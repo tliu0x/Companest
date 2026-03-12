@@ -1,0 +1,108 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+__MACOSX/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv
+env/
+venv/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# Analysis output
+*_analysis.json
+*_analysis.yaml
+analyses/
+
+# Qdrant data
+qdrant_data/
+storage/
+
+# Model cache
+.cache/
+models/
+*.onnx
+*.bin
+
+# Local settings
+.claude/
+
+# Private notes
+setup.md
+plan.md
+documents/private-uncommitted-docs/
+
+# Deploy secrets
+deploy/.env
+
+# Terraform state and secrets
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/*.tfstate*
+infra/tfplan
+infra/*.tfvars
+!infra/*.tfvars.example
+
+# Local runtime data
+.companest/
+!.companest/config.example.md
+
+# Track the public examples
+!examples/
+!examples/**/.companest/
+!examples/**/.companest/**
