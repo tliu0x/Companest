@@ -1,0 +1,8 @@
+{
+  "companest": {
+    "path": ".",
+    "repo": "https://github.com/tliu0x/Companest",
+    "branch": "main",
+    "description": "Companest sample workspace"
+  }
+}

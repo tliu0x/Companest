@@ -1,0 +1,38 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "4000:4000"
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    command: --config /app/config.yaml
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health')"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: unless-stopped
+    mem_limit: 256m
+    healthcheck:
+      test: pg_isready -U litellm
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

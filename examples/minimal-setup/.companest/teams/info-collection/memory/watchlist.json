@@ -1,0 +1,22 @@
+{
+  "brave_queries": [
+    "AI agent frameworks 2024",
+    "multi-agent orchestration"
+  ],
+  "reddit": [
+    "MachineLearning",
+    "LocalLLaMA"
+  ],
+  "hn": {
+    "enabled": true,
+    "story_type": "top",
+    "limit": 15
+  },
+  "rss_feeds": [
+    "https://arxiv.org/rss/cs.AI"
+  ],
+  "openbb": {
+    "symbols": ["AAPL", "MSFT", "NVDA", "GOOGL"],
+    "data_types": ["quote", "news"]
+  }
+}
