@@ -23,7 +23,7 @@ import time
 import defusedxml.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote_plus
+from xml.etree.ElementTree import Element as XmlElement
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +226,7 @@ async def fetch_rss(url: str, limit: int = 15) -> List[Dict]:
 
 
 def _xml_text(
-    el: ET.Element, tag: str, default: str = "",
+    el: XmlElement, tag: str, default: str = "",
     ns: Optional[Dict] = None, max_len: int = 0,
 ) -> str:
     """Extract text from an XML element, handling namespaces."""
