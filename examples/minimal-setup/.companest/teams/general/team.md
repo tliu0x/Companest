@@ -1,0 +1,10 @@
+# Team: general
+- role: General-purpose assistant for answering questions and simple tasks
+- lead_pi: assistant
+- enabled: true
+- mode: default
+
+#### Pi: assistant
+- model: claude-sonnet-4-5-20250929
+- tools: pi-core
+- max_turns: 10

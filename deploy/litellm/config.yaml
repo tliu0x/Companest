@@ -1,0 +1,80 @@
+model_list:
+  # Anthropic models
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-sonnet-4-5-20250929
+    litellm_params:
+      model: claude-sonnet-4-5-20250929
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-opus-4-6
+    litellm_params:
+      model: claude-opus-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # OpenAI models
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-4o
+    litellm_params:
+      model: gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  # DeepSeek
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com
+  - model_name: deepseek-reasoner
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+      api_base: https://api.deepseek.com
+
+  # Moonshot/Kimi
+  - model_name: moonshot-v1-8k
+    litellm_params:
+      model: openai/moonshot-v1-8k
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: https://api.moonshot.cn/v1
+  - model_name: moonshot-v1-128k
+    litellm_params:
+      model: openai/moonshot-v1-128k
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: https://api.moonshot.cn/v1
+
+  # Kimi K2.5
+  - model_name: kimi-k2.5
+    litellm_params:
+      model: openai/kimi-k2.5
+      api_key: os.environ/MOONSHOT_API_KEY
+      api_base: https://api.moonshot.cn/v1
+
+  # Zhipu GLM models
+  - model_name: glm-4.7
+    litellm_params:
+      model: openai/glm-4.7
+      api_key: os.environ/ZHIPU_API_KEY
+      api_base: https://open.bigmodel.cn/api/paas/v4
+  - model_name: glm-5
+    litellm_params:
+      model: openai/glm-5
+      api_key: os.environ/ZHIPU_API_KEY
+      api_base: https://open.bigmodel.cn/api/paas/v4
+
+  # Alibaba Qwen
+  - model_name: qwen3-coder
+    litellm_params:
+      model: openai/qwen3-coder
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
