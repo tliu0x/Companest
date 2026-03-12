@@ -1,0 +1,25 @@
+[
+  {
+    "team_id": "philosophy",
+    "mode": "council",
+    "channel": "telegram",
+    "chat_id": "-100123456789",
+    "priority": 10,
+    "_comment": "Philosophy discussion group -> always council mode, skip SmartRouter"
+  },
+  {
+    "team_id": "engineering",
+    "mode": "cascade",
+    "channel": "discord",
+    "chat_id": "987654321",
+    "priority": 10,
+    "_comment": "Discord tech channel -> engineering team, cascade mode"
+  },
+  {
+    "team_id": "philosophy",
+    "mode": "cascade",
+    "user_id": "111222333",
+    "priority": 20,
+    "_comment": "VIP user -> philosophy team regardless of channel (higher priority)"
+  }
+]

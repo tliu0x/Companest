@@ -1,0 +1,8 @@
+{
+  "companest": {
+    "path": ".",
+    "repo": "https://github.com/taoge64/Companest",
+    "branch": "main",
+    "description": "Companest sample workspace"
+  }
+}

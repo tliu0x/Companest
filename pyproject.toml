@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "companest-orchestrator"
+version = "1.0.0"
+description = "Multi-agent company incubator for building agent-native teams and workflows."
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+keywords = ["multi-agent", "agent-companies", "orchestrator", "company-incubator", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "pydantic>=2.0.0,<3.0.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+    "aiofiles>=23.0.0",
+    "defusedxml>=0.7.0",
+]
+
+[project.optional-dependencies]
+claude = [
+    "anthropic>=0.40.0",
+    "claude-agent-sdk>=0.1.0",
+]
+openai = [
+    "openai-agents>=0.1.0",
+]
+server = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+]
+gateway = [
+    "websockets>=12.0",
+]
+s3 = [
+    "boto3>=1.34.0",
+]
+qdrant = [
+    "qdrant-client>=1.9.0",
+    "fastembed>=0.3.0",
+]
+ui = [
+    "nicegui>=2.0.0",
+]
+scheduler = [
+    "APScheduler>=3.10.0,<4.0.0",
+    "SQLAlchemy>=2.0.0",
+    "aiosqlite>=0.19.0",
+]
+all = [
+    "companest-orchestrator[claude,openai,server,gateway,s3,qdrant,scheduler,ui]",
+]
+dev = [
+    "companest-orchestrator[all]",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+]
+
+[project.scripts]
+companest = "companest.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/taoge64/Companest"
+Repository = "https://github.com/taoge64/Companest"
+Issues = "https://github.com/taoge64/Companest/issues"
+
+[tool.setuptools.packages.find]
+include = ["companest*"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not live_network'"
+markers = [
+    "live_network: tests that make real outbound network requests",
+]
