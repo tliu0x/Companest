@@ -79,7 +79,10 @@ CUSTOM_TOOL_NAMES = {"memory_read", "memory_write", "memory_list", "memory_index
 SCHEDULER_TOOL_NAMES = {"schedule_task", "list_schedules", "cancel_schedule"}
 
 # Feed tool names (data collection, need feed MCP server)
-FEED_TOOL_NAMES = {"brave_search", "fetch_rss", "fetch_reddit", "fetch_hn", "fetch_x", "fetch_openbb"}
+FEED_TOOL_NAMES = {
+    "brave_search", "fetch_rss", "fetch_reddit", "fetch_hn", "fetch_x", "fetch_openbb",
+    "fetch_polymarket", "fetch_kalshi", "fetch_metaculus",
+}
 
 # Sessions tool names (agent-to-agent messaging)
 SESSIONS_TOOL_NAMES = {"sessions_send", "sessions_list", "sessions_history"}
@@ -526,6 +529,30 @@ def create_feed_tool_defs() -> List[ToolDefinition]:
         )
         return json.dumps(items, ensure_ascii=False, indent=2)
 
+    async def fetch_polymarket(args):
+        items = await feeds.fetch_polymarket(
+            query=args.get("query", ""),
+            limit=int(args.get("limit", 10)),
+            active_only=args.get("active_only", True),
+        )
+        return json.dumps(items, ensure_ascii=False, indent=2)
+
+    async def fetch_kalshi(args):
+        items = await feeds.fetch_kalshi(
+            query=args.get("query", ""),
+            limit=int(args.get("limit", 10)),
+            status=args.get("status", "open"),
+        )
+        return json.dumps(items, ensure_ascii=False, indent=2)
+
+    async def fetch_metaculus(args):
+        items = await feeds.fetch_metaculus(
+            query=args.get("query", ""),
+            limit=int(args.get("limit", 10)),
+            order_by=args.get("order_by", "-activity"),
+        )
+        return json.dumps(items, ensure_ascii=False, indent=2)
+
     return [
         ToolDefinition(
             name="brave_search",
@@ -606,17 +633,63 @@ def create_feed_tool_defs() -> List[ToolDefinition]:
             },
             handler=fetch_openbb,
         ),
+        ToolDefinition(
+            name="fetch_polymarket",
+            description="Fetch prediction markets from Polymarket. Returns market questions, probabilities, and volumes.",
+            parameters={
+                "query": {"type": "string", "description": "Search query to filter markets", "optional": True},
+                "limit": {"type": "number", "description": "Number of markets (default 10, max 50)", "optional": True},
+                "active_only": {"type": "boolean", "description": "Only return active markets (default true)", "optional": True},
+            },
+            handler=fetch_polymarket,
+        ),
+        ToolDefinition(
+            name="fetch_kalshi",
+            description="Fetch prediction markets from Kalshi. Returns market titles, prices, and volumes.",
+            parameters={
+                "query": {"type": "string", "description": "Search query to filter markets", "optional": True},
+                "limit": {"type": "number", "description": "Number of markets (default 10, max 50)", "optional": True},
+                "status": {"type": "string", "description": "Market status: 'open', 'closed', 'settled' (default: open)", "optional": True},
+            },
+            handler=fetch_kalshi,
+        ),
+        ToolDefinition(
+            name="fetch_metaculus",
+            description="Fetch prediction questions from Metaculus. Returns questions, community predictions, and activity.",
+            parameters={
+                "query": {"type": "string", "description": "Search query to filter questions", "optional": True},
+                "limit": {"type": "number", "description": "Number of questions (default 10, max 50)", "optional": True},
+                "order_by": {"type": "string", "description": "Sort: '-activity', '-publish_time', '-resolve_time' (default: -activity)", "optional": True},
+            },
+            handler=fetch_metaculus,
+        ),
     ]
 
 
 def create_sessions_tool_defs(
     memory: MemoryManager, team_id: str, pi_id: str, team_registry=None,
+    company_id: Optional[str] = None,
+    shared_teams: Optional[List[str]] = None,
 ) -> List[ToolDefinition]:
     """Create ToolDefinitions for agent-to-agent messaging."""
     import datetime
 
+    def _can_access_target(target: str) -> bool:
+        """Check if this Pi's company can access the target team."""
+        if "/" not in target:
+            # Global team — allowed (same as orchestrator logic for sessions)
+            if company_id is None:
+                return True
+            if shared_teams is None:
+                return True
+            return target in shared_teams
+        owner = target.split("/", 1)[0]
+        return company_id is not None and company_id == owner
+
     async def sessions_send(args):
         target = args["target_team"]
+        if not _can_access_target(target):
+            return f"Access denied: cannot send to {target} (cross-company)"
         msg = args["message"]
         entry = {
             "from_team": team_id,
@@ -633,10 +706,14 @@ def create_sessions_tool_defs(
                      if t not in (team_registry.list_meta_teams() if hasattr(team_registry, "list_meta_teams") else [])]
         else:
             teams = memory.list_teams()
+        # Filter to only accessible teams
+        teams = [t for t in teams if _can_access_target(t)]
         return json.dumps(teams)
 
     async def sessions_history(args):
         target = args.get("team_id", team_id)
+        if not _can_access_target(target):
+            return json.dumps({"error": f"Access denied: cannot read {target} (cross-company)"})
         limit = int(args.get("limit", 10))
         inbox = memory.read_team_memory(target, "inbox.json")
         if inbox is None:
@@ -909,11 +986,44 @@ def create_feed_mcp_server():
 def create_feed_openai_tools():
     return definitions_to_openai(create_feed_tool_defs())
 
-def create_sessions_mcp_server(memory, team_id, pi_id, team_registry=None):
-    return definitions_to_mcp(create_sessions_tool_defs(memory, team_id, pi_id, team_registry), "sessions")
+def create_sessions_mcp_server(
+    memory,
+    team_id,
+    pi_id,
+    team_registry=None,
+    company_id: Optional[str] = None,
+    shared_teams: Optional[List[str]] = None,
+):
+    return definitions_to_mcp(
+        create_sessions_tool_defs(
+            memory,
+            team_id,
+            pi_id,
+            team_registry,
+            company_id=company_id,
+            shared_teams=shared_teams,
+        ),
+        "sessions",
+    )
 
-def create_sessions_openai_tools(memory, team_id, pi_id, team_registry=None):
-    return definitions_to_openai(create_sessions_tool_defs(memory, team_id, pi_id, team_registry))
+def create_sessions_openai_tools(
+    memory,
+    team_id,
+    pi_id,
+    team_registry=None,
+    company_id: Optional[str] = None,
+    shared_teams: Optional[List[str]] = None,
+):
+    return definitions_to_openai(
+        create_sessions_tool_defs(
+            memory,
+            team_id,
+            pi_id,
+            team_registry,
+            company_id=company_id,
+            shared_teams=shared_teams,
+        )
+    )
 
 
 # -- Tool Registry --------------------------------------------
@@ -932,6 +1042,7 @@ class ToolContext:
     tools_deny: Set[str] = field(default_factory=set)
     extra: Dict[str, Any] = field(default_factory=dict)
     memory_backend: Optional[MemoryBackend] = None
+    company_id: Optional[str] = None
 
 
 @dataclass
@@ -958,6 +1069,7 @@ class ToolRegistry:
         self._skills: Dict[str, SkillDefinition] = {}
         self._external_mcp_configs: Dict[str, dict] = {}  # name -> sdk config
         self.memory_backend: Optional[MemoryBackend] = None  # set by orchestrator
+        self._company_mcp_names: Dict[str, set] = {}  # company_id -> set of scoped names
         self._register_builtins()
 
     def _register_builtins(self) -> None:
@@ -1026,9 +1138,31 @@ class ToolRegistry:
         """Register an external MCP server config (shared across all teams)."""
         self._external_mcp_configs[name] = sdk_config
 
-    def get_external_mcp_servers(self) -> Dict[str, dict]:
-        """Return all registered external MCP server configs."""
-        return dict(self._external_mcp_configs)
+    def register_company_mcp(self, company_id: str, name: str, sdk_config: dict) -> None:
+        """Register a company-scoped MCP server."""
+        scoped_name = f"{company_id}/{name}"
+        self._external_mcp_configs[scoped_name] = sdk_config
+        self._company_mcp_names.setdefault(company_id, set()).add(scoped_name)
+
+    def get_external_mcp_servers(self, company_id: Optional[str] = None) -> Dict[str, dict]:
+        """Return external MCP server configs.
+
+        If company_id is given, returns global + that company's scoped servers.
+        Otherwise returns only global (non-scoped) servers.
+        """
+        result = {}
+        for name, cfg in self._external_mcp_configs.items():
+            if "/" not in name:
+                result[name] = cfg
+            elif company_id and name.startswith(f"{company_id}/"):
+                result[name] = cfg
+        return result
+
+    def unregister_company_mcp(self, company_id: str) -> None:
+        """Remove all MCP servers belonging to a company."""
+        names = self._company_mcp_names.pop(company_id, set())
+        for name in names:
+            self._external_mcp_configs.pop(name, None)
 
     def get_skill_instructions(self, tools_config: List[str]) -> str:
         """Return combined instructions for all active skills.
@@ -1247,6 +1381,8 @@ class ToolRegistry:
         defs = create_sessions_tool_defs(
             ctx.memory, ctx.team_id, ctx.pi_id,
             team_registry=ctx.team_registry,
+            company_id=ctx.company_id,
+            shared_teams=ctx.extra.get("company_shared_teams"),
         )
         return definitions_to_mcp(defs, "sessions")
 
@@ -1255,6 +1391,8 @@ class ToolRegistry:
         defs = create_sessions_tool_defs(
             ctx.memory, ctx.team_id, ctx.pi_id,
             team_registry=ctx.team_registry,
+            company_id=ctx.company_id,
+            shared_teams=ctx.extra.get("company_shared_teams"),
         )
         return definitions_to_openai(defs)
 

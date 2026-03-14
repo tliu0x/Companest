@@ -23,8 +23,11 @@ from companest.feeds import (
     brave_search,
     close_client,
     fetch_hn,
+    fetch_kalshi,
+    fetch_metaculus,
     fetch_multi_source,
     fetch_openbb,
+    fetch_polymarket,
     fetch_reddit,
     fetch_rss,
     fetch_x,
@@ -386,7 +389,129 @@ class TestFetchOpenBB:
         assert items[0]["source"] == "openbb/quote"
 
 
-#  Multi-Source Tests 
+#  Polymarket Tests
+
+class TestFetchPolymarket:
+    @pytest.mark.asyncio
+    async def test_successful_fetch(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = [
+            {
+                "question": "Will AI pass the Turing test by 2030?",
+                "slug": "ai-turing-test",
+                "description": "Market about AI capabilities",
+                "end_date_iso": "2030-12-31T00:00:00Z",
+                "outcomePrices": "0.35",
+                "volume": 50000,
+            },
+        ]
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("companest.feeds._get_client", return_value=mock_client):
+            items = await feeds.fetch_polymarket("AI", limit=5)
+
+        assert len(items) == 1
+        assert items[0]["source"] == "polymarket"
+        assert "Turing" in items[0]["title"]
+
+    @pytest.mark.asyncio
+    async def test_http_error(self):
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
+
+        with patch("companest.feeds._get_client", return_value=mock_client):
+            items = await feeds.fetch_polymarket("test")
+
+        assert len(items) == 1
+        assert "error" in items[0]
+
+
+#  Kalshi Tests
+
+class TestFetchKalshi:
+    @pytest.mark.asyncio
+    async def test_successful_fetch(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "markets": [
+                {
+                    "title": "Fed rate cut in March?",
+                    "ticker": "FED-RATE-MAR",
+                    "rules_primary": "Will the Fed cut rates?",
+                    "close_time": "2026-03-31T00:00:00Z",
+                    "yes_ask": 0.65,
+                    "volume": 10000,
+                },
+            ]
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("companest.feeds._get_client", return_value=mock_client):
+            items = await feeds.fetch_kalshi("Fed", limit=5)
+
+        assert len(items) == 1
+        assert items[0]["source"] == "kalshi"
+        assert "Fed" in items[0]["title"]
+
+    @pytest.mark.asyncio
+    async def test_http_error(self):
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("Timeout"))
+
+        with patch("companest.feeds._get_client", return_value=mock_client):
+            items = await feeds.fetch_kalshi("test")
+
+        assert len(items) == 1
+        assert "error" in items[0]
+
+
+#  Metaculus Tests
+
+class TestFetchMetaculus:
+    @pytest.mark.asyncio
+    async def test_successful_fetch(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "results": [
+                {
+                    "id": 12345,
+                    "title": "When will AGI be achieved?",
+                    "description": "Question about artificial general intelligence",
+                    "publish_time": "2024-01-01T00:00:00Z",
+                    "community_prediction": {"full": {"q2": 0.42}},
+                    "number_of_predictions": 500,
+                },
+            ]
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("companest.feeds._get_client", return_value=mock_client):
+            items = await feeds.fetch_metaculus("AGI", limit=5)
+
+        assert len(items) == 1
+        assert items[0]["source"] == "metaculus"
+        assert "AGI" in items[0]["title"]
+        assert items[0]["prediction"] == 0.42
+
+    @pytest.mark.asyncio
+    async def test_http_error(self):
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("API error"))
+
+        with patch("companest.feeds._get_client", return_value=mock_client):
+            items = await feeds.fetch_metaculus("test")
+
+        assert len(items) == 1
+        assert "error" in items[0]
+
+
+#  Multi-Source Tests
 
 class TestFetchMultiSource:
     @pytest.mark.asyncio

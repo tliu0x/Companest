@@ -33,6 +33,9 @@ class ScheduledTask:
     run_count: int = 0
     error_count: int = 0
     last_error: Optional[str] = None
+    scope_type: Optional[str] = None  # "company" | "system"
+    scope_id: Optional[str] = None    # company_id
+    timeout: Optional[int] = None     # max seconds per execution (default 300)
     _executing: bool = field(default=False, repr=False)
 
 
@@ -61,6 +64,8 @@ class Scheduler:
         interval: int,
         enabled: bool = True,
         run_on_start: bool = False,
+        scope_type: Optional[str] = None,
+        scope_id: Optional[str] = None,
     ) -> None:
         """Register a periodic task."""
         if name in self._tasks:
@@ -71,6 +76,8 @@ class Scheduler:
             interval_seconds=interval,
             enabled=enabled,
             run_on_start=run_on_start,
+            scope_type=scope_type,
+            scope_id=scope_id,
         )
         logger.info(
             f"[Scheduler] Registered '{name}' "
@@ -86,6 +93,16 @@ class Scheduler:
             del self._tasks[name]
             return True
         return False
+
+    def remove_by_scope(self, scope_type: str, scope_id: str) -> List[str]:
+        """Remove all tasks matching the given scope."""
+        removed = []
+        for name in list(self._tasks):
+            task = self._tasks[name]
+            if task.scope_type == scope_type and task.scope_id == scope_id:
+                self.remove(name)
+                removed.append(name)
+        return removed
 
     def enable(self, name: str) -> bool:
         """Enable a disabled task."""
@@ -155,16 +172,23 @@ class Scheduler:
             logger.error(f"[Scheduler] Task '{task.name}' loop died: {e}")
 
     async def _execute(self, task: ScheduledTask) -> None:
-        """Execute a single task with error handling and overlap prevention."""
+        """Execute a single task with error handling, timeout, and overlap prevention."""
         if task._executing:
             logger.warning(f"[Scheduler] Skipping '{task.name}': still running from previous interval")
             return
         task._executing = True
+        effective_timeout = task.timeout or 300
         try:
             logger.debug(f"[Scheduler] Running '{task.name}'")
-            await task.func()
+            await asyncio.wait_for(task.func(), timeout=effective_timeout)
             task.last_run = datetime.now(timezone.utc)
             task.run_count += 1
+        except asyncio.TimeoutError:
+            task.error_count += 1
+            task.last_error = f"Timed out after {effective_timeout}s"
+            logger.error(
+                f"[Scheduler] Task '{task.name}' timed out after {effective_timeout}s"
+            )
         except Exception as e:
             task.error_count += 1
             task.last_error = str(e)

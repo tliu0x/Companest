@@ -85,6 +85,7 @@ class RoutingBinding:
     team_id: str
     mode: str = "cascade"
     priority: int = 1
+    owner_company_id: Optional[str] = None
 
 
 @dataclass
@@ -328,6 +329,7 @@ class SmartRouter:
 
     def add_binding(
         self, pattern: str, team_id: str, mode: str = "cascade", priority: int = 1,
+        owner_company_id: Optional[str] = None,
     ) -> None:
         """Add a deterministic regex binding rule for fast routing.
 
@@ -336,15 +338,29 @@ class SmartRouter:
         compiled = re.compile(pattern, re.IGNORECASE)
         self._bindings.append(RoutingBinding(
             pattern=compiled, team_id=team_id, mode=mode, priority=priority,
+            owner_company_id=owner_company_id,
         ))
         logger.info(f"[SmartRouter] Added binding: /{pattern}/  {team_id} ({mode})")
 
-    def get_available_teams(self, company_id: Optional[str] = None) -> List[str]:
+    def remove_bindings_by_owner(self, company_id: str) -> int:
+        """Remove all bindings owned by a company."""
+        before = len(self._bindings)
+        self._bindings = [b for b in self._bindings if b.owner_company_id != company_id]
+        removed = before - len(self._bindings)
+        if removed:
+            self.invalidate_cache()
+        return removed
+
+    def get_available_teams(
+        self, company_id: Optional[str] = None,
+        shared_teams: Optional[List[str]] = None,
+    ) -> List[str]:
         """Return teams accessible by a company.
 
-        - Global teams (no '/')  always included
-        - Private teams ('{owner}/...')  included only if owner == company_id
-        - No company_id  global teams only
+        - Global teams (no '/'): if company_id given, only include if in shared_teams whitelist
+        - Private teams ('{owner}/'): included only if owner == company_id
+        - No company_id: global teams only
+        - shared_teams=None (not passed): backward compat, include all global teams
         """
         all_teams = self._registry.list_teams()
         meta = set(self._registry.list_meta_teams())
@@ -353,7 +369,13 @@ class SmartRouter:
             if t in meta:
                 continue
             if "/" not in t:
-                result.append(t)
+                # Global team
+                if company_id is None:
+                    result.append(t)
+                elif shared_teams is not None and t in shared_teams:
+                    result.append(t)
+                elif shared_teams is None:
+                    result.append(t)  # backward compat: no whitelist = all global teams
             elif company_id and t.startswith(f"{company_id}/"):
                 result.append(t)
         return result
@@ -361,6 +383,7 @@ class SmartRouter:
     async def route(
         self, task: str, preferred_teams: Optional[List[str]] = None,
         company_id: Optional[str] = None,
+        shared_teams: Optional[List[str]] = None,
     ) -> RoutingDecision:
         """
         Route a task to the best team(s).
@@ -378,7 +401,7 @@ class SmartRouter:
         """
         # Build the set of teams this caller is allowed to use.
         # When company_id is None, restrict to global teams only (no private teams).
-        allowed_teams = set(self.get_available_teams(company_id))
+        allowed_teams = set(self.get_available_teams(company_id, shared_teams=shared_teams))
 
         # 1. Check explicit tag
         explicit = self._keyword_router._check_explicit_tag(task)

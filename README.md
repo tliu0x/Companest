@@ -67,6 +67,13 @@ Environment variable interpolation supports `${VAR}` and `${VAR:-default}`.
           soul.md
 ```
 
+## Multi-Company Onboarding
+
+Companest can now act as a shared control plane for external company repos that register themselves by manifest.
+
+- Registration guide: [`examples/company-onboarding.md`](./examples/company-onboarding.md)
+- Example extension: [`examples/prediction-market/README.md`](./examples/prediction-market/README.md)
+
 ## CLI
 
 ```bash

@@ -127,6 +127,10 @@ class CompanyConfig(BaseModel):
     schedules: List[CompanySchedule] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)  # private env vars
     enabled: bool = True
+    shared_teams: Optional[List[str]] = None
+    routing_bindings: List[Dict[str, str]] = Field(default_factory=list)
+    memory_seed: Dict[str, Any] = Field(default_factory=dict)
+    mcp_servers: List[Dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -199,6 +203,10 @@ class CompanyRegistry:
         self._configs.clear()
         self._mtimes.clear()
 
+        # Re-inject component-backed companies (survive reload)
+        for cid, comp in self._components.items():
+            self._configs[cid] = comp.config
+
         if not self._companies_dir.exists():
             logger.info(f"[CompanyRegistry] Companies dir does not exist: {self._companies_dir}")
             return
@@ -212,6 +220,10 @@ class CompanyRegistry:
 
             try:
                 _validate_company_id(company_dir.name)
+                # Skip if a component is registered for this ID (component takes precedence)
+                if company_dir.name in self._components:
+                    logger.info(f"[CompanyRegistry] Skipping YAML for {company_dir.name} (component takes precedence)")
+                    continue
                 config = self._load_config(config_path, company_dir.name)
                 self._configs[config.id] = config
                 self._mtimes[config.id] = config_path.stat().st_mtime
@@ -325,6 +337,7 @@ class CompanyRegistry:
             shutil.rmtree(company_dir)
         self._configs.pop(company_id, None)
         self._mtimes.pop(company_id, None)
+        self._components.pop(company_id, None)
         logger.info(f"[CompanyRegistry] Deleted company: {company_id}")
         return True
 

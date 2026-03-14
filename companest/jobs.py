@@ -86,6 +86,7 @@ class Job:
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     submitted_by: str = "api"
+    company_id: Optional[str] = None
 
     @property
     def duration_ms(self) -> Optional[int]:
@@ -109,6 +110,7 @@ class Job:
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "submitted_by": self.submitted_by,
+            "company_id": self.company_id,
             "duration_ms": self.duration_ms,
         }
 
@@ -133,6 +135,8 @@ class JobManager:
         jobs = await manager.list_jobs(status=JobStatus.COMPLETED)
         await manager.stop()
     """
+
+    MAX_IN_MEMORY_JOBS = 500
 
     def __init__(self, orchestrator=None, data_dir: Optional[Path] = None):
         """
@@ -186,6 +190,17 @@ class JobManager:
             task = asyncio.create_task(self._worker(f"worker-{i}"))
             self._workers.append(task)
 
+        # Recover interrupted jobs: RUNNING/DISPATCHED -> QUEUED
+        for job in self._jobs.values():
+            if job.status in (JobStatus.RUNNING, JobStatus.DISPATCHED):
+                logger.warning(
+                    f"Recovering interrupted job {job.id} "
+                    f"({job.status.value} -> queued)"
+                )
+                job.status = JobStatus.QUEUED  # bypass _transition (not a normal flow)
+                job.started_at = None
+                await self._persist_job(job)
+
         # Re-queue any pending/queued jobs from persistence
         for job in self._jobs.values():
             if job.status == JobStatus.PENDING:
@@ -224,6 +239,7 @@ class JobManager:
         task: str,
         context: Optional[Dict[str, Any]] = None,
         submitted_by: str = "api",
+        company_id: Optional[str] = None,
     ) -> str:
         """
         Submit a new job.
@@ -236,12 +252,23 @@ class JobManager:
         Returns:
             Job ID
         """
+        ctx = dict(context or {})
+        # Resolve company_id: explicit param takes priority, then context
+        effective_company_id = company_id or ctx.get("company_id")
+        if company_id and ctx.get("company_id") and company_id != ctx.get("company_id"):
+            raise JobError(
+                f"company_id mismatch: param={company_id}, context={ctx.get('company_id')}"
+            )
+        if effective_company_id and "company_id" not in ctx:
+            # Keep the runtime execution context aligned with the indexed company_id field.
+            ctx["company_id"] = effective_company_id
         job = Job(
             id=str(uuid.uuid4()),
             task=task,
             status=JobStatus.PENDING,
-            context=context or {},
+            context=ctx,
             submitted_by=submitted_by,
+            company_id=effective_company_id,
         )
 
         self._jobs[job.id] = job
@@ -263,6 +290,7 @@ class JobManager:
         status: Optional[JobStatus] = None,
         limit: int = 50,
         offset: int = 0,
+        company_id: Optional[str] = None,
     ) -> List[Job]:
         """
         List jobs, optionally filtered by status.
@@ -276,6 +304,8 @@ class JobManager:
 
         if status:
             jobs = [j for j in jobs if j.status == status]
+        if company_id:
+            jobs = [j for j in jobs if j.company_id == company_id]
 
         # Sort by creation time, newest first
         jobs.sort(key=lambda j: j.created_at, reverse=True)
@@ -386,10 +416,19 @@ class JobManager:
                 # Resumed jobs are already RUNNING  skip dispatch transitions
                 if job.status == JobStatus.RUNNING:
                     logger.info(f"[{name}] Resuming job {job_id}")
-                    await self._execute_job(job, resumed=True)
                 else:
                     logger.info(f"[{name}] Processing job {job_id}")
-                    await self._execute_job(job)
+                try:
+                    await self._execute_job(job, resumed=(job.status == JobStatus.RUNNING))
+                except asyncio.CancelledError:
+                    # Shutdown while job is running — mark as FAILED
+                    if job.status == JobStatus.RUNNING:
+                        job.status = JobStatus.FAILED
+                        job.error = "Interrupted by shutdown"
+                        job.completed_at = datetime.now(timezone.utc)
+                        await self._persist_job(job)
+                        logger.warning(f"[{name}] Job {job_id} interrupted by shutdown")
+                    raise
 
         except asyncio.CancelledError:
             return
@@ -413,17 +452,22 @@ class JobManager:
                 self._transition(job, JobStatus.RUNNING)
                 await self._persist_job(job)
 
-            team_id = job.context.get("team_id")
+            # Ensure company_id from the job record is in the execution context
+            exec_context = dict(job.context) if job.context else {}
+            if job.company_id and "company_id" not in exec_context:
+                exec_context["company_id"] = job.company_id
+
+            team_id = exec_context.get("team_id")
             if team_id:
                 result_text = await self.orchestrator.run_team(
                     task=job.task,
                     team_id=team_id,
-                    user_context=job.context,
+                    user_context=exec_context,
                 )
             else:
                 result_text, _ = await self.orchestrator.run_auto(
                     task=job.task,
-                    user_context=job.context,
+                    user_context=exec_context,
                 )
 
             self._transition(job, JobStatus.COMPLETED)
@@ -437,6 +481,7 @@ class JobManager:
             logger.error(f"Job {job.id} failed: {e}")
 
         await self._persist_job(job)
+        self._evict_completed_jobs()
 
     # -------------------------------------------------------------------------
     # Persistence (aiosqlite)
@@ -470,7 +515,8 @@ class JobManager:
                 created_at TEXT NOT NULL,
                 started_at TEXT,
                 completed_at TEXT,
-                submitted_by TEXT
+                submitted_by TEXT,
+                company_id TEXT
             )
         """)
         await self._db.commit()
@@ -480,6 +526,13 @@ class JobManager:
             await self._db.execute("SELECT approval_reason FROM jobs LIMIT 1")
         except Exception:
             await self._db.execute("ALTER TABLE jobs ADD COLUMN approval_reason TEXT")
+            await self._db.commit()
+
+        # Migration: add company_id column if missing (existing DBs)
+        try:
+            await self._db.execute("SELECT company_id FROM jobs LIMIT 1")
+        except Exception:
+            await self._db.execute("ALTER TABLE jobs ADD COLUMN company_id TEXT")
             await self._db.commit()
 
     async def _persist_job(self, job: Job) -> None:
@@ -492,8 +545,9 @@ class JobManager:
                 """
                 INSERT OR REPLACE INTO jobs
                 (id, task, status, context, subtasks, result, error,
-                 approval_reason, created_at, started_at, completed_at, submitted_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 approval_reason, created_at, started_at, completed_at, submitted_by,
+                 company_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job.id,
@@ -508,6 +562,7 @@ class JobManager:
                     job.started_at.isoformat() if job.started_at else None,
                     job.completed_at.isoformat() if job.completed_at else None,
                     job.submitted_by,
+                    job.company_id,
                 ),
             )
             await self._db.commit()
@@ -522,7 +577,8 @@ class JobManager:
         try:
             async with self._db.execute(
                 "SELECT id, task, status, context, subtasks, result, error, "
-                "approval_reason, created_at, started_at, completed_at, submitted_by "
+                "approval_reason, created_at, started_at, completed_at, submitted_by, "
+                "company_id "
                 "FROM jobs ORDER BY created_at DESC LIMIT 1000"
             ) as cursor:
                 rows = await cursor.fetchall()
@@ -541,12 +597,28 @@ class JobManager:
                     started_at=datetime.fromisoformat(row[9]) if row[9] else None,
                     completed_at=datetime.fromisoformat(row[10]) if row[10] else None,
                     submitted_by=row[11] or "api",
+                    company_id=row[12] if len(row) > 12 else None,
                 )
                 self._jobs[job.id] = job
 
             logger.info(f"Loaded {len(rows)} jobs from database")
         except Exception as e:
             logger.error(f"Failed to load jobs: {e}")
+
+    def _evict_completed_jobs(self) -> None:
+        """Evict oldest completed/failed/cancelled jobs when over the cap."""
+        if len(self._jobs) <= self.MAX_IN_MEMORY_JOBS:
+            return
+        terminal = sorted(
+            (j for j in self._jobs.values()
+             if j.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)),
+            key=lambda j: j.completed_at or j.created_at,
+        )
+        to_evict = len(self._jobs) - self.MAX_IN_MEMORY_JOBS
+        for job in terminal[:to_evict]:
+            self._jobs.pop(job.id, None)
+        if to_evict > 0:
+            logger.info(f"Evicted {min(to_evict, len(terminal))} completed jobs from memory")
 
     def get_stats(self) -> Dict[str, Any]:
         """Get job statistics."""

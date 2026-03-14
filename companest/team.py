@@ -64,6 +64,7 @@ class TeamConfig:
         cascade_skip_models: Optional[List[str]] = None,
     ):
         self.id = id
+        self.local_id: str = ""
         self.role = role
         self.lead_pi = lead_pi
         self.mode = mode
@@ -319,6 +320,7 @@ class TeamRegistry:
             if team_dir.is_dir() and team_md.exists():
                 try:
                     config = TeamConfig.from_markdown(team_md)
+                    config.local_id = config.id  # physical directory name
                     config.id = f"{company_id}/{config.id}"
                     if config.enabled:
                         self._configs[config.id] = config
@@ -397,10 +399,38 @@ class TeamRegistry:
         return evicted
 
     def reload(self) -> None:
-        """Hot reload: clear all instances, rescan configs."""
+        """Hot reload: clear idle instances, rescan configs.
+
+        Instances with active in-flight tasks are preserved to prevent
+        data loss. They will be cleaned up by eviction after tasks complete.
+        """
+        # Preserve instances with active tasks
+        active_instances = {}
+        active_last_used = {}
+        active_counts = {}
+        for tid in list(self._instances):
+            if self._active_count.get(tid, 0) > 0:
+                active_instances[tid] = self._instances[tid]
+                active_last_used[tid] = self._last_used.get(tid, 0)
+                active_counts[tid] = self._active_count[tid]
+                logger.warning(
+                    f"Preserving active instance '{tid}' during reload: "
+                    f"{self._active_count[tid]} task(s) in-flight"
+                )
+
         self._instances.clear()
         self._last_used.clear()
         self._meta_teams.clear()
+
+        # Restore active instances
+        self._instances.update(active_instances)
+        self._last_used.update(active_last_used)
+        # Keep all active counts (including meta teams)
+        preserved_counts = {k: v for k, v in self._active_count.items() if v > 0}
+        self._active_count.clear()
+        self._active_count.update(preserved_counts)
+        self._active_count.update(active_counts)
+
         self.scan_configs()
         self.memory.clear_cache()
         if self._on_reload_callback:
@@ -416,6 +446,30 @@ class TeamRegistry:
 
     def get_config(self, team_id: str) -> Optional[TeamConfig]:
         return self._configs.get(team_id)
+
+    def get_configs_by_company(self, company_id: str) -> Dict[str, "TeamConfig"]:
+        return {tid: cfg for tid, cfg in self._configs.items() if tid.startswith(f"{company_id}/")}
+
+    def unregister_company(self, company_id: str) -> None:
+        """Remove all teams belonging to a company.
+
+        Configs are removed immediately so no new tasks can be routed.
+        Instances with active in-flight tasks are kept alive and will be
+        cleaned up by the eviction timer after tasks complete.
+        """
+        to_remove = [tid for tid in self._configs if tid.startswith(f"{company_id}/")]
+        for tid in to_remove:
+            self._configs.pop(tid, None)
+            if self._active_count.get(tid, 0) > 0:
+                logger.warning(
+                    f"Deferring instance cleanup for '{tid}': "
+                    f"{self._active_count[tid]} task(s) still active"
+                )
+                continue
+            self._instances.pop(tid, None)
+            self._last_used.pop(tid, None)
+            self._active_count.pop(tid, None)
+            self._meta_teams.pop(tid, None)
 
     def list_teams(self) -> List[str]:
         """All registered team IDs."""

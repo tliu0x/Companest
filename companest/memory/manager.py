@@ -93,6 +93,7 @@ class EnrichmentSource:
     section_title: str
     formatter: Callable[[Any], Optional[str]]
     exclude_teams: Optional[Set[str]] = field(default_factory=set)
+    company_id: Optional[str] = None
 
 
 class MemoryManager:
@@ -124,6 +125,7 @@ class MemoryManager:
         self._prompt_cache: Dict[Tuple[str, str], _PromptCacheEntry] = {}
         self._dir_cache: Dict[Path, _DirCacheEntry] = {}
         self._register_default_enrichments()
+        self._team_path_overrides: Dict[str, Path] = {}
         if not self.base_path.exists():
             logger.warning(f"Memory base path does not exist: {self.base_path}")
 
@@ -148,7 +150,13 @@ class MemoryManager:
         """Register a custom enrichment source."""
         self._enrichment_sources.append(source)
 
-    #  Master level 
+    def remove_enrichments_by_company(self, company_id: str) -> int:
+        """Remove all enrichment sources belonging to a company."""
+        before = len(self._enrichment_sources)
+        self._enrichment_sources = [s for s in self._enrichment_sources if s.company_id != company_id]
+        return before - len(self._enrichment_sources)
+
+    #  Master level
 
     def read_master_soul(self) -> str:
         return self._read_file(self.base_path / "soul.md")
@@ -232,9 +240,23 @@ class MemoryManager:
             if f.is_file() and not f.name.startswith(".")
         )
 
-    #  Team level 
+    def register_team_path(self, team_id: str, path: Path) -> None:
+        """Register a physical path override for a namespaced team."""
+        self._team_path_overrides[team_id] = path.resolve()
+
+    def unregister_team_path(self, team_id: str) -> None:
+        self._team_path_overrides.pop(team_id, None)
+
+    def unregister_company_paths(self, company_id: str) -> None:
+        to_remove = [k for k in self._team_path_overrides if k.startswith(f"{company_id}/")]
+        for k in to_remove:
+            del self._team_path_overrides[k]
+
+    #  Team level
 
     def team_path(self, team_id: str) -> Path:
+        if team_id in self._team_path_overrides:
+            return self._team_path_overrides[team_id]
         self._validate_path_component(team_id, "team_id")
         return self.base_path / "teams" / team_id
 

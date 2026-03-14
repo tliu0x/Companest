@@ -148,81 +148,84 @@ class Pi:
             user_context: Optional dict with user_id, chat_id, channel for scheduling tools.
         """
         self._user_context = user_context
-        # Extract company context for system prompt injection
-        company_context = None
-        if user_context:
-            company_context = user_context.get("company_context")
-        system = self.memory.build_system_prompt(
-            self.team_id, self.id, company_context=company_context,
-        )
-        retrieval_task = self._resolve_memory_task_hint(task, user_context)
-        relevant_memory = self._build_relevant_memory_section(retrieval_task)
-        if relevant_memory:
-            system = system + "\n\n---\n\n" + relevant_memory if system else relevant_memory
-        if not cascade:
-            return await self._run_single(task, system, timeout)
+        try:
+            # Extract company context for system prompt injection
+            company_context = None
+            if user_context:
+                company_context = user_context.get("company_context")
+            system = self.memory.build_system_prompt(
+                self.team_id, self.id, company_context=company_context,
+            )
+            retrieval_task = self._resolve_memory_task_hint(task, user_context)
+            relevant_memory = self._build_relevant_memory_section(retrieval_task)
+            if relevant_memory:
+                system = system + "\n\n---\n\n" + relevant_memory if system else relevant_memory
+            if not cascade:
+                return await self._run_single(task, system, timeout)
 
-        # -- Cascade mode (via CascadeEngine) --------------------
-        engine = self.cascade_engine or CascadeEngine()
-        metrics = CascadeMetrics.load(self.memory, self.team_id)
-        chain = engine.get_effective_chain(self.model, task, metrics)
+            # -- Cascade mode (via CascadeEngine) --------------------
+            engine = self.cascade_engine or CascadeEngine()
+            metrics = CascadeMetrics.load(self.memory, self.team_id)
+            chain = engine.get_effective_chain(self.model, task, metrics)
 
-        if len(chain) <= 1:
-            return await self._run_single(task, system, timeout)
+            if len(chain) <= 1:
+                return await self._run_single(task, system, timeout)
 
-        last_error: Optional[PiError] = None
-        last_result: Optional[str] = None
+            last_error: Optional[PiError] = None
+            last_result: Optional[str] = None
 
-        for i, model in enumerate(chain):
-            is_last = (i == len(chain) - 1)
-            # Extract short model name for display
-            short_model = model.rsplit("-", 1)[0] if "-20" in model else model
-            if on_progress:
-                await on_progress(
-                    f"\U0001f916 {self.team_id}/{self.id} ({short_model}) "
-                    f"[{i+1}/{len(chain)}]"
-                )
-            try:
-                result = await self._run_with_model(task, system, model, timeout)
-                adequate, quality = engine.check_adequate(result, task)
-                if is_last or adequate:
-                    metrics.record(model, succeeded=True, quality=quality)
-                    metrics.save(self.memory, self.team_id)
-                    logger.info(
-                        f"[Pi:{self.team_id}/{self.id}] Cascade accepted at "
-                        f"{model} (step {i+1}/{len(chain)}, quality={quality:.2f})"
+            for i, model in enumerate(chain):
+                is_last = (i == len(chain) - 1)
+                # Extract short model name for display
+                short_model = model.rsplit("-", 1)[0] if "-20" in model else model
+                if on_progress:
+                    await on_progress(
+                        f"\U0001f916 {self.team_id}/{self.id} ({short_model}) "
+                        f"[{i+1}/{len(chain)}]"
                     )
-                    return result
-                metrics.record(model, succeeded=False, quality=quality)
-                logger.info(
-                    f"[Pi:{self.team_id}/{self.id}] Cascade: "
-                    f"{model} inadequate (quality={quality:.2f}), escalating"
-                )
-                last_result = result
-                if on_progress and not is_last:
-                    next_model = chain[i + 1]
-                    short_next = next_model.rsplit("-", 1)[0] if "-20" in next_model else next_model
-                    await on_progress(f"\u2b06\ufe0f \u2192 {short_next} [{i+2}/{len(chain)}]")
-            except PiError as e:
-                metrics.record(model, succeeded=False, quality=0.0)
-                logger.info(
-                    f"[Pi:{self.team_id}/{self.id}] Cascade: "
-                    f"{model} failed ({e}), escalating"
-                )
-                last_error = e
-                if on_progress and not is_last:
-                    next_model = chain[i + 1]
-                    short_next = next_model.rsplit("-", 1)[0] if "-20" in next_model else next_model
-                    await on_progress(f"\u2b06\ufe0f \u2192 {short_next} [{i+2}/{len(chain)}]")
-                continue
+                try:
+                    result = await self._run_with_model(task, system, model, timeout)
+                    adequate, quality = engine.check_adequate(result, task)
+                    if is_last or adequate:
+                        metrics.record(model, succeeded=True, quality=quality)
+                        metrics.save(self.memory, self.team_id)
+                        logger.info(
+                            f"[Pi:{self.team_id}/{self.id}] Cascade accepted at "
+                            f"{model} (step {i+1}/{len(chain)}, quality={quality:.2f})"
+                        )
+                        return result
+                    metrics.record(model, succeeded=False, quality=quality)
+                    logger.info(
+                        f"[Pi:{self.team_id}/{self.id}] Cascade: "
+                        f"{model} inadequate (quality={quality:.2f}), escalating"
+                    )
+                    last_result = result
+                    if on_progress and not is_last:
+                        next_model = chain[i + 1]
+                        short_next = next_model.rsplit("-", 1)[0] if "-20" in next_model else next_model
+                        await on_progress(f"\u2b06\ufe0f \u2192 {short_next} [{i+2}/{len(chain)}]")
+                except PiError as e:
+                    metrics.record(model, succeeded=False, quality=0.0)
+                    logger.info(
+                        f"[Pi:{self.team_id}/{self.id}] Cascade: "
+                        f"{model} failed ({e}), escalating"
+                    )
+                    last_error = e
+                    if on_progress and not is_last:
+                        next_model = chain[i + 1]
+                        short_next = next_model.rsplit("-", 1)[0] if "-20" in next_model else next_model
+                        await on_progress(f"\u2b06\ufe0f \u2192 {short_next} [{i+2}/{len(chain)}]")
+                    continue
 
-        metrics.save(self.memory, self.team_id)
-        if last_result:
-            return last_result
-        raise last_error or PiError(
-            f"Cascade exhausted for {self.team_id}/{self.id}",
-            details={"model": self.model},
-        )
+            metrics.save(self.memory, self.team_id)
+            if last_result:
+                return last_result
+            raise last_error or PiError(
+                f"Cascade exhausted for {self.team_id}/{self.id}",
+                details={"model": self.model},
+            )
+        finally:
+            self._user_context = None
 
     # -- Internal execution helpers ------------------------------
 
@@ -414,17 +417,19 @@ class Pi:
 
     def _build_tool_context(self) -> ToolContext:
         """Build a ToolContext from current Pi state."""
+        uc = getattr(self, "_user_context", None) or {}
         return ToolContext(
             memory=self.memory,
             team_id=self.team_id,
             pi_id=self.id,
             tools_config=self.tools_config,
-            user_context=getattr(self, "_user_context", None),
+            user_context=uc or None,
             user_scheduler=self.user_scheduler,
             team_registry=getattr(self, "_team_registry", None),
             tools_deny=self._build_deny_set(),
             extra=getattr(self, "_extra_tool_context", {}),
             memory_backend=getattr(self.tool_registry, "memory_backend", None) if self.tool_registry else None,
+            company_id=uc.get("company_id") if isinstance(uc, dict) else None,
         )
 
     async def _run_claude_agent_sdk(
@@ -438,8 +443,10 @@ class Pi:
         if self.tool_registry:
             ctx = self._build_tool_context()
             mcp_servers = self.tool_registry.get_mcp_servers(ctx)
-            # Merge external MCP servers (shared across all teams)
-            ext_servers = self.tool_registry.get_external_mcp_servers()
+            # Merge external MCP servers (global + company-scoped)
+            ext_servers = self.tool_registry.get_external_mcp_servers(
+                company_id=ctx.company_id
+            )
             mcp_servers.update(ext_servers)
             # Resolve tools (empty tools_config = all tools via registry)
             allowed = self.tool_registry.resolve_tool_names(self.tools_config, tools_deny=deny_set)
@@ -477,8 +484,12 @@ class Pi:
             has_sessions_tools = any(t in SESSIONS_TOOL_NAMES or t == "messenger"
                                     for t in self.tools_config)
             if has_sessions_tools:
+                uc = getattr(self, "_user_context", None) or {}
+                extra_ctx = getattr(self, "_extra_tool_context", {})
                 sessions_server = create_sessions_mcp_server(
                     self.memory, self.team_id, self.id,
+                    company_id=uc.get("company_id") if isinstance(uc, dict) else None,
+                    shared_teams=extra_ctx.get("company_shared_teams"),
                 )
                 if sessions_server:
                     mcp_servers["sessions"] = sessions_server
@@ -599,8 +610,12 @@ class Pi:
             has_sessions_tools = any(t in SESSIONS_TOOL_NAMES or t == "messenger"
                                     for t in self.tools_config)
             if has_sessions_tools:
+                uc = getattr(self, "_user_context", None) or {}
+                extra_ctx = getattr(self, "_extra_tool_context", {})
                 sessions_tools = create_sessions_openai_tools(
                     self.memory, self.team_id, self.id,
+                    company_id=uc.get("company_id") if isinstance(uc, dict) else None,
+                    shared_teams=extra_ctx.get("company_shared_teams"),
                 )
                 mem_tools.extend(sessions_tools)
 
@@ -620,7 +635,6 @@ class Pi:
                 details={"model": effective_model},
             )
         return result_text
-
 
 
 
