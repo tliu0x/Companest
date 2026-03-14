@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 TOOL_PRESETS = {
     "pi-core": ["Read", "Write", "Edit", "Glob", "Grep"],
     "pi-safe": ["Read", "Glob", "Grep", "memory_read"],
-    "researcher": ["WebSearch", "WebFetch", "memory_read", "memory_write"],
+    "researcher": ["WebSearch", "WebFetch", "memory_read", "memory_write", "search_public_knowledge", "read_public_knowledge"],
     "analyst": ["WebSearch", "memory_read", "memory_write", "memory_list", "memory_index", "memory_search"],
     "reporter": ["memory_read"],
     "reviewer": ["Read", "Glob", "Grep", "memory_read"],
@@ -42,6 +42,7 @@ TOOL_PRESETS = {
         "brave_search", "fetch_rss", "fetch_reddit", "fetch_hn", "fetch_x",
         "fetch_openbb",
         "memory_read", "memory_write", "memory_list",
+        "search_public_knowledge", "read_public_knowledge",
     ],
     "messenger": [
         "sessions_send", "sessions_list", "sessions_history",
@@ -73,7 +74,7 @@ CLAUDE_BUILTIN_TOOLS = {
 }
 
 # Custom tool names (need MCP server or function definitions)
-CUSTOM_TOOL_NAMES = {"memory_read", "memory_write", "memory_list", "memory_index", "memory_search"}
+CUSTOM_TOOL_NAMES = {"memory_read", "memory_write", "memory_list", "memory_index", "memory_search", "search_public_knowledge", "read_public_knowledge"}
 
 # Scheduler tool names (need separate MCP server with user context)
 SCHEDULER_TOOL_NAMES = {"schedule_task", "list_schedules", "cancel_schedule"}
