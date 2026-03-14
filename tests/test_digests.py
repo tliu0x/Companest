@@ -135,12 +135,8 @@ class TestDigestModels:
 # ---------------------------------------------------------------------------
 
 class TestIngestIdempotency:
-    def _make_ingestor(self):
-        mock_store = MagicMock(spec=DigestS3Store)
-        return DigestIngestor(mock_store), mock_store
-
     def test_first_ingest_accepted(self):
-        ingestor, store = self._make_ingestor()
+        ingestor, store = _make_ingestor()
         digest = MarketSnapshotDigest(
             company_id="acme",
             snapshot_timestamp=NOW,
@@ -153,7 +149,7 @@ class TestIngestIdempotency:
         store.put_digest.assert_called_once()
 
     def test_duplicate_returns_duplicate(self):
-        ingestor, store = self._make_ingestor()
+        ingestor, store = _make_ingestor()
         digest = MarketSnapshotDigest(
             company_id="acme",
             snapshot_timestamp=NOW,
@@ -168,7 +164,7 @@ class TestIngestIdempotency:
         assert store.put_digest.call_count == 1
 
     def test_different_keys_both_accepted(self):
-        ingestor, store = self._make_ingestor()
+        ingestor, store = _make_ingestor()
         d1 = MarketSnapshotDigest(
             company_id="acme", snapshot_timestamp=NOW,
             idempotency_key="k1", markets=[],
@@ -188,9 +184,15 @@ class TestIngestIdempotency:
 # Company ID validation
 # ---------------------------------------------------------------------------
 
+def _make_ingestor():
+    """Standalone helper shared by idempotency and validation tests."""
+    mock_store = MagicMock(spec=DigestS3Store)
+    return DigestIngestor(mock_store), mock_store
+
+
 class TestCompanyIdValidation:
     def test_valid_company_id(self):
-        ingestor, _ = TestIngestIdempotency._make_ingestor(None)
+        ingestor, _ = _make_ingestor()
         digest = MarketSnapshotDigest(
             company_id="acme-corp",
             snapshot_timestamp=NOW,
@@ -201,7 +203,7 @@ class TestCompanyIdValidation:
         assert result.accepted is True
 
     def test_invalid_company_id_rejected(self):
-        ingestor, _ = TestIngestIdempotency._make_ingestor(None)
+        ingestor, _ = _make_ingestor()
         digest = MarketSnapshotDigest(
             company_id="../../../etc/passwd",
             snapshot_timestamp=NOW,
@@ -211,8 +213,6 @@ class TestCompanyIdValidation:
         result = ingestor.ingest(digest)
         assert result.accepted is False
         assert result.reason == "invalid_company_id"
-
-    def _make_ingestor(self):
         mock_store = MagicMock(spec=DigestS3Store)
         return DigestIngestor(mock_store), mock_store
 

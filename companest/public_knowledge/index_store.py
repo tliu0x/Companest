@@ -75,9 +75,12 @@ class IndexStore:
             resp = s3.get_object(Bucket=self.bucket, Key=key)
             body = resp["Body"].read().decode("utf-8")
         except Exception as e:
-            # Treat missing index as empty
-            error_code = getattr(getattr(e, "response", None), "get", lambda *_: None)
-            if hasattr(e, "response") and e.response.get("Error", {}).get("Code") == "NoSuchKey":
+            # Treat missing index as empty.
+            # boto3 ClientError has e.response["Error"]["Code"] == "NoSuchKey".
+            error_code = ""
+            if hasattr(e, "response") and isinstance(e.response, dict):
+                error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "NoSuchKey":
                 logger.info("Index not found, starting fresh")
                 return []
             logger.warning("Failed to load index: %s (starting fresh)", e)

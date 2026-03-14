@@ -21,7 +21,10 @@ from .models import (
 )
 from .ingest import DigestIngestor, IngestResult
 from .s3_store import DigestS3Store
-from .router import router as digest_router
+
+# Note: router is NOT imported at package level to avoid forcing
+# fastapi as a hard dependency. Import it directly when needed:
+#   from companest.digests.router import router as digest_router
 
 __all__ = [
     "DigestEnvelope",
@@ -35,5 +38,4 @@ __all__ = [
     "DigestIngestor",
     "IngestResult",
     "DigestS3Store",
-    "digest_router",
 ]
