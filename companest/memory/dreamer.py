@@ -98,7 +98,7 @@ class Dreamer:
         self,
         memory: MemoryManager,
         proxy_config: Optional["ProxyConfig"] = None,
-        model: str = "claude-haiku-4-5-20251001",
+        model: str = "deepseek-chat",
         short_tier_max_age_hours: int = 24,
         min_importance_to_keep: float = 0.3,
         max_access_for_gc: int = 2,

@@ -34,7 +34,7 @@
   "teams": [
     {
       "id": "analyst-team",
-      "team_md": "# Team: analyst-team\n- role: research\n- lead_pi: analyst\n- mode: cascade\n- enabled: true\n\n#### Pi: analyst\n- model: claude-sonnet-4-5-20250929\n- tools: memory_read, memory_write, memory_list, fetch_polymarket, fetch_kalshi, fetch_metaculus, brave_search\n- max_turns: 15",
+      "team_md": "# Team: analyst-team\n- role: research\n- lead_pi: analyst\n- mode: cascade\n- enabled: true\n\n#### Pi: analyst\n- model: deepseek-chat\n- tools: memory_read, memory_write, memory_list, fetch_polymarket, fetch_kalshi, fetch_metaculus, brave_search\n- max_turns: 15",
       "pis": [
         {
           "id": "analyst",
@@ -44,7 +44,7 @@
     },
     {
       "id": "collector-team",
-      "team_md": "# Team: collector-team\n- role: general\n- lead_pi: collector\n- mode: cascade\n- enabled: true\n\n#### Pi: collector\n- model: claude-sonnet-4-5-20250929\n- tools: memory_read, memory_write, memory_list, fetch_polymarket, fetch_kalshi, fetch_metaculus\n- max_turns: 10",
+      "team_md": "# Team: collector-team\n- role: general\n- lead_pi: collector\n- mode: cascade\n- enabled: true\n\n#### Pi: collector\n- model: deepseek-chat\n- tools: memory_read, memory_write, memory_list, fetch_polymarket, fetch_kalshi, fetch_metaculus\n- max_turns: 10",
       "pis": [
         {
           "id": "collector",

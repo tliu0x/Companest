@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 class PiConfig:
     """Configuration for a single Pi agent."""
     id: str
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = "deepseek-chat"
     tools: List[str] = field(default_factory=list)  # empty = all tools
     tools_deny: List[str] = field(default_factory=list)
     max_turns: int = 10
