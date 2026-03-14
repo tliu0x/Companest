@@ -1,8 +1,44 @@
 # Companest Examples
 
-The `minimal-setup` sample is the canonical public demo used by both onboarding docs and configuration tests.
+The `examples/` directory contains three practical starting points.
 
-## Run it locally
+## Available Examples
+
+### `minimal-setup`
+
+Use this when you want a local `.companest/` runtime that you can validate and run immediately.
+
+Included:
+
+- `general`: a lightweight assistant team
+- `coding`: a coding and review team with workspace-aware tools
+- `info-collection`: a feed collector team with a sample watchlist
+- `workspaces.json`: a sample workspace registry entry
+
+### `company-template`
+
+Use this when you want to create a new external company repo that registers into a running Companest control plane.
+
+Included:
+
+- a starter `manifest.json`
+- a `register.py` helper
+- a short customization guide
+
+### `prediction-market`
+
+Use this when you want a complete example of a vertical company extension.
+
+Included:
+
+- private teams
+- company schedules
+- routing bindings
+- memory seeds
+- feed-tool usage
+- API-based registration
+
+## Run The Local Demo
 
 ```bash
 pip install -e ".[claude,server]"
@@ -12,15 +48,6 @@ companest validate
 companest serve
 companest team run general "Summarize this project"
 ```
-
-## What is included
-
-- `general`: a lightweight assistant team for simple prompts
-- `coding`: a coding and review team with workspace-aware tools
-- `info-collection`: a feed collector team with a public watchlist example
-- `workspaces.json`: a sample workspace registry entry
-
-Use this sample as the starting point for your own `.companest/` directory.
 
 ## Registering External Companies
 

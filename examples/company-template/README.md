@@ -1,6 +1,8 @@
 # Company Template
 
-Copy this folder into a new external company repo and customize:
+Copy this folder into a new external company repo when you want the smallest possible starting point for registration into a Companest control plane.
+
+## Included Files
 
 - `manifest.json`
 - `register.py`
@@ -40,3 +42,12 @@ For a first integration, keep it simple:
 - one hourly schedule
 
 Once that works, add more teams, schedules, and MCP servers.
+
+## Recommended Next Step
+
+After the first registration succeeds:
+
+1. Check `GET /api/companies/{id}`.
+2. Submit one job with `POST /api/jobs`.
+3. Confirm the team routes correctly.
+4. Confirm the company schedule appears in fleet status.
