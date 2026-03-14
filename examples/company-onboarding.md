@@ -1,17 +1,8 @@
 # Company Onboarding
 
-This guide shows how a separate company repo can register itself with a running Companest control plane and start using shared infrastructure.
+This guide shows how an external company repo can register itself with a running Companest control plane and start using shared infrastructure.
 
-## What Companest Expects
-
-Companest is the control plane. A company repo brings its own:
-
-- manifest metadata
-- private team definitions
-- routing bindings
-- schedules
-- optional company-scoped MCP servers
-- initial memory seed
+## What Companest Owns
 
 Companest provides the shared runtime:
 
@@ -22,6 +13,17 @@ Companest provides the shared runtime:
 - team routing
 - cost controls
 - company lifecycle management
+
+## What Your Company Repo Owns
+
+Your company repo provides:
+
+- manifest metadata
+- private team definitions
+- routing bindings
+- schedules
+- optional company-scoped MCP servers
+- initial memory seed
 
 ## Before You Start
 
@@ -119,6 +121,22 @@ Minimal example:
 - `mcp_servers`: registered only for this company.
 - `teams`: inline private team definitions written into `companies/{id}/teams/`.
 
+## Team And Pi ID Rules
+
+Companest validates inline team IDs and Pi IDs before writing them to disk.
+
+Safe examples:
+
+- `analyst-team`
+- `collector`
+- `research_v2`
+
+Unsafe examples:
+
+- `../../etc`
+- `team/name`
+- `team name`
+
 ## Recommended Repo Layout
 
 Your external repo can stay simple:
@@ -133,7 +151,14 @@ my-company/
 
 You do not need to copy files onto the Companest host manually if you use inline `teams`.
 
-## Register a Company
+## Access Control Rules
+
+- Private teams are visible only to their owning company.
+- Global teams are available only if they are listed in `shared_teams`.
+- `POST /api/jobs` should include the top-level `company_id`.
+- Companest normalizes `company_id` into the execution context so routing, memory, budgets, and tool access remain company-scoped.
+
+## Register A Company
 
 Example using `curl`:
 
@@ -178,9 +203,7 @@ curl -X POST http://localhost:8000/api/jobs \
   }'
 ```
 
-Companest will normalize `company_id` into the execution context so routing, access control, budgets, and memory all stay company-scoped.
-
-## Update a Company
+## Update A Company
 
 Use `PATCH /api/companies/{id}` with the updated manifest fields.
 
@@ -190,7 +213,7 @@ Important behavior:
 - stale team directories not present in the new payload are removed
 - the company is torn down and re-applied immediately
 
-## Delete a Company
+## Delete A Company
 
 Delete with:
 
@@ -222,7 +245,7 @@ Recommended:
 
 Avoid relying on implicit access. Explicit allowlists are clearer and safer.
 
-## Example Extension
+## Starting Points
 
 Use the prediction market example as a reference implementation:
 
