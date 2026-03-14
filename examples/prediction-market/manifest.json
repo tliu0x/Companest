@@ -1,0 +1,56 @@
+{
+  "id": "prediction-market",
+  "name": "Prediction Market Analysis",
+  "domain": "Prediction market monitoring and opportunity identification",
+  "enabled": true,
+  "shared_teams": ["general"],
+  "schedules": [
+    {
+      "name": "market-collection",
+      "team_id": "prediction-market/collector-team",
+      "prompt": "Run data collection cycle. Fetch latest markets from polymarket, kalshi, and metaculus. Read existing markets.json from memory, merge new data, deduplicate by title, drop resolved markets. Keep max 100 items. Write updated markets.json.",
+      "interval_seconds": 600,
+      "mode": "cascade",
+      "enabled": true
+    }
+  ],
+  "routing_bindings": [
+    {
+      "pattern": "prediction[- ]market|polymarket|kalshi|metaculus|forecast|betting[- ]market",
+      "team_id": "prediction-market/analyst-team",
+      "mode": "cascade"
+    }
+  ],
+  "memory_seed": {
+    "shared": {
+      "watchlist.json": {
+        "queries": ["AI", "elections", "crypto", "climate", "technology"],
+        "sources": ["polymarket", "kalshi", "metaculus"]
+      }
+    },
+    "teams": {}
+  },
+  "mcp_servers": [],
+  "teams": [
+    {
+      "id": "analyst-team",
+      "team_md": "# Team: analyst-team\n- role: research\n- lead_pi: analyst\n- mode: cascade\n- enabled: true\n\n#### Pi: analyst\n- model: claude-sonnet-4-5-20250929\n- tools: memory_read, memory_write, memory_list, fetch_polymarket, fetch_kalshi, fetch_metaculus, brave_search\n- max_turns: 15",
+      "pis": [
+        {
+          "id": "analyst",
+          "soul_md": "You are a prediction market analyst. Your role is to:\n\n## Duties\n- Analyze prediction market data from Polymarket, Kalshi, and Metaculus\n- Identify mispriced markets and arbitrage opportunities across platforms\n- Provide probability assessments with reasoning\n- Track market movements and significant changes\n- Compare community predictions across platforms for the same events\n\n## Guidelines\n- Always cite specific market data (prices, volumes, number of predictions)\n- Express probabilities as percentages\n- Flag markets where platforms significantly disagree\n- Consider base rates and reference classes\n- Note any relevant recent news that could affect market prices"
+        }
+      ]
+    },
+    {
+      "id": "collector-team",
+      "team_md": "# Team: collector-team\n- role: general\n- lead_pi: collector\n- mode: cascade\n- enabled: true\n\n#### Pi: collector\n- model: claude-sonnet-4-5-20250929\n- tools: memory_read, memory_write, memory_list, fetch_polymarket, fetch_kalshi, fetch_metaculus\n- max_turns: 10",
+      "pis": [
+        {
+          "id": "collector",
+          "soul_md": "You are a prediction market data collector. Your role is to:\n\n## Duties\n- Periodically fetch market data from Polymarket, Kalshi, and Metaculus\n- Read the watchlist.json for configured queries and sources\n- Merge new market data with existing markets.json\n- Deduplicate markets by title similarity\n- Remove resolved/settled markets\n- Maintain a clean, up-to-date dataset\n\n## Data Format\nStore markets in markets.json as:\n```json\n{\"items\": [{\"title\": \"...\", \"source\": \"...\", \"probability\": ..., \"volume\": ..., \"url\": \"...\", \"fetched_at\": \"...\"}], \"updated_at\": \"...\"}\n```"
+        }
+      ]
+    }
+  ]
+}

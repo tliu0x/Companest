@@ -61,6 +61,9 @@ _RATE_LIMITS: Dict[str, float] = {
     "rss": 1.0,
     "x": 1.0,
     "openbb": 0.5,
+    "polymarket": 1.0,
+    "kalshi": 1.0,
+    "metaculus": 1.0,
 }
 _last_request_time: Dict[str, float] = {}
 
@@ -588,13 +591,204 @@ def _normalize_historical(
     }]
 
 
-#  Multi-Source Aggregation 
+#  Polymarket
+
+async def fetch_polymarket(
+    query: str = "",
+    limit: int = 10,
+    active_only: bool = True,
+) -> List[Dict]:
+    """
+    Fetch prediction markets from Polymarket CLOB API.
+
+    Args:
+        query: Search query to filter markets
+        limit: Number of markets to return (max 50)
+        active_only: Only return active/open markets
+
+    Returns:
+        List of {"title", "url", "source", "snippet", "timestamp", ...}
+    """
+    ck = _cache_key("fetch_polymarket", query, limit, active_only)
+    cached = _cache_get(ck)
+    if cached is not None:
+        return cached
+
+    params: Dict[str, Any] = {"limit": min(limit, 50)}
+    if active_only:
+        params["active"] = "true"
+
+    await _rate_limit("polymarket")
+    try:
+        client = _get_client()
+        resp = await client.get(
+            "https://clob.polymarket.com/markets",
+            params=params,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"Polymarket fetch failed: {e}")
+        return [{"error": str(e)}]
+
+    markets = data if isinstance(data, list) else data.get("data", data.get("markets", []))
+    items = []
+    query_lower = query.lower()
+    for m in markets:
+        question = m.get("question", "") or m.get("title", "")
+        if query and query_lower not in question.lower():
+            continue
+        slug = m.get("slug", m.get("condition_id", ""))
+        items.append({
+            "title": question,
+            "url": f"https://polymarket.com/event/{slug}" if slug else "",
+            "source": "polymarket",
+            "snippet": (m.get("description", "") or "")[:300],
+            "timestamp": m.get("end_date_iso", m.get("created_at", "")),
+            "probability": m.get("outcomePrices", m.get("last_trade_price")),
+            "volume": m.get("volume", m.get("volumeNum")),
+        })
+        if len(items) >= limit:
+            break
+    _cache_set(ck, items)
+    return items
+
+
+#  Kalshi
+
+async def fetch_kalshi(
+    query: str = "",
+    limit: int = 10,
+    status: str = "open",
+) -> List[Dict]:
+    """
+    Fetch prediction markets from Kalshi public API.
+
+    Args:
+        query: Search query to filter markets
+        limit: Number of markets to return (max 50)
+        status: Market status filter ("open", "closed", "settled")
+
+    Returns:
+        List of {"title", "url", "source", "snippet", "timestamp", ...}
+    """
+    ck = _cache_key("fetch_kalshi", query, limit, status)
+    cached = _cache_get(ck)
+    if cached is not None:
+        return cached
+
+    params: Dict[str, Any] = {"limit": min(limit, 50), "status": status}
+
+    await _rate_limit("kalshi")
+    try:
+        client = _get_client()
+        resp = await client.get(
+            "https://api.elections.kalshi.com/trade-api/v2/markets",
+            params=params,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"Kalshi fetch failed: {e}")
+        return [{"error": str(e)}]
+
+    markets = data.get("markets", [])
+    items = []
+    query_lower = query.lower()
+    for m in markets:
+        title = m.get("title", "") or m.get("subtitle", "")
+        if query and query_lower not in title.lower():
+            continue
+        ticker = m.get("ticker", "")
+        items.append({
+            "title": title,
+            "url": f"https://kalshi.com/markets/{ticker}" if ticker else "",
+            "source": "kalshi",
+            "snippet": (m.get("rules_primary", "") or m.get("subtitle", ""))[:300],
+            "timestamp": m.get("close_time", m.get("expiration_time", "")),
+            "yes_price": m.get("yes_ask", m.get("last_price")),
+            "volume": m.get("volume", m.get("open_interest")),
+        })
+        if len(items) >= limit:
+            break
+    _cache_set(ck, items)
+    return items
+
+
+#  Metaculus
+
+async def fetch_metaculus(
+    query: str = "",
+    limit: int = 10,
+    order_by: str = "-activity",
+) -> List[Dict]:
+    """
+    Fetch prediction questions from Metaculus API.
+
+    Args:
+        query: Search query to filter questions
+        limit: Number of questions to return (max 50)
+        order_by: Sort order ("-activity", "-publish_time", "-resolve_time")
+
+    Returns:
+        List of {"title", "url", "source", "snippet", "timestamp", ...}
+    """
+    ck = _cache_key("fetch_metaculus", query, limit, order_by)
+    cached = _cache_get(ck)
+    if cached is not None:
+        return cached
+
+    params: Dict[str, Any] = {
+        "limit": min(limit, 50),
+        "order_by": order_by,
+    }
+    if query:
+        params["search"] = query
+
+    await _rate_limit("metaculus")
+    try:
+        client = _get_client()
+        resp = await client.get(
+            "https://www.metaculus.com/api2/questions/",
+            params=params,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"Metaculus fetch failed: {e}")
+        return [{"error": str(e)}]
+
+    questions = data.get("results", [])
+    items = []
+    for q in questions:
+        qid = q.get("id", "")
+        prediction = q.get("community_prediction", {})
+        median = prediction.get("full", {}).get("q2") if isinstance(prediction, dict) else None
+        items.append({
+            "title": q.get("title", ""),
+            "url": f"https://www.metaculus.com/questions/{qid}/" if qid else "",
+            "source": "metaculus",
+            "snippet": (q.get("description", "") or "")[:300],
+            "timestamp": q.get("publish_time", q.get("created_time", "")),
+            "prediction": median,
+            "num_predictions": q.get("number_of_predictions", 0),
+        })
+        if len(items) >= limit:
+            break
+    _cache_set(ck, items)
+    return items
+
+
+#  Multi-Source Aggregation
 
 _SOURCE_FETCHERS = {
     "brave": lambda q, n: brave_search(q, count=n),
     "reddit": lambda q, n: fetch_reddit(q, limit=n),
     "hn": lambda q, n: fetch_hn(limit=n),
     "rss": lambda q, n: fetch_rss(q, limit=n),
+    "polymarket": lambda q, n: fetch_polymarket(q, limit=n),
+    "kalshi": lambda q, n: fetch_kalshi(q, limit=n),
+    "metaculus": lambda q, n: fetch_metaculus(q, limit=n),
 }
 
 

@@ -1,0 +1,46 @@
+{
+  "id": "your-company-id",
+  "name": "Your Company Name",
+  "domain": "What this company does and what kinds of tasks it should handle",
+  "enabled": true,
+  "shared_teams": ["general"],
+  "routing_bindings": [
+    {
+      "pattern": "your-keyword|your-domain|your-product",
+      "team_id": "your-company-id/analyst-team",
+      "mode": "cascade"
+    }
+  ],
+  "schedules": [
+    {
+      "name": "hourly-refresh",
+      "team_id": "your-company-id/analyst-team",
+      "prompt": "Review the latest company memory and refresh the current status summary.",
+      "interval_seconds": 3600,
+      "mode": "cascade",
+      "enabled": true
+    }
+  ],
+  "memory_seed": {
+    "shared": {
+      "watchlist.json": {
+        "topics": ["topic-a", "topic-b"],
+        "notes": "Initial company watchlist or operating config."
+      }
+    },
+    "teams": {}
+  },
+  "mcp_servers": [],
+  "teams": [
+    {
+      "id": "analyst-team",
+      "team_md": "# Team: analyst-team\n- role: research\n- lead_pi: analyst\n- enabled: true\n- mode: cascade\n\n#### Pi: analyst\n- model: claude-sonnet-4-5-20250929\n- tools: memory_read, memory_write, memory_list, brave_search\n- max_turns: 12",
+      "pis": [
+        {
+          "id": "analyst",
+          "soul_md": "You are the lead analyst for this company. Produce concise, practical work products and keep company memory current."
+        }
+      ]
+    }
+  ]
+}

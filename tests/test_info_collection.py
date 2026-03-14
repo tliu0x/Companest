@@ -181,6 +181,7 @@ class TestToolResolution:
     def test_feed_tool_names_constant(self):
         assert FEED_TOOL_NAMES == {
             "brave_search", "fetch_rss", "fetch_reddit", "fetch_hn", "fetch_x", "fetch_openbb",
+            "fetch_polymarket", "fetch_kalshi", "fetch_metaculus",
         }
 
 

@@ -1,5 +1,6 @@
 """Tests for CompanyComponent protocol, CompanyContext, and CompanyMemoryNamespace."""
 
+import asyncio
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass
@@ -181,3 +182,50 @@ def test_registry_component_is_none_for_yaml_only():
         registry = CompanyRegistry(td)
         assert registry.get_component("nonexistent") is None
         assert registry.list_components() == []
+
+
+def test_registry_scan_component_takes_precedence_over_yaml():
+    from companest.company import CompanyRegistry
+
+    with tempfile.TemporaryDirectory() as td:
+        registry = CompanyRegistry(td)
+        comp = DummyComponent("acme")
+        registry.register_component(comp)
+
+        company_dir = Path(td) / "companies" / "acme"
+        company_dir.mkdir(parents=True)
+        (company_dir / "company.yaml").write_text(
+            "id: acme\nname: YAML Company\ndomain: yaml\nenabled: true\n",
+            encoding="utf-8",
+        )
+
+        registry.scan()
+
+        assert registry.get("acme").name == "Test Company"
+
+
+def test_company_config_shared_teams_default_is_unrestricted():
+    cfg = CompanyConfig(id="acme", name="Acme")
+    assert cfg.shared_teams is None
+
+
+def test_job_submit_normalizes_top_level_company_id_into_context():
+    from companest.jobs import JobManager
+
+    jm = JobManager.__new__(JobManager)
+    jm._jobs = {}
+    jm._queue = asyncio.Queue()
+
+    async def _persist_job(_job):
+        return None
+
+    jm._persist_job = _persist_job
+
+    async def run():
+        job_id = await JobManager.submit(jm, "Assess market", company_id="acme")
+        return jm._jobs[job_id]
+
+    job = asyncio.run(run())
+
+    assert job.company_id == "acme"
+    assert job.context["company_id"] == "acme"

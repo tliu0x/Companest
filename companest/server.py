@@ -14,12 +14,14 @@ Usage:
 import logging
 import asyncio
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 from .config import CompanestConfig
 from .jobs import JobManager, JobStatus
 from .orchestrator import CompanestOrchestrator
+from .company import _SAFE_ID_RE
 from .exceptions import CompanestError, JobError, OrchestratorError
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ class CompanestAPIServer:
         self.orchestrator = orchestrator
         self._app = None
         self._event_subscribers: List[asyncio.Queue] = []
+        self.MAX_WS_SUBSCRIBERS = 50
 
     def create_app(self):
         """Create and configure the FastAPI application."""
@@ -145,6 +148,7 @@ class CompanestAPIServer:
             task: str = Field(..., min_length=1, max_length=50000)
             context: Optional[Dict[str, Any]] = None
             submitted_by: str = Field(default="api", max_length=100)
+            company_id: Optional[str] = Field(default=None, max_length=100)
 
         class WebhookRequest(BaseModel):
             task: str = Field(..., min_length=1, max_length=50000)
@@ -171,10 +175,14 @@ class CompanestAPIServer:
                     task=req.task,
                     context=req.context,
                     submitted_by=req.submitted_by,
+                    company_id=req.company_id,
                 )
                 return {"job_id": job_id, "status": "queued"}
+            except JobError as e:
+                raise HTTPException(status_code=400, detail=str(e))
             except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+                logger.error(f"Job submission failed: {e}")
+                raise HTTPException(status_code=500, detail="Internal server error")
 
         @app.get("/api/jobs/{job_id}")
         async def get_job(job_id: str):
@@ -228,6 +236,22 @@ class CompanestAPIServer:
             }
             if self.orchestrator and hasattr(self.orchestrator, "team_registry"):
                 status["teams"] = self.orchestrator.team_registry.get_fleet_status()
+            # Per-company stats
+            if self.orchestrator and hasattr(self.orchestrator, "company_registry"):
+                companies = {}
+                for cid in self.orchestrator.company_registry.list_companies():
+                    cfg = self.orchestrator.company_registry.get(cid)
+                    company_teams = list(
+                        self.orchestrator.team_registry.get_configs_by_company(cid).keys()
+                    ) if hasattr(self.orchestrator, "team_registry") else []
+                    company_jobs = await self.job_manager.list_jobs(company_id=cid, limit=100)
+                    companies[cid] = {
+                        "name": cfg.name if cfg else cid,
+                        "enabled": cfg.enabled if cfg else False,
+                        "active_teams": len(company_teams),
+                        "total_jobs": len(company_jobs),
+                    }
+                status["companies"] = companies
             return status
 
         # --- WebSocket Events ---
@@ -242,6 +266,9 @@ class CompanestAPIServer:
                     if token != api_token:
                         await websocket.close(code=4001, reason="Unauthorized")
                         return
+                if len(self._event_subscribers) >= self.MAX_WS_SUBSCRIBERS:
+                    await websocket.close(code=4002, reason="Too many connections")
+                    return
                 await websocket.accept()
                 queue: asyncio.Queue = asyncio.Queue(maxsize=100)
                 self._event_subscribers.append(queue)
@@ -293,7 +320,8 @@ class CompanestAPIServer:
                         "message": "Job submitted via n8n webhook",
                     }
                 except Exception as e:
-                    raise HTTPException(status_code=500, detail=str(e))
+                    logger.error(f"n8n webhook failed: {e}")
+                    raise HTTPException(status_code=500, detail="Internal server error")
 
         # --- v2: Pi Agent Team endpoints ---
 
@@ -440,6 +468,18 @@ class CompanestAPIServer:
             name: str = Field(..., min_length=1, max_length=200)
             domain: str = ""
             enabled: bool = True
+            # manifest extension fields
+            bindings: Optional[list] = None
+            preferences: Optional[dict] = None
+            ceo: Optional[dict] = None
+            schedules: Optional[list] = None
+            env: Optional[Dict[str, str]] = None
+            shared_teams: Optional[List[str]] = None
+            routing_bindings: Optional[list] = None
+            memory_seed: Optional[dict] = None
+            mcp_servers: Optional[list] = None
+            # inline team definitions (external repos pass team file contents via API)
+            teams: Optional[List[dict]] = None
 
         class CompanyUpdateRequest(BaseModel):
             name: Optional[str] = None
@@ -449,11 +489,33 @@ class CompanestAPIServer:
             preferences: Optional[Dict[str, Any]] = None
             schedules: Optional[list] = None
             env: Optional[Dict[str, str]] = None
+            shared_teams: Optional[List[str]] = None
+            routing_bindings: Optional[list] = None
+            memory_seed: Optional[dict] = None
+            mcp_servers: Optional[list] = None
+            teams: Optional[List[dict]] = None
 
         class CompanyBindRequest(BaseModel):
             channel: Optional[str] = None
             chat_id: Optional[str] = None
             user_id: Optional[str] = None
+
+        def _validate_inline_teams_payload(teams: Optional[List[dict]]) -> List[dict]:
+            validated: List[dict] = []
+            for team_def in teams or []:
+                tid = team_def.get("id", "")
+                if not tid:
+                    continue
+                if not _SAFE_ID_RE.match(tid):
+                    raise HTTPException(status_code=400, detail=f"Invalid team ID: {tid!r}")
+                for pi_def in team_def.get("pis", []):
+                    pid = pi_def.get("id", "")
+                    if not pid:
+                        continue
+                    if not _SAFE_ID_RE.match(pid):
+                        raise HTTPException(status_code=400, detail=f"Invalid pi ID: {pid!r}")
+                validated.append(team_def)
+            return validated
 
         @app.get("/api/companies")
         async def list_companies():
@@ -481,9 +543,44 @@ class CompanestAPIServer:
             registry = self.orchestrator.company_registry
             if registry.get(req.id):
                 raise HTTPException(status_code=409, detail=f"Company already exists: {req.id}")
+            validated_teams = _validate_inline_teams_payload(req.teams)
             from .company import CompanyConfig
-            config = CompanyConfig(id=req.id, name=req.name, domain=req.domain, enabled=req.enabled)
+            # Build full config from manifest fields
+            config_data = {"id": req.id, "name": req.name, "domain": req.domain, "enabled": req.enabled}
+            for field_name in ("bindings", "preferences", "ceo", "schedules", "env",
+                               "shared_teams", "routing_bindings", "memory_seed", "mcp_servers"):
+                val = getattr(req, field_name, None)
+                if val is not None:
+                    config_data[field_name] = val
+            config = CompanyConfig(**config_data)
             registry.save(config)
+
+            # Write inline team definitions to disk
+            if validated_teams:
+                base = Path(self.orchestrator.memory.base_path)
+                for team_def in validated_teams:
+                    tid = team_def.get("id", "")
+                    if not tid:
+                        continue
+                    team_dir = base / "companies" / req.id / "teams" / tid
+                    team_dir.mkdir(parents=True, exist_ok=True)
+                    # Write team.md
+                    team_md = team_def.get("team_md", "")
+                    if team_md:
+                        (team_dir / "team.md").write_text(team_md, encoding="utf-8")
+                    # Write pi soul.md files
+                    for pi_def in team_def.get("pis", []):
+                        pid = pi_def.get("id", "")
+                        if not pid:
+                            continue
+                        pi_dir = team_dir / "pis" / pid
+                        pi_dir.mkdir(parents=True, exist_ok=True)
+                        soul_md = pi_def.get("soul_md", "")
+                        if soul_md:
+                            (pi_dir / "soul.md").write_text(soul_md, encoding="utf-8")
+
+            # Immediate apply (no 30s watcher delay)
+            await self.orchestrator.apply_company(req.id)
             return {"status": "created", "id": config.id}
 
         @app.get("/api/companies/{company_id}")
@@ -496,6 +593,20 @@ class CompanestAPIServer:
             data = config.model_dump()
             # Redact env vars (sensitive)
             data["env"] = {k: "***" for k in data.get("env", {})}
+            # Enrich with runtime info
+            if hasattr(self.orchestrator, "team_registry"):
+                data["teams"] = list(
+                    self.orchestrator.team_registry.get_configs_by_company(company_id).keys()
+                )
+            if hasattr(self.orchestrator, "scheduler"):
+                sched_status = self.orchestrator.scheduler.get_status()
+                data["schedule_status"] = {
+                    name: info for name, info in sched_status.get("tasks", {}).items()
+                    if name.startswith(f"company_{company_id}_") or name == f"ceo_{company_id}"
+                }
+            # Recent jobs
+            recent = await self.job_manager.list_jobs(company_id=company_id, limit=10)
+            data["recent_jobs"] = [j.to_dict() for j in recent]
             return data
 
         @app.patch("/api/companies/{company_id}")
@@ -506,6 +617,7 @@ class CompanestAPIServer:
             config = registry.get(company_id)
             if not config:
                 raise HTTPException(status_code=404, detail=f"Company not found: {company_id}")
+            validated_teams = _validate_inline_teams_payload(req.teams) if req.teams is not None else None
             update = req.model_dump(exclude_none=True)
             data = config.model_dump()
             # Deep merge for nested config objects
@@ -524,6 +636,43 @@ class CompanestAPIServer:
             from .company import CompanyConfig
             updated = CompanyConfig(**data)
             registry.save(updated)
+            # Write inline team definitions if provided
+            if validated_teams is not None:
+                base = Path(self.orchestrator.memory.base_path)
+                teams_root = base / "companies" / company_id / "teams"
+                # Write inline team definitions
+                provided_ids = set()
+                for team_def in validated_teams:
+                    tid = team_def.get("id", "")
+                    if not tid:
+                        continue
+                    provided_ids.add(tid)
+                    team_dir = teams_root / tid
+                    team_dir.mkdir(parents=True, exist_ok=True)
+                    team_md = team_def.get("team_md", "")
+                    if team_md:
+                        (team_dir / "team.md").write_text(team_md, encoding="utf-8")
+                    for pi_def in team_def.get("pis", []):
+                        pid = pi_def.get("id", "")
+                        if not pid:
+                            continue
+                        pi_dir = team_dir / "pis" / pid
+                        pi_dir.mkdir(parents=True, exist_ok=True)
+                        soul_md = pi_def.get("soul_md", "")
+                        if soul_md:
+                            (pi_dir / "soul.md").write_text(soul_md, encoding="utf-8")
+                # Remove team directories not in the updated manifest
+                if teams_root.exists():
+                    import shutil
+                    for existing in teams_root.iterdir():
+                        if existing.is_dir() and existing.name not in provided_ids:
+                            if not _SAFE_ID_RE.match(existing.name):
+                                logger.warning(f"Skipping removal of invalid team directory: {existing.name}")
+                                continue
+                            shutil.rmtree(existing)
+                            logger.info(f"Removed stale team directory: {existing.name}")
+            # Immediate apply
+            await self.orchestrator.apply_company(company_id)
             return {"status": "updated", "id": company_id}
 
         @app.delete("/api/companies/{company_id}")
@@ -533,13 +682,26 @@ class CompanestAPIServer:
             registry = self.orchestrator.company_registry
             if not registry.get(company_id):
                 raise HTTPException(status_code=404, detail=f"Company not found: {company_id}")
-            # Remove CEO schedule
-            if hasattr(self.orchestrator, "scheduler"):
-                self.orchestrator.scheduler.remove(f"ceo_{company_id}")
-            if hasattr(self.orchestrator, "_ceo_pis"):
-                self.orchestrator._ceo_pis.pop(company_id, None)
+            await self.orchestrator.teardown_company(company_id)
             registry.delete(company_id)
             return {"status": "deleted", "id": company_id}
+
+        @app.get("/api/companies/{company_id}/jobs")
+        async def list_company_jobs(company_id: str, limit: int = 20, status: Optional[str] = None):
+            if not self.orchestrator or not hasattr(self.orchestrator, "company_registry"):
+                raise HTTPException(status_code=503, detail="Company registry not initialized")
+            if not self.orchestrator.company_registry.get(company_id):
+                raise HTTPException(status_code=404, detail=f"Company not found: {company_id}")
+            filter_status = None
+            if status:
+                try:
+                    filter_status = JobStatus(status)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+            jobs = await self.job_manager.list_jobs(
+                status=filter_status, limit=limit, company_id=company_id,
+            )
+            return {"jobs": [j.to_dict() for j in jobs], "total": len(jobs)}
 
         @app.post("/api/companies/{company_id}/bind")
         async def add_company_binding(company_id: str, req: CompanyBindRequest):

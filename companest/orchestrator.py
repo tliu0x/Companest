@@ -434,7 +434,7 @@ class CompanestOrchestrator:
 
     #  Team Access Control 
 
-    def can_access_team(self, company_id: Optional[str], team_id: str) -> bool:
+    def _legacy_can_access_team(self, company_id: Optional[str], team_id: str) -> bool:
         """Check if a company is allowed to access a team.
 
         Rules:
@@ -443,7 +443,40 @@ class CompanestOrchestrator:
         - No company context -only global teams
         """
         if "/" not in team_id:
-            return True  # global team
+            # Global team — check shared_teams whitelist if company has one
+            if company_id and hasattr(self, "company_registry"):
+                company = self.company_registry.get(company_id)
+                if company and company.shared_teams:
+                    return team_id in company.shared_teams
+            return True  # no whitelist or no company context
+        owner = team_id.split("/", 1)[0]
+        return company_id == owner
+
+    def _get_company_shared_teams(self, company_id: Optional[str]) -> Optional[List[str]]:
+        """Return the company's global-team whitelist.
+
+        None means legacy unrestricted access. An empty list means no shared teams.
+        """
+        if not company_id or not hasattr(self, "company_registry"):
+            return None
+        company = self.company_registry.get(company_id)
+        if company is None:
+            return []
+        return company.shared_teams
+
+    def can_access_team(self, company_id: Optional[str], team_id: str) -> bool:
+        """Check if a company is allowed to access a team.
+
+        Rules:
+        - Global teams: allowed if no whitelist (shared_teams is None),
+          otherwise must be in the whitelist (empty list = no access).
+        - Private teams (contains '/'): only the owner company can access.
+        """
+        if "/" not in team_id:
+            shared_teams = self._get_company_shared_teams(company_id)
+            if shared_teams is None:
+                return True  # no whitelist configured — legacy unrestricted
+            return team_id in shared_teams
         owner = team_id.split("/", 1)[0]
         return company_id == owner
 
@@ -462,6 +495,12 @@ class CompanestOrchestrator:
         if hasattr(self, "team_registry"):
             self.team_registry.scan_company_teams(company.id, company_teams_dir)
 
+            # Register path overrides for company private teams
+            for tid, cfg in self.team_registry.get_configs_by_company(company.id).items():
+                if cfg.local_id:
+                    actual_path = company_teams_dir / cfg.local_id
+                    self.memory.register_team_path(tid, actual_path)
+
         # If this company has a registered component, invoke on_init()
         component = self.company_registry.get_component(company.id)
         if component is not None:
@@ -471,8 +510,12 @@ class CompanestOrchestrator:
                 memory=ns,
                 tool_registry=self.tool_registry,
                 event_bus=self.events,
-                add_binding=lambda pat, tid, mode: self._smart_router.add_binding(pat, tid, mode),
-                register_enrichment=self.memory.register_enrichment,
+                add_binding=lambda pat, tid, mode: self._smart_router.add_binding(
+                    pat, tid, mode, owner_company_id=company.id
+                ),
+                register_enrichment=lambda src: (
+                    setattr(src, 'company_id', company.id) or self.memory.register_enrichment(src)
+                ),
             )
             try:
                 component.on_init(ctx)
@@ -494,6 +537,53 @@ class CompanestOrchestrator:
         if not hasattr(self, "_cycle_numbers"):
             self._cycle_numbers: Dict[str, int] = {}
         self._cycle_numbers.setdefault(company.id, 0)
+
+        # Process routing_bindings from config
+        for rb in company.routing_bindings:
+            self._smart_router.add_binding(
+                rb.get("pattern", ""), rb.get("team_id", ""),
+                rb.get("mode", "cascade"),
+                owner_company_id=company.id,
+            )
+
+        # Process memory_seed — only_if_missing semantics
+        ns = CompanyMemoryNamespace(self.memory, company.id)
+        seed = company.memory_seed
+        if seed:
+            for key, content in seed.get("shared", {}).items():
+                if ns.read_shared(key) is None:
+                    ns.write_shared(key, content)
+            for team_id, team_seed in seed.get("teams", {}).items():
+                for key, content in team_seed.items():
+                    if ns.read_team_memory(team_id, key) is None:
+                        ns.write_team_memory(team_id, key, content)
+
+        # Process mcp_servers — company-scoped
+        for mcp_cfg in company.mcp_servers:
+            cfg = dict(mcp_cfg)
+            name = cfg.pop("name", "")
+            if name:
+                self.tool_registry.register_company_mcp(company.id, name, cfg)
+
+        # Validate shared_teams
+        for st in company.shared_teams or []:
+            if st not in self.team_registry.list_teams():
+                logger.warning(f"Company {company.id} requests shared team '{st}' which does not exist")
+
+        # Register CompanySchedules to Scheduler
+        for sched in company.schedules:
+            if not sched.enabled:
+                continue
+            task_name = f"company_{company.id}_{sched.name}"
+            self.scheduler.add(
+                task_name,
+                lambda tid=sched.team_id, p=sched.prompt, m=sched.mode, cid=company.id:
+                    self.run_team(p, tid, mode=m, user_context={"company_id": cid}),
+                interval=sched.interval_seconds,
+                run_on_start=False,
+                scope_type="company",
+                scope_id=company.id,
+            )
 
         # Create CEO Pi
         if company.ceo.enabled:
@@ -520,6 +610,7 @@ class CompanestOrchestrator:
                 "run_auto_fn": self.run_auto,
                 "company_id": company.id,
                 "company_env": company.env,
+                "company_shared_teams": company.shared_teams,
             }
 
             self._ceo_pis[company.id] = ceo_pi
@@ -530,12 +621,91 @@ class CompanestOrchestrator:
                 lambda c=company, p=ceo_pi: self._run_ceo_cycle(c, p),
                 interval=company.ceo.cycle_interval,
                 run_on_start=False,
+                scope_type="company",
+                scope_id=company.id,
             )
 
             logger.info(
                 f"[Company] CEO initialized: {company.id} "
                 f"(model={company.ceo.model}, cycle={company.ceo.cycle_interval}s)"
             )
+
+    async def apply_company(self, company_id: str) -> None:
+        """Register or update a company — immediate effect, no watcher delay."""
+        config = self.company_registry.get(company_id)
+        if not config or not config.enabled:
+            if self._is_company_initialized(company_id):
+                await self.teardown_company(company_id)
+            return
+        # If already initialized, teardown first (clean update)
+        if self._is_company_initialized(company_id):
+            await self.teardown_company(company_id)
+        self._init_company(config)
+
+    async def teardown_company(self, company_id: str) -> None:
+        """Full cleanup: component, scheduler, router, enrichment, teams, memory, MCP."""
+        # 1. on_teardown
+        comp = self.company_registry.get_component(company_id)
+        if comp and hasattr(comp, 'on_teardown'):
+            try:
+                comp.on_teardown()
+            except Exception as e:
+                logger.error(f"[Company] on_teardown failed for {company_id}: {e}")
+
+        # 2. Scheduler — remove by scope
+        if hasattr(self, 'scheduler'):
+            self.scheduler.remove_by_scope("company", company_id)
+            # Also remove CEO schedule
+            self.scheduler.remove(f"ceo_{company_id}")
+
+        # 3. Router — remove by owner
+        if hasattr(self, '_smart_router'):
+            self._smart_router.remove_bindings_by_owner(company_id)
+
+        # 4. Enrichment — remove from MemoryManager
+        if hasattr(self, 'memory'):
+            self.memory.remove_enrichments_by_company(company_id)
+
+        # 5. Teams — unregister configs + instances + meta
+        if hasattr(self, 'team_registry'):
+            self.team_registry.unregister_company(company_id)
+
+        # 6. Memory path overrides
+        if hasattr(self, 'memory'):
+            self.memory.unregister_company_paths(company_id)
+
+        # 7. Company-scoped MCP
+        if hasattr(self, 'tool_registry'):
+            self.tool_registry.unregister_company_mcp(company_id)
+
+        # 8. CEO Pi
+        self._ceo_pis.pop(company_id, None)
+
+        # 9. Output sinks
+        if hasattr(self, '_output_sinks'):
+            self._output_sinks.pop(company_id, None)
+
+        logger.info(f"[Company] Teardown complete: {company_id}")
+
+    def _is_company_initialized(self, company_id: str) -> bool:
+        """Check if a company has been initialized."""
+        if company_id in self._ceo_pis:
+            return True
+        if hasattr(self, 'team_registry'):
+            if self.team_registry.get_configs_by_company(company_id):
+                return True
+        return False
+
+    def _initialized_company_ids(self) -> List[str]:
+        """Return company IDs that may still have runtime resources attached."""
+        ids = set(self._ceo_pis.keys())
+        if hasattr(self, "company_registry"):
+            ids.update(self.company_registry.list_companies())
+        if hasattr(self, "team_registry"):
+            for team_id in self.team_registry.list_teams():
+                if "/" in team_id:
+                    ids.add(team_id.split("/", 1)[0])
+        return sorted(ids)
 
     async def _run_ceo_cycle(self, company: CompanyConfig, ceo_pi: Pi) -> None:
         """Execute one CEO cycle and dispatch results through OutputSinks."""
@@ -667,20 +837,31 @@ class CompanestOrchestrator:
             return
         if self.company_registry.check_for_changes():
             logger.info("[Company] Config changes detected, reloading...")
-            old_ids = set(self._ceo_pis.keys())
+            old_ids = set(self._initialized_company_ids())
+
+            # Full teardown of all previously initialized companies
+            for cid in old_ids:
+                try:
+                    if self._is_company_initialized(cid):
+                        await self.teardown_company(cid)
+                except Exception as e:
+                    logger.error(f"Failed to teardown company {cid}: {e}")
+
             self.company_registry.reload()
 
-            # Remove old CEO schedules
-            for cid in old_ids:
-                self.scheduler.remove(f"ceo_{cid}")
-            self._ceo_pis.clear()
-
             # Re-init all enabled companies
+            new_ids = set()
             for company in self.company_registry.list_enabled():
+                new_ids.add(company.id)
                 try:
                     self._init_company(company)
                 except Exception as e:
                     logger.error(f"Failed to re-init company {company.id}: {e}")
+
+            # Teardown companies that were removed (existed before but not after reload)
+            removed = old_ids - new_ids
+            for cid in removed:
+                logger.info(f"[Company] Company {cid} removed, already torn down")
 
             # Invalidate memory/prompt caches for company teams
             self.memory.clear_cache()
@@ -818,6 +999,12 @@ class CompanestOrchestrator:
                     extra["workspace_path"] = ws.path
                     extra["workspace_context"] = ws_context
                     pi._extra_tool_context = extra
+
+        company_shared_teams = self._get_company_shared_teams(company_id)
+        for pi in team.pis.values():
+            extra = getattr(pi, "_extra_tool_context", {})
+            extra["company_shared_teams"] = company_shared_teams
+            pi._extra_tool_context = extra
 
         # Emit TASK_STARTED
         event_data = {"team_id": team_id, "mode": effective_mode, "task_preview": task[:200]}
@@ -964,9 +1151,13 @@ class CompanestOrchestrator:
             if company and company.preferences.preferred_teams:
                 preferred_teams = company.preferences.preferred_teams
 
+        cid = user_context.get("company_id")
+        shared_teams = self._get_company_shared_teams(cid)
+
         decision = await self._smart_router.route(
             task, preferred_teams=preferred_teams,
             company_id=user_context.get("company_id"),
+            shared_teams=shared_teams,
         )
         # Note: SmartRouter.route() already emits TASK_ROUTED via _emit_routing_audit()
 
