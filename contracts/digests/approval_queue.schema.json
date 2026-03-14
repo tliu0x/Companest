@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "digests/approval_queue.schema.json",
+  "title": "ApprovalQueueDigest",
+  "description": "Pending trade approvals awaiting human review. Company-private.",
+  "type": "object",
+  "required": [
+    "company_id",
+    "digest_type",
+    "schema_version",
+    "snapshot_timestamp",
+    "idempotency_key",
+    "pending_approvals"
+  ],
+  "properties": {
+    "company_id": { "type": "string" },
+    "digest_type": { "type": "string", "const": "approval_queue" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "snapshot_timestamp": { "type": "string", "format": "date-time" },
+    "idempotency_key": { "type": "string" },
+    "pending_approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["order_id", "ticker", "side", "quantity", "price", "reason", "created_at"],
+        "properties": {
+          "order_id": { "type": "string" },
+          "ticker": { "type": "string" },
+          "market_title": { "type": "string" },
+          "side": { "type": "string", "enum": ["yes", "no"] },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "price": { "type": "number", "minimum": 1, "maximum": 99 },
+          "reason": { "type": "string", "description": "Why this order needs approval" },
+          "created_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

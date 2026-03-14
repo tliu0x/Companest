@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 TOOL_PRESETS = {
     "pi-core": ["Read", "Write", "Edit", "Glob", "Grep"],
     "pi-safe": ["Read", "Glob", "Grep", "memory_read"],
-    "researcher": ["WebSearch", "WebFetch", "memory_read", "memory_write"],
+    "researcher": ["WebSearch", "WebFetch", "memory_read", "memory_write", "search_public_knowledge", "read_public_knowledge"],
     "analyst": ["WebSearch", "memory_read", "memory_write", "memory_list", "memory_index", "memory_search"],
     "reporter": ["memory_read"],
     "reviewer": ["Read", "Glob", "Grep", "memory_read"],
@@ -42,6 +42,7 @@ TOOL_PRESETS = {
         "brave_search", "fetch_rss", "fetch_reddit", "fetch_hn", "fetch_x",
         "fetch_openbb",
         "memory_read", "memory_write", "memory_list",
+        "search_public_knowledge", "read_public_knowledge",
     ],
     "messenger": [
         "sessions_send", "sessions_list", "sessions_history",
@@ -74,6 +75,9 @@ CLAUDE_BUILTIN_TOOLS = {
 
 # Custom tool names (need MCP server or function definitions)
 CUSTOM_TOOL_NAMES = {"memory_read", "memory_write", "memory_list", "memory_index", "memory_search"}
+
+# Public knowledge tool names (need public_knowledge MCP server)
+PUBLIC_KNOWLEDGE_TOOL_NAMES = {"search_public_knowledge", "read_public_knowledge"}
 
 # Scheduler tool names (need separate MCP server with user context)
 SCHEDULER_TOOL_NAMES = {"schedule_task", "list_schedules", "cancel_schedule"}
@@ -986,6 +990,14 @@ def create_feed_mcp_server():
 def create_feed_openai_tools():
     return definitions_to_openai(create_feed_tool_defs())
 
+def create_public_knowledge_mcp_server(bucket="", prefix="companest-public-knowledge/", region="us-east-1", endpoint_url=""):
+    from .public_knowledge.mcp import create_public_knowledge_tool_defs
+    return definitions_to_mcp(create_public_knowledge_tool_defs(bucket, prefix, region, endpoint_url), "pk")
+
+def create_public_knowledge_openai_tools(bucket="", prefix="companest-public-knowledge/", region="us-east-1", endpoint_url=""):
+    from .public_knowledge.mcp import create_public_knowledge_tool_defs
+    return definitions_to_openai(create_public_knowledge_tool_defs(bucket, prefix, region, endpoint_url))
+
 def create_sessions_mcp_server(
     memory,
     team_id,
@@ -1114,6 +1126,13 @@ class ToolRegistry:
             mcp_factory=self._git_mcp_factory,
             openai_factory=self._git_openai_factory,
             requires=self._git_requires,
+        ))
+        self.register(ToolProvider(
+            name="public_knowledge",
+            tool_names=PUBLIC_KNOWLEDGE_TOOL_NAMES,
+            mcp_factory=self._pk_mcp_factory,
+            openai_factory=self._pk_openai_factory,
+            requires=self._pk_requires,
         ))
 
     def register(self, provider: ToolProvider) -> None:
@@ -1438,6 +1457,42 @@ class ToolRegistry:
     @staticmethod
     def _git_openai_factory(ctx: ToolContext) -> list:
         defs = create_git_tool_defs(ctx)
+        return definitions_to_openai(defs)
+
+    @staticmethod
+    def _pk_requires(ctx: ToolContext, default_all: bool = False) -> bool:
+        import os
+        if not os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true"):
+            return False
+        if default_all:
+            return True
+        return any(
+            t in PUBLIC_KNOWLEDGE_TOOL_NAMES or t in ("researcher", "collector")
+            for t in ctx.tools_config
+        )
+
+    @staticmethod
+    def _pk_mcp_factory(ctx: ToolContext) -> Any:
+        import os
+        from .public_knowledge.mcp import create_public_knowledge_tool_defs
+        defs = create_public_knowledge_tool_defs(
+            bucket=os.environ.get("PK_S3_BUCKET", ""),
+            prefix=os.environ.get("PK_S3_PREFIX", "companest-public-knowledge/"),
+            region=os.environ.get("PK_S3_REGION", "us-east-1"),
+            endpoint_url=os.environ.get("PK_S3_ENDPOINT_URL", ""),
+        )
+        return definitions_to_mcp(defs, "pk")
+
+    @staticmethod
+    def _pk_openai_factory(ctx: ToolContext) -> list:
+        import os
+        from .public_knowledge.mcp import create_public_knowledge_tool_defs
+        defs = create_public_knowledge_tool_defs(
+            bucket=os.environ.get("PK_S3_BUCKET", ""),
+            prefix=os.environ.get("PK_S3_PREFIX", "companest-public-knowledge/"),
+            region=os.environ.get("PK_S3_REGION", "us-east-1"),
+            endpoint_url=os.environ.get("PK_S3_ENDPOINT_URL", ""),
+        )
         return definitions_to_openai(defs)
 
 
