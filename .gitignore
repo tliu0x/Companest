@@ -55,6 +55,7 @@ ENV/
 htmlcov/
 .tox/
 .nox/
+test_out.txt
 
 # Logs
 *.log
