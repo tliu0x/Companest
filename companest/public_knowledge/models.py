@@ -6,14 +6,22 @@ Matches contracts/public_knowledge_doc.schema.json.
 
 from datetime import datetime
 from typing import List, Literal, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PublicKnowledgeDoc(BaseModel):
     """A structured document in the shared public knowledge pool."""
 
     doc_id: str = Field(..., description="Unique document identifier (UUID)")
+
+    @field_validator("doc_id")
+    @classmethod
+    def validate_doc_id_is_uuid(cls, v: str) -> str:
+        """Enforce that doc_id is a valid UUID string, matching the JSON schema."""
+        UUID(v)  # raises ValueError if not a valid UUID
+        return v
     source_type: Literal["news", "research", "filing", "social", "prediction_market"] = Field(
         ..., description="Category of the information source"
     )
