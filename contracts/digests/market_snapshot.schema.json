@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "digests/market_snapshot.schema.json",
+  "title": "MarketSnapshotDigest",
+  "description": "Snapshot of markets a trader is actively watching. Pushed periodically to Companest.",
+  "type": "object",
+  "required": [
+    "company_id",
+    "digest_type",
+    "schema_version",
+    "snapshot_timestamp",
+    "idempotency_key",
+    "markets"
+  ],
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "Company that owns this digest"
+    },
+    "digest_type": {
+      "type": "string",
+      "const": "market_snapshot"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "snapshot_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this snapshot was taken (ISO8601)"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "description": "Unique key for deduplication"
+    },
+    "markets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "title", "yes_price", "status", "last_updated"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "title": { "type": "string" },
+          "yes_price": { "type": "number", "minimum": 0, "maximum": 100 },
+          "volume": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string", "enum": ["open", "closed", "settled"] },
+          "last_updated": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
