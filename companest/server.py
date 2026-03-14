@@ -747,6 +747,26 @@ class CompanestAPIServer:
             except ImportError:
                 logger.info("NiceGUI not installed, admin UI disabled")
 
+        # --- Public Knowledge & Digest Routers (v1) ---
+        import os
+        if os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true"):
+            from .public_knowledge.router import create_public_knowledge_router
+            app.include_router(create_public_knowledge_router())
+            logger.info("Public Knowledge API enabled")
+
+            from .digests.router import router as digest_router
+            from .digests.router import configure as configure_digests
+            from .digests.s3_store import DigestS3Store
+            digest_s3 = DigestS3Store(
+                bucket=os.environ.get("DIGEST_S3_BUCKET", ""),
+                prefix=os.environ.get("DIGEST_S3_PREFIX", "companest-digests/"),
+                region=os.environ.get("DIGEST_S3_REGION", "us-east-1"),
+                endpoint_url=os.environ.get("DIGEST_S3_ENDPOINT_URL") or None,
+            )
+            configure_digests(digest_s3)
+            app.include_router(digest_router)
+            logger.info("Digest API enabled")
+
         self._app = app
         return app
 

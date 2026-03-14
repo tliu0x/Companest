@@ -1,0 +1,12 @@
+version: "1.0.0"
+date: "2026-03-14"
+notes: "Initial contract freeze for v1 parallel development"
+
+# Tag prefixes are soft conventions, not enforced by schema.
+# Use these prefixes for consistency across repos.
+tag_prefixes:
+  - "topic:"       # topic:macro, topic:politics, topic:crypto
+  - "market:"      # market:kalshi, market:polymarket
+  - "entity:"      # entity:fed, entity:trump
+  - "event:"       # event:fomc-2026-03, event:cpi-2026-04
+  - "source:"      # source:reuters, source:kalshi-rules

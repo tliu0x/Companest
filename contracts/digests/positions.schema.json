@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "digests/positions.schema.json",
+  "title": "PositionsDigest",
+  "description": "Current positions held by a trader. Company-private.",
+  "type": "object",
+  "required": [
+    "company_id",
+    "digest_type",
+    "schema_version",
+    "snapshot_timestamp",
+    "idempotency_key",
+    "positions"
+  ],
+  "properties": {
+    "company_id": { "type": "string" },
+    "digest_type": { "type": "string", "const": "positions" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "snapshot_timestamp": { "type": "string", "format": "date-time" },
+    "idempotency_key": { "type": "string" },
+    "positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "side", "quantity", "avg_price"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "market_title": { "type": "string" },
+          "side": { "type": "string", "enum": ["yes", "no"] },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "avg_price": { "type": "number", "minimum": 0, "maximum": 100 },
+          "current_price": { "type": "number", "minimum": 0, "maximum": 100 },
+          "unrealized_pnl": { "type": "number" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

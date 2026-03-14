@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "digests/settlement.schema.json",
+  "title": "SettlementDigest",
+  "description": "Recent settlement events for a trader. Company-private.",
+  "type": "object",
+  "required": [
+    "company_id",
+    "digest_type",
+    "schema_version",
+    "snapshot_timestamp",
+    "idempotency_key",
+    "settlements"
+  ],
+  "properties": {
+    "company_id": { "type": "string" },
+    "digest_type": { "type": "string", "const": "settlement" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "snapshot_timestamp": { "type": "string", "format": "date-time" },
+    "idempotency_key": { "type": "string" },
+    "settlements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ticker", "outcome", "pnl", "settled_at"],
+        "properties": {
+          "ticker": { "type": "string" },
+          "market_title": { "type": "string" },
+          "outcome": { "type": "string", "enum": ["yes", "no"] },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "pnl": { "type": "number", "description": "Settlement P&L in cents" },
+          "settled_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

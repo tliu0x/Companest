@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "digests/risk.schema.json",
+  "title": "RiskDigest",
+  "description": "Risk metrics for a trader. Company-private.",
+  "type": "object",
+  "required": [
+    "company_id",
+    "digest_type",
+    "schema_version",
+    "snapshot_timestamp",
+    "idempotency_key",
+    "total_exposure",
+    "position_count",
+    "risk_level"
+  ],
+  "properties": {
+    "company_id": { "type": "string" },
+    "digest_type": { "type": "string", "const": "risk" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "snapshot_timestamp": { "type": "string", "format": "date-time" },
+    "idempotency_key": { "type": "string" },
+    "total_exposure": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total capital at risk in cents"
+    },
+    "position_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of open positions"
+    },
+    "max_single_position": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Largest single position exposure in cents"
+    },
+    "daily_loss": {
+      "type": "number",
+      "description": "Current day loss in cents (negative = loss)"
+    },
+    "daily_loss_limit": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Configured daily loss limit in cents"
+    },
+    "position_limit": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Configured max number of positions"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "description": "Computed risk level"
+    }
+  },
+  "additionalProperties": false
+}

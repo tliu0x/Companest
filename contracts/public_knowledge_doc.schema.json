@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public_knowledge_doc.schema.json",
+  "title": "PublicKnowledgeDoc",
+  "description": "A structured document in the shared public knowledge pool. Any repo producing public knowledge must conform to this schema.",
+  "type": "object",
+  "required": [
+    "doc_id",
+    "source_type",
+    "title",
+    "summary",
+    "tags",
+    "source_url",
+    "published_at",
+    "fresh_until",
+    "confidence",
+    "visibility"
+  ],
+  "properties": {
+    "doc_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique document identifier"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["news", "research", "filing", "social", "prediction_market"],
+      "description": "Category of the information source"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "Document title"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 5000,
+      "description": "Document summary or abstract"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "description": "Free-text tags. Use prefixes: topic:, market:, entity:, event:, source:"
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Original source URL"
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the source was originally published (ISO8601)"
+    },
+    "fresh_until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Document is considered fresh/relevant until this time (ISO8601)"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Confidence score of the information (0=unreliable, 1=highly reliable)"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["public", "company_private"],
+      "description": "public = shared across all companies; company_private = restricted to one company"
+    }
+  },
+  "additionalProperties": false
+}

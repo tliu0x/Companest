@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "digests/pnl.schema.json",
+  "title": "PnLDigest",
+  "description": "Profit and loss summary for a trader. Company-private.",
+  "type": "object",
+  "required": [
+    "company_id",
+    "digest_type",
+    "schema_version",
+    "snapshot_timestamp",
+    "idempotency_key",
+    "realized_pnl",
+    "unrealized_pnl",
+    "total_pnl"
+  ],
+  "properties": {
+    "company_id": { "type": "string" },
+    "digest_type": { "type": "string", "const": "pnl" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "snapshot_timestamp": { "type": "string", "format": "date-time" },
+    "idempotency_key": { "type": "string" },
+    "daily_pnl": { "type": "number", "description": "P&L for current day in cents" },
+    "weekly_pnl": { "type": "number", "description": "P&L for current week in cents" },
+    "realized_pnl": { "type": "number", "description": "Total realized P&L in cents" },
+    "unrealized_pnl": { "type": "number", "description": "Total unrealized P&L in cents" },
+    "total_pnl": { "type": "number", "description": "realized + unrealized in cents" }
+  },
+  "additionalProperties": false
+}
