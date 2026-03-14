@@ -626,15 +626,44 @@ class Pi:
             tools=mem_tools,
         )
 
-        # Proxy env vars are set once at startup via Pi.configure_proxy()
-        result = await Runner.run(agent, task)
-        result_text = result.final_output or ""
-        if not result_text:
-            raise PiError(
-                f"Pi {self.team_id}/{self.id} returned empty response",
-                details={"model": effective_model},
-            )
-        return result_text
+        # If proxy env vars are not set (no LiteLLM), configure direct
+        # connection for non-OpenAI models via OpenAIChatCompletionsModel.
+        import os
+        direct_client = None
+        if not os.environ.get("OPENAI_BASE_URL"):
+            if effective_model.startswith("deepseek"):
+                from agents import OpenAIChatCompletionsModel
+                import openai
+                direct_client = openai.AsyncOpenAI(
+                    base_url="https://api.deepseek.com",
+                    api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                )
+                agent.model = OpenAIChatCompletionsModel(
+                    model=effective_model, openai_client=direct_client,
+                )
+            elif effective_model.startswith(("moonshot", "kimi")):
+                from agents import OpenAIChatCompletionsModel
+                import openai
+                direct_client = openai.AsyncOpenAI(
+                    base_url="https://api.moonshot.cn/v1",
+                    api_key=os.environ.get("MOONSHOT_API_KEY", ""),
+                )
+                agent.model = OpenAIChatCompletionsModel(
+                    model=effective_model, openai_client=direct_client,
+                )
+
+        try:
+            result = await Runner.run(agent, task)
+            result_text = result.final_output or ""
+            if not result_text:
+                raise PiError(
+                    f"Pi {self.team_id}/{self.id} returned empty response",
+                    details={"model": effective_model},
+                )
+            return result_text
+        finally:
+            if direct_client:
+                await direct_client.close()
 
 
 

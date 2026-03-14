@@ -955,7 +955,7 @@ class CompanestOrchestrator:
         # Cost gate evaluation
         if not skip_cost_check and hasattr(self, "cost_gate"):
             lead_config = team.get_lead_config()
-            model = lead_config.model if lead_config else "claude-sonnet-4-5-20250929"
+            model = lead_config.model if lead_config else "deepseek-chat"
 
             decision = await self.cost_gate.evaluate(
                 task, team_id, model, priority=priority,
@@ -1048,7 +1048,7 @@ class CompanestOrchestrator:
         if hasattr(self, "cost_gate") and not skip_cost_check:
             try:
                 lead_config = team.get_lead_config()
-                model = lead_config.model if lead_config else "claude-sonnet-4-5-20250929"
+                model = lead_config.model if lead_config else "deepseek-chat"
                 estimate = self.cost_gate.estimate_cost(task, model, team_id)
                 self.cost_gate.record_spending(
                     team_id=team_id,

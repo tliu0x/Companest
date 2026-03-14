@@ -612,7 +612,7 @@ class CostGate:
                 priority=priority,
             )
         elif user_choice == "downgrade":
-            estimate.target_model = estimate.suggested_downgrade or "claude-haiku-4-5-20251001"
+            estimate.target_model = estimate.suggested_downgrade or "deepseek-chat"
             return CostDecision(
                 action="auto_approve", estimate=estimate,
                 reason="User approved (downgraded)", approval_id=approval_id,

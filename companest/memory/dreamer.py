@@ -513,11 +513,32 @@ class Dreamer:
 
     #  LLM Helper 
 
+    @staticmethod
+    def _detect_provider(model: str, proxy_enabled: bool = False) -> str:
+        """Determine which SDK to use based on model name."""
+        if model.startswith(("claude-", "anthropic/")):
+            return "anthropic"
+        if model.startswith((
+            "deepseek", "moonshot", "kimi", "qwen", "gpt-", "o3", "o4",
+            "openai/", "mistral", "llama", "gemma", "yi-", "glm-", "qwq",
+        )):
+            return "openai"
+        return "openai" if proxy_enabled else "anthropic"
+
     async def _call_llm(self, prompt: str) -> str:
         """
-        Minimal LLM call using Anthropic SDK directly.
-        Uses cheap model for consolidation work.
+        Minimal LLM call. Routes to Anthropic or OpenAI-compatible SDK
+        based on the model name.
         """
+        proxy_enabled = bool(self.proxy_config and self.proxy_config.enabled)
+        provider = self._detect_provider(self.model, proxy_enabled)
+
+        if provider == "anthropic":
+            return await self._call_llm_anthropic(prompt)
+        return await self._call_llm_openai(prompt)
+
+    async def _call_llm_anthropic(self, prompt: str) -> str:
+        """Call LLM via Anthropic SDK (for Claude models)."""
         try:
             import anthropic
         except ImportError:
@@ -544,6 +565,42 @@ class Dreamer:
                 if hasattr(block, "text") and block.text:
                     parts.append(block.text)
             return "\n".join(parts)
+        finally:
+            await client.close()
+
+    async def _call_llm_openai(self, prompt: str) -> str:
+        """Call LLM via OpenAI-compatible SDK (for DeepSeek, Kimi, etc.)."""
+        try:
+            import openai
+        except ImportError:
+            raise DreamerError(
+                "openai SDK not installed. Run: pip install openai"
+            )
+
+        kwargs: Dict[str, Any] = {}
+        if self.proxy_config and self.proxy_config.enabled:
+            kwargs["base_url"] = self.proxy_config.base_url.rstrip("/") + "/v1"
+            kwargs["api_key"] = (
+                self.proxy_config.default_key or self.proxy_config.master_key
+            )
+        else:
+            # Direct connection: resolve base_url and api_key from model name
+            import os
+            if self.model.startswith("deepseek"):
+                kwargs["base_url"] = "https://api.deepseek.com"
+                kwargs["api_key"] = os.environ.get("DEEPSEEK_API_KEY", "")
+            elif self.model.startswith(("moonshot", "kimi")):
+                kwargs["base_url"] = "https://api.moonshot.cn/v1"
+                kwargs["api_key"] = os.environ.get("MOONSHOT_API_KEY", "")
+
+        client = openai.AsyncOpenAI(**kwargs)
+        try:
+            response = await client.chat.completions.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content or ""
         finally:
             await client.close()
 

@@ -43,7 +43,7 @@ class TeamConfig:
         - always_on: false
 
         #### Pi: analyst
-        - model: claude-sonnet-4-5-20250929
+        - model: deepseek-chat
         - tools: web_search, memory_read, memory_write
         - max_turns: 10
     """
@@ -550,7 +550,7 @@ def _parse_pi_sections(text: str) -> List[PiConfig]:
         pi_id = sections[i].strip()
         body = sections[i + 1] if i + 1 < len(sections) else ""
 
-        model = _extract_field(body, "model", "claude-sonnet-4-5-20250929")
+        model = _extract_field(body, "model", "deepseek-chat")
         tools_str = _extract_field(body, "tools")
         tools = [t.strip() for t in tools_str.split(",")] if tools_str else []
         max_turns = int(_extract_field(body, "max_turns", "10"))
