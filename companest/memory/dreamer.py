@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .manager import MemoryManager
 from ..exceptions import CompanestError
+from ..model_routing import detect_provider, resolve_model_endpoint
 
 if TYPE_CHECKING:
     from ..config import ProxyConfig
@@ -516,14 +517,7 @@ class Dreamer:
     @staticmethod
     def _detect_provider(model: str, proxy_enabled: bool = False) -> str:
         """Determine which SDK to use based on model name."""
-        if model.startswith(("claude-", "anthropic/")):
-            return "anthropic"
-        if model.startswith((
-            "deepseek", "moonshot", "kimi", "qwen", "gpt-", "o3", "o4",
-            "openai/", "mistral", "llama", "gemma", "yi-", "glm-", "qwq",
-        )):
-            return "openai"
-        return "openai" if proxy_enabled else "anthropic"
+        return detect_provider(model, proxy_enabled)
 
     async def _call_llm(self, prompt: str) -> str:
         """
@@ -577,21 +571,15 @@ class Dreamer:
                 "openai SDK not installed. Run: pip install openai"
             )
 
+        # Resolve endpoint — raises ConfigurationError for missing keys
+        # or unsupported direct models.
+        endpoint = resolve_model_endpoint(self.model, self.proxy_config)
+
         kwargs: Dict[str, Any] = {}
-        if self.proxy_config and self.proxy_config.enabled:
-            kwargs["base_url"] = self.proxy_config.base_url.rstrip("/") + "/v1"
-            kwargs["api_key"] = (
-                self.proxy_config.default_key or self.proxy_config.master_key
-            )
-        else:
-            # Direct connection: resolve base_url and api_key from model name
-            import os
-            if self.model.startswith("deepseek"):
-                kwargs["base_url"] = "https://api.deepseek.com"
-                kwargs["api_key"] = os.environ.get("DEEPSEEK_API_KEY", "")
-            elif self.model.startswith(("moonshot", "kimi")):
-                kwargs["base_url"] = "https://api.moonshot.cn/v1"
-                kwargs["api_key"] = os.environ.get("MOONSHOT_API_KEY", "")
+        if endpoint.base_url:
+            kwargs["base_url"] = endpoint.base_url
+        if endpoint.api_key:
+            kwargs["api_key"] = endpoint.api_key
 
         client = openai.AsyncOpenAI(**kwargs)
         try:
@@ -600,6 +588,13 @@ class Dreamer:
                 max_tokens=4096,
                 messages=[{"role": "user", "content": prompt}],
             )
+            if not response.choices:
+                raise DreamerError(
+                    f"LLM returned empty choices for model '{self.model}' "
+                    f"(provider: openai-compatible). "
+                    f"The model may be overloaded or the request was filtered.",
+                    details={"model": self.model},
+                )
             return response.choices[0].message.content or ""
         finally:
             await client.close()

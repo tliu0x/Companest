@@ -41,6 +41,7 @@ from .tools import (
 )
 from .cascade import CascadeEngine, CascadeMetrics
 from .exceptions import PiError
+from .model_routing import detect_provider, resolve_model_endpoint
 
 if TYPE_CHECKING:
     from .config import ProxyConfig
@@ -101,16 +102,7 @@ class Pi:
 
     @staticmethod
     def _detect_provider(model: str, proxy_enabled: bool = False) -> str:
-        if model.startswith(("claude-", "anthropic/")):
-            return "anthropic"
-        elif model.startswith(("gpt-", "o3", "o4", "openai/")):
-            return "openai"
-        elif model.startswith((
-            "deepseek", "moonshot", "kimi", "qwen",
-            "mistral", "llama", "gemma", "yi-", "glm-", "qwq",
-        )):
-            return "openai"
-        return "openai" if proxy_enabled else "anthropic"
+        return detect_provider(model, proxy_enabled)
 
     @staticmethod
     def configure_proxy(proxy_config: "ProxyConfig") -> None:
@@ -548,25 +540,28 @@ class Pi:
             )
         else:
             client = anthropic.AsyncAnthropic()
-        response = await client.messages.create(
-            model=effective_model,
-            max_tokens=8192,
-            system=system,
-            messages=[{"role": "user", "content": task}],
-        )
-
-        result_parts = []
-        for block in response.content:
-            if hasattr(block, "text") and block.text:
-                result_parts.append(block.text)
-
-        result_text = "\n\n".join(result_parts)
-        if not result_text:
-            raise PiError(
-                f"Pi {self.team_id}/{self.id} returned empty response",
-                details={"model": effective_model},
+        try:
+            response = await client.messages.create(
+                model=effective_model,
+                max_tokens=8192,
+                system=system,
+                messages=[{"role": "user", "content": task}],
             )
-        return result_text
+
+            result_parts = []
+            for block in response.content:
+                if hasattr(block, "text") and block.text:
+                    result_parts.append(block.text)
+
+            result_text = "\n\n".join(result_parts)
+            if not result_text:
+                raise PiError(
+                    f"Pi {self.team_id}/{self.id} returned empty response",
+                    details={"model": effective_model},
+                )
+            return result_text
+        finally:
+            await client.close()
 
     async def _run_openai(
         self, task: str, system: str, model_override: Optional[str] = None,
@@ -626,34 +621,24 @@ class Pi:
             tools=mem_tools,
         )
 
-        # If proxy env vars are not set (no LiteLLM), configure direct
-        # connection for non-OpenAI models via OpenAIChatCompletionsModel.
-        import os
+        # Resolve endpoint: raises ConfigurationError for missing keys
+        # or unsupported direct models.
+        endpoint = resolve_model_endpoint(effective_model, self.proxy_config)
+
         direct_client = None
-        if not os.environ.get("OPENAI_BASE_URL"):
-            if effective_model.startswith("deepseek"):
-                from agents import OpenAIChatCompletionsModel
-                import openai
-                direct_client = openai.AsyncOpenAI(
-                    base_url="https://api.deepseek.com",
-                    api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
-                )
-                agent.model = OpenAIChatCompletionsModel(
-                    model=effective_model, openai_client=direct_client,
-                )
-            elif effective_model.startswith(("moonshot", "kimi")):
-                from agents import OpenAIChatCompletionsModel
-                import openai
-                direct_client = openai.AsyncOpenAI(
-                    base_url="https://api.moonshot.cn/v1",
-                    api_key=os.environ.get("MOONSHOT_API_KEY", ""),
-                )
-                agent.model = OpenAIChatCompletionsModel(
-                    model=effective_model, openai_client=direct_client,
-                )
+        if endpoint.needs_chat_completions_wrapper:
+            from agents import OpenAIChatCompletionsModel
+            import openai
+            direct_client = openai.AsyncOpenAI(
+                base_url=endpoint.base_url,
+                api_key=endpoint.api_key,
+            )
+            agent.model = OpenAIChatCompletionsModel(
+                model=effective_model, openai_client=direct_client,
+            )
 
         try:
-            result = await Runner.run(agent, task)
+            result = await Runner.run(agent, task, max_turns=self.max_turns)
             result_text = result.final_output or ""
             if not result_text:
                 raise PiError(
