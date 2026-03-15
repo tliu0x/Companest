@@ -1001,7 +1001,7 @@ def cmd_company_add_team(args) -> int:
             f"- enabled: true\n"
             f"\n"
             f"#### Pi: {pi_id}\n"
-            f"- model: claude-sonnet-4-5-20250929\n"
+            f"- model: deepseek-chat\n"
             f"- tools: researcher\n"
             f"- max_turns: 10\n"
         )

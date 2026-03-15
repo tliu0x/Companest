@@ -9,13 +9,13 @@
 ## Pis
 
 ### coder
-- model: claude-sonnet-4-5-20250929
+- model: deepseek-chat
 - tools: coder
 - tools_deny: none
 - max_turns: 15
 
 ### reviewer
-- model: claude-sonnet-4-5-20250929
+- model: deepseek-chat
 - tools: code-reviewer
 - tools_deny: none
 - max_turns: 10

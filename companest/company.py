@@ -98,7 +98,7 @@ class CompanySchedule(BaseModel):
 
 class CompanyCEOConfig(BaseModel):
     """Configuration for the company's CEO Agent (a special Pi)."""
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = "deepseek-chat"
     max_turns: int = 50
     cycle_interval: int = 1800       # CEO operating cycle interval (seconds)
     cycle_prompt: Optional[str] = None   # Override: if set, use this instead of ceo_engine

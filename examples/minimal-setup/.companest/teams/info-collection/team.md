@@ -9,6 +9,6 @@
 ## Pis
 
 ### collector
-- model: claude-haiku-4-5-20251001
+- model: deepseek-chat
 - tools: collector
 - max_turns: 5

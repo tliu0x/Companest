@@ -172,7 +172,9 @@ For a documented production baseline, start from [`deploy/config.prod.md`](./dep
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes for Claude models | Anthropic API key |
+| `DEEPSEEK_API_KEY` | Yes (default provider) | DeepSeek API key (default model: deepseek-chat) |
+| `MOONSHOT_API_KEY` | Yes (for routing) | Kimi/Moonshot API key (router model: kimi-k2.5) |
+| `ANTHROPIC_API_KEY` | Optional | Anthropic API key (for Claude models, not required by default) |
 | `OPENAI_API_KEY` | Optional | OpenAI provider support |
 | `COMPANEST_API_TOKEN` | Required in production | REST API bearer token |
 | `COMPANEST_MASTER_TOKEN` | Required only when gateway mode is enabled | Gateway auth token |

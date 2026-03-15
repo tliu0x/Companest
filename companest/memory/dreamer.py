@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .manager import MemoryManager
 from ..exceptions import CompanestError
+from ..model_routing import detect_provider, resolve_model_endpoint
 
 if TYPE_CHECKING:
     from ..config import ProxyConfig
@@ -98,7 +99,7 @@ class Dreamer:
         self,
         memory: MemoryManager,
         proxy_config: Optional["ProxyConfig"] = None,
-        model: str = "claude-haiku-4-5-20251001",
+        model: str = "deepseek-chat",
         short_tier_max_age_hours: int = 24,
         min_importance_to_keep: float = 0.3,
         max_access_for_gc: int = 2,
@@ -513,11 +514,25 @@ class Dreamer:
 
     #  LLM Helper 
 
+    @staticmethod
+    def _detect_provider(model: str, proxy_enabled: bool = False) -> str:
+        """Determine which SDK to use based on model name."""
+        return detect_provider(model, proxy_enabled)
+
     async def _call_llm(self, prompt: str) -> str:
         """
-        Minimal LLM call using Anthropic SDK directly.
-        Uses cheap model for consolidation work.
+        Minimal LLM call. Routes to Anthropic or OpenAI-compatible SDK
+        based on the model name.
         """
+        proxy_enabled = bool(self.proxy_config and self.proxy_config.enabled)
+        provider = self._detect_provider(self.model, proxy_enabled)
+
+        if provider == "anthropic":
+            return await self._call_llm_anthropic(prompt)
+        return await self._call_llm_openai(prompt)
+
+    async def _call_llm_anthropic(self, prompt: str) -> str:
+        """Call LLM via Anthropic SDK (for Claude models)."""
         try:
             import anthropic
         except ImportError:
@@ -544,6 +559,43 @@ class Dreamer:
                 if hasattr(block, "text") and block.text:
                     parts.append(block.text)
             return "\n".join(parts)
+        finally:
+            await client.close()
+
+    async def _call_llm_openai(self, prompt: str) -> str:
+        """Call LLM via OpenAI-compatible SDK (for DeepSeek, Kimi, etc.)."""
+        try:
+            import openai
+        except ImportError:
+            raise DreamerError(
+                "openai SDK not installed. Run: pip install openai"
+            )
+
+        # Resolve endpoint — raises ConfigurationError for missing keys
+        # or unsupported direct models.
+        endpoint = resolve_model_endpoint(self.model, self.proxy_config)
+
+        kwargs: Dict[str, Any] = {}
+        if endpoint.base_url:
+            kwargs["base_url"] = endpoint.base_url
+        if endpoint.api_key:
+            kwargs["api_key"] = endpoint.api_key
+
+        client = openai.AsyncOpenAI(**kwargs)
+        try:
+            response = await client.chat.completions.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if not response.choices:
+                raise DreamerError(
+                    f"LLM returned empty choices for model '{self.model}' "
+                    f"(provider: openai-compatible). "
+                    f"The model may be overloaded or the request was filtered.",
+                    details={"model": self.model},
+                )
+            return response.choices[0].message.content or ""
         finally:
             await client.close()
 

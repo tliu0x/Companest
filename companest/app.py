@@ -255,7 +255,7 @@ class CompanyBuilder:
         # Pi sections
         for pi_def in pis:
             pi_id = pi_def.get("id", "agent")
-            model = pi_def.get("model", "claude-sonnet-4-5-20250929")
+            model = pi_def.get("model", "deepseek-chat")
             tools = pi_def.get("tools", "researcher")
             max_turns = pi_def.get("max_turns", 10)
             lines.append(f"#### Pi: {pi_id}")

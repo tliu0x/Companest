@@ -99,7 +99,7 @@ Minimal example:
   "teams": [
     {
       "id": "analyst-team",
-      "team_md": "# Team: analyst-team\n- role: research\n- lead_pi: analyst\n- enabled: true\n- mode: cascade\n\n#### Pi: analyst\n- model: claude-sonnet-4-5-20250929\n- tools: memory_read, memory_write, brave_search\n- max_turns: 12",
+      "team_md": "# Team: analyst-team\n- role: research\n- lead_pi: analyst\n- enabled: true\n- mode: cascade\n\n#### Pi: analyst\n- model: deepseek-chat\n- tools: memory_read, memory_write, brave_search\n- max_turns: 12",
       "pis": [
         {
           "id": "analyst",

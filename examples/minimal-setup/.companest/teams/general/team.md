@@ -5,6 +5,6 @@
 - mode: default
 
 #### Pi: assistant
-- model: claude-sonnet-4-5-20250929
+- model: deepseek-chat
 - tools: pi-core
 - max_turns: 10
