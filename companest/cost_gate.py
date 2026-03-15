@@ -611,8 +611,8 @@ class CostGate:
                 reason="User approved", approval_id=approval_id,
                 priority=priority,
             )
-        elif user_choice == "downgrade":
-            estimate.target_model = estimate.suggested_downgrade or "claude-haiku-4-5-20251001"
+        elif user_choice == "downgrade" and estimate.suggested_downgrade:
+            estimate.target_model = estimate.suggested_downgrade
             return CostDecision(
                 action="auto_approve", estimate=estimate,
                 reason="User approved (downgraded)", approval_id=approval_id,
@@ -796,6 +796,9 @@ class UserNotifier:
     ) -> None:
         """Send approval request to user."""
         total_tokens = estimate.estimated_input_tokens + estimate.estimated_output_tokens
+        choices = "approve / reject"
+        if estimate.suggested_downgrade:
+            choices = f"approve / downgrade ({estimate.suggested_downgrade}) / reject"
         msg = (
             f"*Companest Finance Approval Request*\n"
             f"\n"
@@ -805,7 +808,7 @@ class UserNotifier:
             f"Today's spending: ${today_spent:.2f} / ${daily_limit:.2f}\n"
             f"\n"
             f"Approval ID: {approval_id}\n"
-            f"Reply: approve / downgrade / reject"
+            f"Reply: {choices}"
         )
         logger.info(f"[CostGate] Approval request: {approval_id} (${estimate.estimated_cost_usd:.2f})")
         await self._send(msg, {
