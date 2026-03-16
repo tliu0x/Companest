@@ -1,9 +1,9 @@
-# CLAUDE.md
+# AGENTS.md
 
 ## Scope
 
-- This is the root Claude guide for this repository. If a deeper directory adds its own `CLAUDE.md`, the deeper file takes precedence for that subtree.
-- `AGENTS.md` is the sister guide for Codex. Keep `CLAUDE.md` and `AGENTS.md` aligned on project facts, commands, safety rules, and workflows; they serve different agents but should carry the same core knowledge.
+- This is the root agent guide for this repository. If a deeper directory adds its own `AGENTS.md`, the deeper file takes precedence for that subtree.
+- There is currently no root `CLAUDE.md` here. If one is added later, keep it aligned with this file so Codex and Claude see the same core project knowledge.
 
 ## Project Snapshot
 
