@@ -1,113 +1,67 @@
-# CLAUDE.md -- Agent Guidelines for Companest
+# CLAUDE.md
 
-## Project Overview
+## Scope
 
-Companest is a multi-agent company incubator and control plane. It runs shared teams and company-private teams in one runtime, routes work across teams, manages background execution (jobs, scheduler), and exposes a REST API for multi-company operation.
+- This is the root Claude guide for this repository. If a deeper directory adds its own `CLAUDE.md`, the deeper file takes precedence for that subtree.
+- `AGENTS.md` is the sister guide for Codex. Keep `CLAUDE.md` and `AGENTS.md` aligned on project facts, commands, safety rules, and workflows; they serve different agents but should carry the same core knowledge.
 
-## Tech Stack
+## Project Snapshot
 
-- **Python 3.10+**
-- **Pydantic** >= 2.0 -- configuration and data validation
-- **httpx** -- async HTTP client
-- **FastAPI** + **uvicorn** -- REST API server (optional `[server]` extra)
-- **anthropic** + **claude-agent-sdk** -- Claude backend (optional `[claude]` extra)
-- **openai-agents** -- OpenAI backend (optional `[openai]` extra)
-- **APScheduler** + **SQLAlchemy** + **aiosqlite** -- scheduler (optional `[scheduler]` extra)
-- **qdrant-client** + **fastembed** -- vector memory (optional `[qdrant]` extra)
-- **boto3** -- S3 archiver (optional `[s3]` extra)
-- **websockets** -- gateway mode (optional `[gateway]` extra)
-- **PyYAML** -- config parsing
-- **defusedxml** -- safe XML handling
+- Companest is a multi-company control plane for agent-native teams, jobs, schedules, memory, and company-scoped execution.
+- The codebase mixes CLI orchestration, API serving, background execution, company registration, team routing, memory backends, and public knowledge tooling.
+- Optional extras in `pyproject.toml` gate major capabilities such as server mode, scheduler support, gateway mode, Qdrant, UI, and provider integrations.
 
-## Architecture
+## Start Here
 
-- **Orchestrator** (`orchestrator.py`): Central runtime that loads config, boots teams, manages company lifecycle, and coordinates execution.
-- **Teams** (`team.py`): Groups of Pis (agents) with execution modes (default, cascade, loop, council, collaborative, conditional).
-- **Pis** (`pi.py`): Individual agents with soul files, model bindings, and tool access.
-- **Company isolation** (`company.py`): Multi-tenant scoping for jobs, routing, schedules, memory, and tools.
-- **Model routing** (`model_routing.py`, `router.py`): Smart routing across providers (DeepSeek, Moonshot, Anthropic, OpenAI, LiteLLM).
-- **Jobs** (`jobs.py`): Background job execution with lifecycle management.
-- **Scheduler** (`scheduler.py`, `user_scheduler.py`): Cron-style task scheduling per company.
-- **Server** (`server.py`): FastAPI REST API for fleet management, company CRUD, job submission.
-- **Tools** (`tools.py`): Tool registry with company-scoped MCP tool support.
-- **Config** (`config.py`, `parser.py`): Markdown and JSON config loading with env var interpolation.
+- CLI entry and operator workflows: `companest/cli.py`
+- App and API serving: `companest/app.py`, `companest/server.py`, `companest/admin.py`
+- Configuration and discovery: `companest/config.py`, `README.md`, `examples/minimal-setup/.companest/config.md`
+- Teams, Pis, routing, and execution modes: `companest/team.py`, `companest/pi.py`, `companest/router.py`, `companest/modes/`, `companest/orchestrator.py`, `companest/multi_team.py`
+- Jobs, background work, and scheduling: `companest/jobs.py`, `companest/background.py`, `companest/scheduler.py`, `companest/user_scheduler.py`, `companest/watcher.py`
+- Memory, digests, and public knowledge: `companest/memory/`, `companest/digests/`, `companest/public_knowledge/`
+- Company onboarding and public examples: `examples/`, `deploy/config.prod.md`, `docs/`
 
-## Key Files
+## Source Of Truth
 
-| File | Role |
-|------|------|
-| `companest/orchestrator.py` | Central runtime, boots teams and companies |
-| `companest/team.py` | Team config, registry, execution modes |
-| `companest/pi.py` | Individual agent (Pi) config and execution |
-| `companest/company.py` | Multi-tenant company isolation |
-| `companest/server.py` | FastAPI REST API |
-| `companest/router.py` | Smart model routing |
-| `companest/model_routing.py` | Provider bindings and model selection |
-| `companest/jobs.py` | Background job manager |
-| `companest/scheduler.py` | APScheduler integration |
-| `companest/tools.py` | Tool registry and MCP tool support |
-| `companest/config.py` | Config loading and validation |
-| `companest/parser.py` | Markdown/JSON config parser |
-| `companest/cli.py` | CLI entry point |
-| `companest/feeds.py` | Market data feeds (Polymarket, Kalshi, Metaculus) |
-| `companest/cost_gate.py` | Cost tracking and budget enforcement |
-| `companest/archiver.py` | S3/local memory archiving |
-| `companest/workspace.py` | Workspace management |
+- Config discovery order is documented in `README.md` and implemented in the configuration layer. Preserve backward compatibility unless the change is deliberate and documented.
+- Treat `companest/config.py` as canonical for config structure and environment resolution.
+- If a feature depends on an optional extra, update `pyproject.toml`, docs, and any validation steps together.
 
-## Code Style
-
-- Follow existing patterns in the codebase.
-- Use type hints on all function signatures.
-- Use `async`/`await` for all I/O operations.
-- Pydantic models for configuration and data shapes.
-- Keep modules focused -- one responsibility per file.
-- Use `defusedxml` instead of stdlib XML parsers.
-
-## Testing
+## Common Commands
 
 ```bash
-# Run all tests (excludes live_network by default)
+pip install -e ".[dev]"
+companest validate
+companest serve
 pytest tests/ -q
-
-# Run live network tests (calls real external services)
 pytest -m live_network -q
-
-# Syntax check
 python -m compileall companest tests -q
 ```
 
-- Framework: `pytest` + `pytest-asyncio`
-- Tests in `tests/`, marker `live_network` for tests that hit real APIs.
-- Mock external services in non-live tests.
-- See `pyproject.toml` `[tool.pytest.ini_options]` for default markers.
+## Working Rules
 
-## Commit Rules
+- Keep examples runnable. If you change config shape, manifests, or onboarding flow, update `README.md`, `examples/`, and `deploy/config.prod.md` in the same change.
+- For CLI or API behavior changes, read `companest/cli.py`, `companest/app.py`, `companest/server.py`, and the relevant tests before editing.
+- For team-mode behavior changes, inspect the matching file in `companest/modes/` and the paired tests in `tests/test_modes.py`, `tests/test_team_mode.py`, and nearby mode-specific tests.
+- For memory, digest, or public-knowledge changes, run the focused tests such as `tests/test_memory_*`, `tests/test_digests.py`, and `tests/test_public_knowledge.py`.
+- Keep changes scoped. Do not mix provider, scheduler, and API refactors unless the task truly spans them.
 
-- **Commit messages must be in English. No Chinese characters in commit messages.**
-- Explanatory comments in code can be in any language.
-- Use conventional commit style: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`.
-- Keep commits focused -- one logical change per commit.
-- See `CONTRIBUTING.md` for PR expectations.
+## Code Conventions
 
-## Security Rules
+- Follow existing module style; this repo contains both synchronous CLI code and async/network-facing code.
+- Prefer `pathlib.Path` and centralized config parsing over scattered path or env handling.
+- Keep public interfaces stable where possible because examples and external company manifests depend on them.
+- When adding new config or runtime behavior, favor explicit validation and clear operator-facing errors.
 
-- **Never commit personal information**: no real API keys, tokens, credentials, or email addresses.
-- Use placeholders in examples and documentation.
-- Secrets belong in `.env` (gitignored) or environment variables, never in source code or config files checked into git.
-- Company-scoped data must respect isolation boundaries -- a company's jobs, memory, routing, and tools must not leak to other companies.
-- Use `defusedxml` for any XML parsing to prevent XXE attacks.
+## Security And Privacy
 
-## Config System
+- Never hardcode API keys, bearer tokens, SSH CIDRs, LiteLLM keys, or provider credentials.
+- Production auth defaults matter. Do not weaken `COMPANEST_API_TOKEN`, `COMPANEST_MASTER_TOKEN`, or shell/tool restrictions without updating docs and tests.
+- Review `SECURITY.md` before changing deployment or gateway behavior.
+- Use placeholders like `<API_TOKEN>`, `<SECRET>`, and `<CIDR>` in docs and examples.
 
-- Config discovery order: `.companest/config.md` -> `.companest/config.json` -> `companest.config.md` -> `companest.config.json`
-- Environment variable interpolation: `${VAR}` and `${VAR:-default}`
-- Team definitions live in `.companest/teams/<team_id>/team.md`
-- Pi (agent) definitions live in `.companest/teams/<team_id>/pis/<pi_id>/soul.md`
-- Company-private teams live under `.companest/companies/<company_id>/teams/`
+## Validation Expectations
 
-## Multi-Company Model
-
-- Companies register via manifest (`POST /api/companies`)
-- All resources (jobs, schedules, memory, tools) are scoped by `company_id`
-- Global teams are shared; company-private teams are isolated
-- The `sessions_*` tools (send/history/list) are for team-to-team messaging within the platform
+- Run targeted tests for the area you touched, then `pytest tests/ -q` for broader confidence.
+- Run `pytest -m live_network -q` only when intentionally validating real external integrations.
+- Run `python -m compileall companest tests -q` after wide Python changes to catch import and syntax issues.
