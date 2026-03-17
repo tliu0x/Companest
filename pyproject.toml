@@ -76,9 +76,9 @@ dev = [
 companest = "companest.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/taoge64/Companest"
-Repository = "https://github.com/taoge64/Companest"
-Issues = "https://github.com/taoge64/Companest/issues"
+Homepage = "https://github.com/tliu0x/Companest"
+Repository = "https://github.com/tliu0x/Companest"
+Issues = "https://github.com/tliu0x/Companest/issues"
 
 [tool.setuptools.packages.find]
 include = ["companest*"]

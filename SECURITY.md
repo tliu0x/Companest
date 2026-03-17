@@ -8,7 +8,7 @@ Companest is currently in alpha. Security fixes are applied to the latest public
 
 Please use a GitHub private security advisory for this repository:
 
-- [Open a private advisory](https://github.com/taoge64/Companest/security/advisories/new)
+- [Open a private advisory](https://github.com/tliu0x/Companest/security/advisories/new)
 
 Include a clear description, reproduction steps, impact, and any suggested mitigation.
 
