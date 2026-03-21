@@ -17,8 +17,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -107,3 +107,4 @@ infra/*.tfvars
 !examples/
 !examples/**/.companest/
 !examples/**/.companest/**
+node_modules
