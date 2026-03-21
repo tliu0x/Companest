@@ -26,13 +26,12 @@ function formatDollars(cents: number): string {
 export function FinancePage() {
   const summary = useFinanceSummary();
   const report = useFinanceReport(24);
+  const resetCb = useResetCircuitBreaker();
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
 
   if (summary.isLoading || report.isLoading) return <PageLoading />;
   if (summary.error) return <ErrorAlert message={summary.error.message} />;
   if (report.error) return <ErrorAlert message={report.error.message} />;
-
-  const resetCb = useResetCircuitBreaker();
-  const [resetMsg, setResetMsg] = useState<string | null>(null);
 
   const s = summary.data;
   const r = report.data;
