@@ -33,6 +33,9 @@ export function FinancePage() {
   if (summary.error) return <ErrorAlert message={summary.error.message} />;
   if (report.error) return <ErrorAlert message={report.error.message} />;
 
+  const resetCb = useResetCircuitBreaker();
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+
   const s = summary.data;
   const r = report.data;
   const tripped = s?.circuit_breaker?.tripped ?? false;
