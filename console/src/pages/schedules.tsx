@@ -1,8 +1,10 @@
 import { useSchedules, useSchedulerStatus } from '@/lib/queries';
+import { useTriggerSchedulerTask, useCancelSchedule } from '@/lib/mutations';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { EmptyState } from '@/components/shared/empty-state';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import {
   Table,
@@ -20,6 +22,9 @@ export function SchedulesPage() {
   if (schedules.isLoading || scheduler.isLoading) return <PageLoading />;
   if (schedules.error) return <ErrorAlert message={schedules.error.message} />;
   if (scheduler.error) return <ErrorAlert message={scheduler.error.message} />;
+
+  const triggerTask = useTriggerSchedulerTask();
+  const cancelSchedule = useCancelSchedule();
 
   const jobs = schedules.data ?? [];
   const tasks = scheduler.data?.tasks ?? [];
@@ -44,6 +49,7 @@ export function SchedulesPage() {
                 <TableHead>Fire Count</TableHead>
                 <TableHead>Last Fired</TableHead>
                 <TableHead>Active</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -65,6 +71,21 @@ export function SchedulesPage() {
                     >
                       {job.active ? 'active' : 'inactive'}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {job.active && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={cancelSchedule.isPending}
+                        onClick={() => {
+                          if (!window.confirm(`Cancel schedule "${job.id}"?`)) return;
+                          cancelSchedule.mutate(job.id);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -88,6 +109,7 @@ export function SchedulesPage() {
                 <TableHead>Last Run</TableHead>
                 <TableHead>Next Run</TableHead>
                 <TableHead>Enabled</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -104,6 +126,16 @@ export function SchedulesPage() {
                     >
                       {task.enabled ? 'enabled' : 'disabled'}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={triggerTask.isPending}
+                      onClick={() => triggerTask.mutate(task.name)}
+                    >
+                      {triggerTask.isPending ? 'Triggering...' : 'Trigger'}
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}

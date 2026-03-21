@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { useFinanceSummary, useFinanceReport } from '@/lib/queries';
+import { useResetCircuitBreaker } from '@/lib/mutations';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { EmptyState } from '@/components/shared/empty-state';
 import { JsonDrawer } from '@/components/shared/json-drawer';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
@@ -28,9 +31,21 @@ export function FinancePage() {
   if (summary.error) return <ErrorAlert message={summary.error.message} />;
   if (report.error) return <ErrorAlert message={report.error.message} />;
 
+  const resetCb = useResetCircuitBreaker();
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+
   const s = summary.data;
   const r = report.data;
   const tripped = s?.circuit_breaker?.tripped ?? false;
+
+  function handleResetCircuitBreaker() {
+    if (!window.confirm('Reset the circuit breaker? This will re-enable spending.')) return;
+    setResetMsg(null);
+    resetCb.mutate(undefined, {
+      onSuccess: () => setResetMsg('Circuit breaker reset.'),
+      onError: (err) => setResetMsg(`Failed to reset: ${(err as Error).message}`),
+    });
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -89,9 +104,25 @@ export function FinancePage() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Circuit Breaker Tripped</AlertTitle>
-          <AlertDescription>
-            The circuit breaker has been tripped ({s?.circuit_breaker?.trip_count ?? 0} times). Spending is halted.
+          <AlertDescription className="flex items-center justify-between">
+            <span>
+              The circuit breaker has been tripped ({s?.circuit_breaker?.trip_count ?? 0} times). Spending is halted.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-4 shrink-0"
+              disabled={resetCb.isPending}
+              onClick={handleResetCircuitBreaker}
+            >
+              {resetCb.isPending ? 'Resetting...' : 'Reset Circuit Breaker'}
+            </Button>
           </AlertDescription>
+          {resetMsg && (
+            <p className={`mt-2 text-sm ${resetCb.isError ? 'text-red-300' : 'text-green-300'}`}>
+              {resetMsg}
+            </p>
+          )}
         </Alert>
       )}
 
