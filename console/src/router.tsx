@@ -8,6 +8,7 @@ import { TeamsPage } from '@/pages/teams';
 import { SchedulesPage } from '@/pages/schedules';
 import { FinancePage } from '@/pages/finance';
 import { BindingsPage } from '@/pages/bindings';
+import { JobDetailPage } from '@/pages/job-detail';
 
 const rootRoute = createRootRoute();
 
@@ -41,6 +42,12 @@ const jobsRoute = createRoute({
   component: JobsPage,
 });
 
+const jobDetailRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/console/jobs/$jobId',
+  component: JobDetailPage,
+});
+
 const teamsRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: '/console/teams',
@@ -71,6 +78,7 @@ const routeTree = rootRoute.addChildren([
     overviewRoute,
     companiesRoute,
     jobsRoute,
+    jobDetailRoute,
     teamsRoute,
     schedulesRoute,
     financeRoute,
