@@ -1,4 +1,4 @@
-import { useParams } from '@tanstack/react-router';
+import { useParams, Link } from '@tanstack/react-router';
 import { useJob } from '@/lib/queries';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
@@ -19,12 +19,12 @@ export function JobDetailPage() {
   return (
     <div className="p-6 space-y-6">
       {/* Back button */}
-      <a href="/console/jobs">
+      <Link to="/console/jobs">
         <Button variant="ghost" size="sm">
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to Jobs
         </Button>
-      </a>
+      </Link>
 
       {/* Title and status */}
       <div className="flex items-center gap-3">

@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import { useFleetStatus } from '@/lib/queries';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
@@ -100,9 +101,9 @@ export function OverviewPage() {
               {companiesEntries.map(([id, company]) => (
                 <TableRow key={id}>
                   <TableCell>
-                    <a href="/console/companies" className="text-primary hover:underline">
+                    <Link to="/console/companies" className="text-primary hover:underline">
                       {company.name}
-                    </a>
+                    </Link>
                   </TableCell>
                   <TableCell>
                     <Badge
