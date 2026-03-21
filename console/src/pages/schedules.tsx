@@ -18,13 +18,12 @@ import {
 export function SchedulesPage() {
   const schedules = useSchedules();
   const scheduler = useSchedulerStatus();
+  const triggerTask = useTriggerSchedulerTask();
+  const cancelSchedule = useCancelSchedule();
 
   if (schedules.isLoading || scheduler.isLoading) return <PageLoading />;
   if (schedules.error) return <ErrorAlert message={schedules.error.message} />;
   if (scheduler.error) return <ErrorAlert message={scheduler.error.message} />;
-
-  const triggerTask = useTriggerSchedulerTask();
-  const cancelSchedule = useCancelSchedule();
 
   const jobs = schedules.data ?? [];
   const tasks = scheduler.data?.tasks ?? [];
