@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { useJobs } from '@/lib/queries';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
@@ -79,9 +80,9 @@ export function JobsPage() {
               {jobs.map((job) => (
                 <TableRow key={job.id}>
                   <TableCell className="font-mono text-xs">
-                    <a href={`/console/jobs/${job.id}`} className="text-primary hover:underline">
+                    <Link to="/console/jobs/$jobId" params={{ jobId: job.id }} className="text-primary hover:underline">
                       {job.id.slice(0, 8)}
-                    </a>
+                    </Link>
                   </TableCell>
                   <TableCell className="max-w-md truncate" title={job.task}>
                     {job.task.length > 60 ? job.task.slice(0, 60) + '...' : job.task}
@@ -92,9 +93,9 @@ export function JobsPage() {
                   <TableCell>{job.company_id ?? '-'}</TableCell>
                   <TableCell>{new Date(job.created_at).toLocaleString()}</TableCell>
                   <TableCell>
-                    <a href={`/console/jobs/${job.id}`} className="text-primary hover:underline text-sm">
+                    <Link to="/console/jobs/$jobId" params={{ jobId: job.id }} className="text-primary hover:underline text-sm">
                       View
-                    </a>
+                    </Link>
                   </TableCell>
                 </TableRow>
               ))}
