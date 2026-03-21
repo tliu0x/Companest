@@ -761,14 +761,14 @@ class CompanestAPIServer:
         # Mount console frontend (static files from Vite build)
         console_dist = Path(__file__).parent.parent / "console" / "dist"
         if console_dist.is_dir():
-            from starlette.staticfiles import StaticFiles
             from starlette.responses import FileResponse
 
             @app.get("/console/{rest_of_path:path}")
             async def console_spa(rest_of_path: str):
                 # Serve static assets if they exist, otherwise serve index.html (SPA fallback)
-                file_path = console_dist / rest_of_path
-                if rest_of_path and file_path.is_file():
+                file_path = (console_dist / rest_of_path).resolve()
+                # Prevent path traversal — resolved path must stay within dist directory
+                if rest_of_path and file_path.is_relative_to(console_dist.resolve()) and file_path.is_file():
                     return FileResponse(file_path)
                 return FileResponse(console_dist / "index.html")
 
