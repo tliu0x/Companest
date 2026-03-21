@@ -9,6 +9,7 @@ import { SchedulesPage } from '@/pages/schedules';
 import { FinancePage } from '@/pages/finance';
 import { BindingsPage } from '@/pages/bindings';
 import { JobDetailPage } from '@/pages/job-detail';
+import { CompanyCreatePage } from '@/pages/company-create';
 
 const rootRoute = createRootRoute();
 
@@ -72,11 +73,18 @@ const bindingsRoute = createRoute({
   component: BindingsPage,
 });
 
+const companyCreateRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/console/companies/create',
+  component: CompanyCreatePage,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   layoutRoute.addChildren([
     overviewRoute,
     companiesRoute,
+    companyCreateRoute,
     jobsRoute,
     jobDetailRoute,
     teamsRoute,
