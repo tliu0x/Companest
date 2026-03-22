@@ -33,9 +33,6 @@ export function FinancePage() {
   if (summary.error) return <ErrorAlert message={summary.error.message} />;
   if (report.error) return <ErrorAlert message={report.error.message} />;
 
-  const resetCb = useResetCircuitBreaker();
-  const [resetMsg, setResetMsg] = useState<string | null>(null);
-
   const s = summary.data;
   const r = report.data;
   const tripped = s?.circuit_breaker?.tripped ?? false;
@@ -130,30 +127,37 @@ export function FinancePage() {
 
       <div>
         <h3 className="text-lg font-medium mb-3">Finance Report (24h)</h3>
-        {!r?.entries || r.entries.length === 0 ? (
-          <EmptyState message="No report entries available" />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {Object.keys(r.entries[0]).map((key) => (
-                  <TableHead key={key}>{key}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {r.entries.map((entry, i) => (
-                <TableRow key={i}>
-                  {Object.values(entry).map((val, j) => (
-                    <TableCell key={j} className="text-xs">
-                      {typeof val === 'object' ? JSON.stringify(val) : String(val ?? '-')}
-                    </TableCell>
+        {(() => {
+          const entries = (r?.entries ?? []) as Record<string, unknown>[];
+          if (entries.length === 0) return <EmptyState message="No report entries available" />;
+          // Collect union of all keys across all entries for consistent columns
+          const allKeys = [...new Set(entries.flatMap(e => Object.keys(e)))];
+          return (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {allKeys.map((key) => (
+                    <TableHead key={key}>{key}</TableHead>
                   ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+              </TableHeader>
+              <TableBody>
+                {entries.map((entry, i) => (
+                  <TableRow key={i}>
+                    {allKeys.map((key) => {
+                      const val = entry[key];
+                      return (
+                        <TableCell key={key} className="text-xs">
+                          {typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val ?? '-')}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          );
+        })()}
       </div>
     </div>
   );
