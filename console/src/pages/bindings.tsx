@@ -31,6 +31,10 @@ export function BindingsPage() {
         setJsonError('Bindings must be a JSON array');
         return;
       }
+      if (parsed.some((item: unknown) => item === null || typeof item !== 'object' || Array.isArray(item))) {
+        setJsonError('Each binding must be a non-null object');
+        return;
+      }
       setJsonError(null);
       setBindings.mutate(parsed, {
         onSuccess: () => setEditing(false),

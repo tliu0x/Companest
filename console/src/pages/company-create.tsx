@@ -15,11 +15,26 @@ export function CompanyCreatePage() {
   const [name, setName] = useState('');
   const [domain, setDomain] = useState('');
   const [enabled, setEnabled] = useState(true);
+  const [idError, setIdError] = useState('');
+
+  // Match backend _SAFE_ID_RE: lowercase alphanumeric, hyphens, underscores
+  const SAFE_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const data: Record<string, unknown> = { id, name, enabled };
-    if (domain) data.domain = domain;
+    const trimmedId = id.trim();
+    if (!trimmedId) {
+      setIdError('ID is required');
+      return;
+    }
+    if (!SAFE_ID_RE.test(trimmedId)) {
+      setIdError('ID must be lowercase alphanumeric with hyphens/underscores only');
+      return;
+    }
+    setIdError('');
+
+    const data: Record<string, unknown> = { id: trimmedId, name: name.trim(), enabled };
+    if (domain.trim()) data.domain = domain.trim();
 
     createCompany.mutate(data, {
       onSuccess: () => {
@@ -45,10 +60,13 @@ export function CompanyCreatePage() {
               <Input
                 id="id"
                 value={id}
-                onChange={(e) => setId(e.target.value)}
+                onChange={(e) => { setId(e.target.value); setIdError(''); }}
                 required
-                placeholder="company-id"
+                placeholder="my-company"
+                pattern="[a-z0-9][a-z0-9_-]*"
+                title="Lowercase alphanumeric, hyphens, underscores"
               />
+              {idError && <p className="text-sm text-destructive">{idError}</p>}
             </div>
 
             <div className="space-y-2">
