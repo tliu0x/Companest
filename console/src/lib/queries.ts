@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
-import type { JobsResponse, FleetStatus, TeamsResponse, FinanceSummary, FinanceReport, ScheduledJob, CompanySummary, Job, SchedulerTask } from './types';
+import type {
+  JobsResponse, FleetStatus, TeamsResponse,
+  FinanceSummary, FinanceReport,
+  CompaniesResponse, SchedulesResponse, SchedulerStatusResponse,
+  BindingsResponse, Job,
+} from './types';
 
 export function useFleetStatus() {
   return useQuery({
@@ -13,7 +18,7 @@ export function useFleetStatus() {
 export function useCompanies() {
   return useQuery({
     queryKey: ['companies'],
-    queryFn: () => apiFetch<CompanySummary[]>('/companies'),
+    queryFn: () => apiFetch<CompaniesResponse>('/companies'),
     staleTime: 30_000,
   });
 }
@@ -51,7 +56,7 @@ export function useTeams() {
 export function useSchedules() {
   return useQuery({
     queryKey: ['schedules'],
-    queryFn: () => apiFetch<ScheduledJob[]>('/schedules'),
+    queryFn: () => apiFetch<SchedulesResponse>('/schedules'),
     staleTime: 30_000,
   });
 }
@@ -59,7 +64,7 @@ export function useSchedules() {
 export function useSchedulerStatus() {
   return useQuery({
     queryKey: ['scheduler-status'],
-    queryFn: () => apiFetch<{ tasks: SchedulerTask[] }>('/scheduler/status'),
+    queryFn: () => apiFetch<SchedulerStatusResponse>('/scheduler/status'),
     staleTime: 30_000,
   });
 }
@@ -83,7 +88,7 @@ export function useFinanceReport(hours: number = 24) {
 export function useBindings() {
   return useQuery({
     queryKey: ['bindings'],
-    queryFn: () => apiFetch<Record<string, unknown>[]>('/bindings'),
+    queryFn: () => apiFetch<BindingsResponse>('/bindings'),
     staleTime: 30_000,
   });
 }

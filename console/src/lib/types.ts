@@ -1,3 +1,5 @@
+// ---- Jobs ----
+
 export interface Job {
   id: string;
   task: string;
@@ -21,6 +23,8 @@ export interface JobsResponse {
   stats: Record<string, number>;
 }
 
+// ---- Companies ----
+
 export interface CompanySummary {
   id: string;
   name: string;
@@ -30,77 +34,174 @@ export interface CompanySummary {
   ceo_enabled: boolean;
 }
 
-export interface CompanyDetail {
-  config: Record<string, unknown>;
-  teams: string[];
-  schedule_status: Record<string, unknown>[];
-  recent_jobs: Record<string, unknown>[];
+export interface CompaniesResponse {
+  companies: CompanySummary[];
+  total: number;
 }
 
+// ---- Fleet Status ----
+// GET /api/fleet/status returns: jobs (stats object), teams, companies, timestamp
+
 export interface FleetStatus {
-  total_companies: number;
-  active_teams: number;
-  total_jobs: number;
-  jobs_by_status: Record<string, number>;
-  companies: Record<string, {
+  jobs: {
+    total: number;
+    pending: number;
+    queued: number;
+    running: number;
+    waiting_approval: number;
+    completed: number;
+    failed: number;
+    cancelled: number;
+    queue_size: number;
+  };
+  timestamp: string;
+  teams?: {
+    registered: string[];
+    active: string[];
+    configs: Record<string, {
+      role: string;
+      mode: string;
+      always_on: boolean;
+      pi_count: number;
+      lead_pi: string;
+    }>;
+  };
+  companies?: Record<string, {
     name: string;
     enabled: boolean;
-    teams: number;
-    active_jobs: number;
+    active_teams: number;
     total_jobs: number;
   }>;
 }
 
+// ---- Teams ----
+// GET /api/teams returns fleet_status directly (no envelope)
+
 export interface TeamConfig {
-  id: string;
   role: string;
-  lead_pi: string;
   mode: string;
-  enabled: boolean;
   always_on: boolean;
-  pis: unknown[];
+  pi_count: number;
+  lead_pi: string;
 }
 
 export interface TeamsResponse {
-  configs: Record<string, TeamConfig>;
+  registered: string[];
   active: string[];
+  configs: Record<string, TeamConfig>;
 }
+
+// ---- Schedules ----
+// GET /api/schedules returns { schedules: [...], total, status }
 
 export interface ScheduledJob {
   id: string;
+  user_id: string;
+  chat_id: string;
+  channel: string;
   task: string;
   description: string;
   trigger_type: string;
   trigger_args: Record<string, unknown>;
   team_id: string | null;
-  mode: string | null;
+  mode: string;
   fire_count: number;
   last_fired: string | null;
   created_at: string;
   active: boolean;
 }
 
-export interface SchedulerTask {
-  name: string;
-  interval: string;
-  last_run: string | null;
-  next_run: string | null;
+export interface SchedulesResponse {
+  schedules: ScheduledJob[];
+  total: number;
+  status: {
+    started: boolean;
+    db_path: string;
+    active_jobs: number;
+    next_run: string | null;
+  };
+}
+
+// GET /api/scheduler/status returns { started, tasks: { name: {...} } }
+
+export interface SchedulerTaskInfo {
   enabled: boolean;
+  interval_seconds: number;
+  last_run: string | null;
+  run_count: number;
+  error_count: number;
+  last_error: string | null;
+  running: boolean;
+}
+
+export interface SchedulerStatusResponse {
+  started: boolean;
+  tasks: Record<string, SchedulerTaskInfo>;
+}
+
+// ---- Finance ----
+// GET /api/finance/summary — values are in dollars (float), NOT cents
+
+export interface CircuitBreakerInfo {
+  tripped: boolean;
+  window_spend: number;
+  window_minutes: number;
+  threshold_pct: number;
+  cooldown_minutes: number;
+  cooldown_remaining_seconds: number;
+  events_in_window: number;
 }
 
 export interface FinanceSummary {
-  total_spent: number;
-  budget_remaining: number | null;
-  daily_limit: number | null;
-  circuit_breaker: {
-    tripped: boolean;
-    trip_count: number;
+  total: number;
+  by_team: Record<string, number>;
+  entries: number;
+  days: number;
+  today: number;
+  window_spend: number;
+  budget: {
+    daily_limit: number;
+    mode: string;
+    rolling_window_hours: number;
+    team_budgets: Record<string, unknown>;
+    overflow_pool: number;
   };
-  [key: string]: unknown;
+  source: string;
+  mode: string;
+  circuit_breaker: CircuitBreakerInfo | null;
 }
 
+// GET /api/finance/report — values are in dollars (float)
+
 export interface FinanceReport {
-  hours: number;
-  entries: Record<string, unknown>[];
-  [key: string]: unknown;
+  window_hours: number;
+  window_spend: number;
+  daily_limit: number;
+  utilization_pct: number;
+  by_team: Record<string, number>;
+  team_utilization: Record<string, {
+    spent: number;
+    budget: number;
+    utilization_pct: number;
+  }>;
+  mode: string;
+  circuit_breaker: CircuitBreakerInfo | null;
+  overflow_pool: number;
+  overflow_used: number;
+}
+
+// ---- Bindings ----
+// GET /api/bindings returns { bindings: [...] }
+
+export interface GlobalBinding {
+  channel?: string;
+  chat_id?: string;
+  user_id?: string;
+  team_id: string;
+  mode: string;
+  priority: number;
+}
+
+export interface BindingsResponse {
+  bindings: GlobalBinding[];
 }
