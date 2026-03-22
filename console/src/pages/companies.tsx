@@ -63,7 +63,7 @@ export function CompaniesPage() {
   if (isLoading) return <PageLoading />;
   if (error) return <ErrorAlert message={error.message} />;
 
-  const companies = data ?? [];
+  const companies = data?.companies ?? [];
 
   return (
     <div className="p-6 space-y-6">

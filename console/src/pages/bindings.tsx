@@ -16,11 +16,11 @@ export function BindingsPage() {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
-  const bindings = data ?? [];
+  const bindings = data?.bindings ?? [];
 
   useEffect(() => {
     if (data) {
-      setEditJson(JSON.stringify(data, null, 2));
+      setEditJson(JSON.stringify(data.bindings ?? [], null, 2));
     }
   }, [data]);
 
@@ -97,7 +97,7 @@ export function BindingsPage() {
                 <Card key={i}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-mono">
-                      {(binding.name as string) ?? (binding.id as string) ?? `Binding ${i + 1}`}
+                      {binding.team_id} ({binding.mode})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>

@@ -219,13 +219,16 @@ class CompanestAPIServer:
                 status=filter_status, company_id=company_id,
                 limit=limit, offset=offset,
             )
-            return {
+            result: Dict[str, Any] = {
                 "jobs": [j.to_dict() for j in jobs],
                 "total": total_matching,
                 "limit": limit,
                 "offset": offset,
-                "stats": self.job_manager.get_stats(),
             }
+            # Only include global stats when no filters are applied
+            if not filter_status and not company_id:
+                result["stats"] = self.job_manager.get_stats()
+            return result
 
         @app.post("/api/jobs/{job_id}/cancel")
         async def cancel_job(job_id: str):
