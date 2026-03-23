@@ -894,8 +894,9 @@ def cmd_job_list(args) -> int:
 
         jobs = data.get("jobs", [])
         stats = data.get("stats", {})
+        total = data.get("total", stats.get("total", len(jobs)))
 
-        print(colored(f"\n=== Jobs ({stats.get('total', len(jobs))} total) ===\n", Colors.BOLD))
+        print(colored(f"\n=== Jobs ({total} total) ===\n", Colors.BOLD))
 
         if not jobs:
             print("  No jobs found.")
