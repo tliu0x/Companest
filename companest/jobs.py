@@ -312,6 +312,19 @@ class JobManager:
 
         return jobs[offset:offset + limit]
 
+    async def count_jobs(
+        self,
+        status: Optional[JobStatus] = None,
+        company_id: Optional[str] = None,
+    ) -> int:
+        """Return the total count of jobs matching the given filters."""
+        jobs = list(self._jobs.values())
+        if status:
+            jobs = [j for j in jobs if j.status == status]
+        if company_id:
+            jobs = [j for j in jobs if j.company_id == company_id]
+        return len(jobs)
+
     async def pause_for_approval(self, job_id: str, reason: str) -> bool:
         """
         Pause a running job to wait for human approval.

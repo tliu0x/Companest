@@ -112,15 +112,18 @@ class CompanestAPIServer:
 
             class AuthMiddleware(BaseHTTPMiddleware):
                 async def dispatch(self, request, call_next):
-                    # Skip auth for health check and admin UI
-                    if request.url.path == "/health" or request.url.path.startswith(("/admin", "/_nicegui")):
+                    # Skip CORS preflight requests
+                    if request.method == "OPTIONS":
+                        return await call_next(request)
+                    # Skip auth for health check, admin UI, and WebSocket paths
+                    if request.url.path == "/health" or request.url.path.startswith(("/admin", "/_nicegui", "/ws/")):
                         return await call_next(request)
                     # Check bearer token
                     auth_header = request.headers.get("Authorization", "")
                     token = auth_header.removeprefix("Bearer ").strip()
                     if token != api_token:
                         return JSONResponse(
-                            {"error": "Unauthorized"},
+                            {"detail": "Unauthorized"},
                             status_code=401,
                         )
                     return await call_next(request)
@@ -194,6 +197,7 @@ class CompanestAPIServer:
         @app.get("/api/jobs")
         async def list_jobs(
             status: Optional[str] = None,
+            company_id: Optional[str] = None,
             limit: int = 50,
             offset: int = 0,
         ):
@@ -207,12 +211,19 @@ class CompanestAPIServer:
                         detail=f"Invalid status: {status}",
                     )
 
+            total_matching = await self.job_manager.count_jobs(
+                status=filter_status, company_id=company_id,
+            )
+
             jobs = await self.job_manager.list_jobs(
-                status=filter_status, limit=limit, offset=offset
+                status=filter_status, company_id=company_id,
+                limit=limit, offset=offset,
             )
             return {
                 "jobs": [j.to_dict() for j in jobs],
-                "total": len(jobs),
+                "total": total_matching,
+                "limit": limit,
+                "offset": offset,
                 "stats": self.job_manager.get_stats(),
             }
 
