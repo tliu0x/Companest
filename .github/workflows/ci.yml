@@ -40,3 +40,18 @@ jobs:
       - run: pip install -e .
       - run: python -c "from companest import CompanestConfig, CompanestOrchestrator, EventBus; print('Core imports OK')"
       - run: python -m compileall companest/ -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - run: npm run build
