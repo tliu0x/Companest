@@ -21,8 +21,10 @@ export function OverviewPage() {
   if (error) return <ErrorAlert message={error.message} />;
   if (!data) return <ErrorAlert message="No fleet data available" />;
 
-  const runningJobs = data.jobs_by_status?.running ?? 0;
   const companiesEntries = Object.entries(data.companies ?? {});
+  const jobStatusEntries = Object.entries(data.jobs).filter(
+    ([key]) => key !== 'total' && key !== 'queue_size'
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -35,7 +37,7 @@ export function OverviewPage() {
             <CardTitle>Total Companies</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{data.total_companies}</p>
+            <p className="text-3xl font-bold">{Object.keys(data.companies ?? {}).length}</p>
           </CardContent>
         </Card>
         <Card>
@@ -43,7 +45,7 @@ export function OverviewPage() {
             <CardTitle>Active Teams</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{data.active_teams}</p>
+            <p className="text-3xl font-bold">{data.teams?.active?.length ?? 0}</p>
           </CardContent>
         </Card>
         <Card>
@@ -51,7 +53,7 @@ export function OverviewPage() {
             <CardTitle>Total Jobs</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{data.total_jobs}</p>
+            <p className="text-3xl font-bold">{data.jobs.total}</p>
           </CardContent>
         </Card>
         <Card>
@@ -59,7 +61,7 @@ export function OverviewPage() {
             <CardTitle>Running Jobs</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{runningJobs}</p>
+            <p className="text-3xl font-bold">{data.jobs.running}</p>
           </CardContent>
         </Card>
       </div>
@@ -71,7 +73,7 @@ export function OverviewPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3">
-            {Object.entries(data.jobs_by_status ?? {}).map(([status, count]) => (
+            {jobStatusEntries.map(([status, count]) => (
               <div key={status} className="flex items-center gap-2">
                 <StatusBadge status={status} />
                 <span className="text-sm font-medium">{count}</span>
@@ -92,8 +94,7 @@ export function OverviewPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Enabled</TableHead>
-                <TableHead>Teams</TableHead>
-                <TableHead>Active Jobs</TableHead>
+                <TableHead>Active Teams</TableHead>
                 <TableHead>Total Jobs</TableHead>
               </TableRow>
             </TableHeader>
@@ -113,8 +114,7 @@ export function OverviewPage() {
                       {company.enabled ? 'enabled' : 'disabled'}
                     </Badge>
                   </TableCell>
-                  <TableCell>{company.teams}</TableCell>
-                  <TableCell>{company.active_jobs}</TableCell>
+                  <TableCell>{company.active_teams}</TableCell>
                   <TableCell>{company.total_jobs}</TableCell>
                 </TableRow>
               ))}

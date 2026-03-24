@@ -1,7 +1,7 @@
 import sys
 from types import SimpleNamespace
 
-from companest.cli import ExitCode, cmd_job_submit, cmd_team_list
+from companest.cli import ExitCode, cmd_job_list, cmd_job_submit, cmd_team_list
 
 
 class _Response:
@@ -65,3 +65,45 @@ def test_job_submit_sends_bearer_token(monkeypatch):
     assert captured["url"] == "http://localhost:8000/api/jobs"
     assert captured["headers"] == {"Authorization": "Bearer secret-token"}
     assert captured["json"] == {"task": "test task", "submitted_by": "cli"}
+
+
+def test_job_list_prefers_top_level_total(monkeypatch, capsys):
+    captured = {}
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["params"] = params
+        captured["timeout"] = timeout
+        return _Response(
+            {
+                "jobs": [
+                    {
+                        "id": "job-1",
+                        "task": "test task",
+                        "status": "completed",
+                    }
+                ],
+                "total": 12,
+                "stats": {"total": 137},
+            }
+        )
+
+    monkeypatch.setenv("COMPANEST_API_TOKEN", "secret-token")
+    monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(get=fake_get))
+
+    result = cmd_job_list(
+        SimpleNamespace(
+            api_url="http://localhost:8000",
+            limit=20,
+            status="completed",
+        )
+    )
+
+    out = capsys.readouterr().out
+
+    assert result == ExitCode.SUCCESS
+    assert captured["url"] == "http://localhost:8000/api/jobs"
+    assert captured["headers"] == {"Authorization": "Bearer secret-token"}
+    assert captured["params"] == {"limit": 20, "status": "completed"}
+    assert "Jobs (12 total)" in out

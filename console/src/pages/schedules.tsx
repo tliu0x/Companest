@@ -14,7 +14,7 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table';
-import type { ScheduledJob, SchedulerTask } from '@/lib/types';
+import type { ScheduledJob, SchedulerTaskInfo } from '@/lib/types';
 
 function CancelScheduleButton({ jobId }: { jobId: string }) {
   const cancelSchedule = useCancelSchedule();
@@ -74,13 +74,14 @@ function UserScheduleRow({ job }: { job: ScheduledJob }) {
   );
 }
 
-function SystemTaskRow({ task }: { task: SchedulerTask }) {
+function SystemTaskRow({ name, task }: { name: string; task: SchedulerTaskInfo }) {
   return (
     <TableRow>
-      <TableCell className="font-mono text-xs">{task.name}</TableCell>
-      <TableCell>{task.interval}</TableCell>
+      <TableCell className="font-mono text-xs">{name}</TableCell>
+      <TableCell>{task.interval_seconds}s</TableCell>
       <TableCell className="text-xs">{task.last_run ?? '-'}</TableCell>
-      <TableCell className="text-xs">{task.next_run ?? '-'}</TableCell>
+      <TableCell>{task.run_count}</TableCell>
+      <TableCell>{task.error_count}</TableCell>
       <TableCell>
         <Badge
           variant="outline"
@@ -90,7 +91,7 @@ function SystemTaskRow({ task }: { task: SchedulerTask }) {
         </Badge>
       </TableCell>
       <TableCell>
-        <TriggerTaskButton taskName={task.name} />
+        <TriggerTaskButton taskName={name} />
       </TableCell>
     </TableRow>
   );
@@ -104,8 +105,8 @@ export function SchedulesPage() {
   if (schedules.error) return <ErrorAlert message={schedules.error.message} />;
   if (scheduler.error) return <ErrorAlert message={scheduler.error.message} />;
 
-  const jobs = schedules.data ?? [];
-  const tasks = scheduler.data?.tasks ?? [];
+  const jobs = schedules.data?.schedules ?? [];
+  const taskEntries = Object.entries(scheduler.data?.tasks ?? {});
 
   return (
     <div className="p-6 space-y-6">
@@ -143,7 +144,7 @@ export function SchedulesPage() {
 
       <div>
         <h3 className="text-lg font-medium mb-3">System Scheduler Tasks</h3>
-        {tasks.length === 0 ? (
+        {taskEntries.length === 0 ? (
           <EmptyState message="No system scheduler tasks found" />
         ) : (
           <Table>
@@ -152,14 +153,15 @@ export function SchedulesPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Interval</TableHead>
                 <TableHead>Last Run</TableHead>
-                <TableHead>Next Run</TableHead>
+                <TableHead>Run Count</TableHead>
+                <TableHead>Error Count</TableHead>
                 <TableHead>Enabled</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {tasks.map((task) => (
-                <SystemTaskRow key={task.name} task={task} />
+              {taskEntries.map(([name, task]) => (
+                <SystemTaskRow key={name} name={name} task={task} />
               ))}
             </TableBody>
           </Table>
