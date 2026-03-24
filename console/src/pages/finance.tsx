@@ -19,8 +19,8 @@ import {
   TableCell,
 } from '@/components/ui/table';
 
-function formatDollars(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+function formatDollars(dollars: number): string {
+  return `$${dollars.toFixed(2)}`;
 }
 
 export function FinancePage() {
@@ -60,17 +60,15 @@ export function FinancePage() {
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Spent</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">{formatDollars(s.total_spent)}</p>
+              <p className="text-2xl font-bold">{formatDollars(s.total)}</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Budget Remaining</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Today</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">
-                {s.budget_remaining != null ? formatDollars(s.budget_remaining) : '-'}
-              </p>
+              <p className="text-2xl font-bold">{formatDollars(s.today)}</p>
             </CardContent>
           </Card>
           <Card>
@@ -79,7 +77,7 @@ export function FinancePage() {
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold">
-                {s.daily_limit != null ? formatDollars(s.daily_limit) : '-'}
+                {s.budget?.daily_limit != null ? formatDollars(s.budget.daily_limit) : '-'}
               </p>
             </CardContent>
           </Card>
@@ -105,7 +103,7 @@ export function FinancePage() {
           <AlertTitle>Circuit Breaker Tripped</AlertTitle>
           <AlertDescription className="flex items-center justify-between">
             <span>
-              The circuit breaker has been tripped ({s?.circuit_breaker?.trip_count ?? 0} times). Spending is halted.
+              The circuit breaker has been tripped ({s?.circuit_breaker?.events_in_window ?? 0} events in window). Spending is halted.
             </span>
             <Button
               variant="outline"
@@ -127,30 +125,64 @@ export function FinancePage() {
 
       <div>
         <h3 className="text-lg font-medium mb-3">Finance Report (24h)</h3>
-        {!r?.entries || r.entries.length === 0 ? (
-          <EmptyState message="No report entries available" />
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {Object.keys(r.entries[0]).map((key) => (
-                  <TableHead key={key}>{key}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {r.entries.map((entry, i) => (
-                <TableRow key={i}>
-                  {Object.values(entry).map((val, j) => (
-                    <TableCell key={j} className="text-xs">
-                      {typeof val === 'object' ? JSON.stringify(val) : String(val ?? '-')}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+        {(() => {
+          const byTeamEntries = Object.entries(r?.by_team ?? {});
+          const utilizationEntries = Object.entries(r?.team_utilization ?? {});
+          if (byTeamEntries.length === 0 && utilizationEntries.length === 0) {
+            return <EmptyState message="No report data available" />;
+          }
+          return (
+            <div className="space-y-6">
+              {byTeamEntries.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Spend by Team</h4>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Team</TableHead>
+                        <TableHead>Spent</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {byTeamEntries.map(([teamId, spent]) => (
+                        <TableRow key={teamId}>
+                          <TableCell className="font-mono text-xs">{teamId}</TableCell>
+                          <TableCell>{formatDollars(spent)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {utilizationEntries.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium mb-2">Team Utilization</h4>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Team</TableHead>
+                        <TableHead>Spent</TableHead>
+                        <TableHead>Budget</TableHead>
+                        <TableHead>Utilization</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {utilizationEntries.map(([teamId, info]) => (
+                        <TableRow key={teamId}>
+                          <TableCell className="font-mono text-xs">{teamId}</TableCell>
+                          <TableCell>{formatDollars(info.spent)}</TableCell>
+                          <TableCell>{formatDollars(info.budget)}</TableCell>
+                          <TableCell>{info.utilization_pct.toFixed(1)}%</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
