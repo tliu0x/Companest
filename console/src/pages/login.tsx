@@ -25,8 +25,8 @@ export function LoginPage() {
       const res = await fetch('/api/fleet/status', {
         headers: { Authorization: `Bearer ${token.trim()}` },
       });
-      if (res.status === 401) {
-        setError('Invalid token');
+      if (!res.ok) {
+        setError(res.status === 401 ? 'Invalid token' : `Server error (${res.status})`);
         return;
       }
       setToken(token.trim());
