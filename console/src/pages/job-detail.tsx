@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useParams, Link } from '@tanstack/react-router';
 import { useJob } from '@/lib/queries';
+import { useCancelJob } from '@/lib/mutations';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { StatusBadge } from '@/components/shared/status-badge';
@@ -11,6 +13,19 @@ import { ArrowLeft } from 'lucide-react';
 export function JobDetailPage() {
   const { jobId } = useParams({ from: '/layout/console/jobs/$jobId' as const });
   const { data: job, isLoading, error } = useJob(jobId);
+  const cancelJob = useCancelJob();
+  const [cancelMsg, setCancelMsg] = useState<string | null>(null);
+
+  const cancellableStatuses = ['pending', 'queued', 'running'];
+
+  function handleCancel() {
+    if (!window.confirm('Cancel this job?')) return;
+    setCancelMsg(null);
+    cancelJob.mutate(jobId, {
+      onSuccess: () => setCancelMsg('Job cancelled.'),
+      onError: (err) => setCancelMsg(`Failed to cancel: ${(err as Error).message}`),
+    });
+  }
 
   if (isLoading) return <PageLoading />;
   if (error) return <ErrorAlert message={error.message} />;
@@ -31,7 +46,22 @@ export function JobDetailPage() {
         <h2 className="text-2xl font-semibold font-mono">{job.id}</h2>
         <StatusBadge status={job.status} />
         <JsonDrawer title="Job JSON" data={job} />
+        {cancellableStatuses.includes(job.status) && (
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={cancelJob.isPending}
+            onClick={handleCancel}
+          >
+            {cancelJob.isPending ? 'Cancelling...' : 'Cancel Job'}
+          </Button>
+        )}
       </div>
+      {cancelMsg && (
+        <p className={`text-sm ${cancelJob.isError ? 'text-destructive' : 'text-green-600'}`}>
+          {cancelMsg}
+        </p>
+      )}
 
       {/* Metadata */}
       {job.company_id && (
