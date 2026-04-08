@@ -107,4 +107,6 @@ infra/*.tfvars
 !examples/
 !examples/**/.companest/
 !examples/**/.companest/**
+examples/**/.companest/*.db
+examples/**/.companest/*.sqlite3
 node_modules
