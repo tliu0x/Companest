@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from companest.config import CompanestConfig
 from companest.model_routing import (
     detect_provider,
     resolve_model_endpoint,
@@ -145,6 +146,15 @@ class TestResolveModelEndpoint:
         for model in models:
             ep = resolve_model_endpoint(model, proxy)
             assert ep.provider in (PROVIDER_ANTHROPIC, PROVIDER_OPENAI)
+
+# ---------------------------------------------------------------------------
+# Removed config validation
+# ---------------------------------------------------------------------------
+
+class TestRemovedProxyConfig:
+    def test_subscription_mode_is_rejected(self):
+        with pytest.raises(ValueError, match="proxy.subscription_mode has been removed"):
+            CompanestConfig(proxy={"enabled": True, "subscription_mode": True})
 
 
 # ---------------------------------------------------------------------------

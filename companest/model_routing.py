@@ -75,17 +75,17 @@ def resolve_model_endpoint(
 
     # -- Anthropic models --------------------------------------------------
     if provider == PROVIDER_ANTHROPIC:
-        if proxy_enabled:
+        if not proxy_enabled:
             return ResolvedEndpoint(
                 provider=PROVIDER_ANTHROPIC,
-                base_url=proxy_config.base_url.rstrip("/"),
-                api_key=proxy_config.default_key or proxy_config.master_key,
+                base_url=None,
+                api_key=None,
                 needs_chat_completions_wrapper=False,
             )
         return ResolvedEndpoint(
             provider=PROVIDER_ANTHROPIC,
-            base_url=None,
-            api_key=None,
+            base_url=proxy_config.base_url.rstrip("/"),
+            api_key=proxy_config.default_key or proxy_config.master_key,
             needs_chat_completions_wrapper=False,
         )
 

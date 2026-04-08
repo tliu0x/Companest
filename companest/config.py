@@ -121,6 +121,17 @@ class ProxyConfig(BaseModel):
     master_key: Optional[str] = Field(None, repr=False, description="LiteLLM admin key (env: LITELLM_MASTER_KEY)")
     default_key: Optional[str] = Field(None, repr=False, description="Default virtual key (env: LITELLM_DEFAULT_KEY)")
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_subscription_mode(cls, data):
+        """Fail fast if an old config still requests the removed feature."""
+        if isinstance(data, dict) and "subscription_mode" in data:
+            raise ValueError(
+                "proxy.subscription_mode has been removed. "
+                "Use Anthropic API credentials or another officially supported provider path."
+            )
+        return data
+
     @model_validator(mode="after")
     def resolve_env(self):
         """Resolve keys from environment variables if not set in config."""
