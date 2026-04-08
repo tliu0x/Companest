@@ -191,6 +191,7 @@ class CostGate:
         self.litellm_client = litellm_client
         self._event_bus = event_bus
         self._pending: Dict[str, asyncio.Future] = {}
+        self._pending_metadata: Dict[str, Dict[str, Any]] = {}
         self._budget_lock = asyncio.Lock()
         self._circuit_breaker: Optional[CircuitBreaker] = None
         self._background_tasks: set = set()  # prevent GC of fire-and-forget tasks
@@ -585,6 +586,21 @@ class CostGate:
         """Send approval request to user and wait for response."""
         future = asyncio.get_running_loop().create_future()
         self._pending[approval_id] = future
+        self._pending_metadata[approval_id] = {
+            "approval_id": approval_id,
+            "task": task,
+            "reason": reason,
+            "priority": priority,
+            "estimated_cost_usd": round(estimate.estimated_cost_usd, 4),
+            "estimated_input_tokens": estimate.estimated_input_tokens,
+            "estimated_output_tokens": estimate.estimated_output_tokens,
+            "target_team": estimate.target_team,
+            "target_model": estimate.target_model,
+            "suggested_downgrade": estimate.suggested_downgrade,
+            "today_spent": round(today_spent, 4),
+            "daily_limit": budget.get("daily_limit", 10.0),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
 
         await self.notifier.request_approval(
             approval_id=approval_id,
@@ -598,12 +614,14 @@ class CostGate:
             user_choice = await asyncio.wait_for(future, timeout=300)
         except asyncio.TimeoutError:
             self._pending.pop(approval_id, None)
+            self._pending_metadata.pop(approval_id, None)
             return CostDecision(
                 action="rejected", estimate=estimate,
                 reason="Approval timeout (5 minutes)", approval_id=approval_id,
             )
         finally:
             self._pending.pop(approval_id, None)
+            self._pending_metadata.pop(approval_id, None)
 
         if user_choice == "approve":
             return CostDecision(
@@ -632,6 +650,17 @@ class CostGate:
             future.set_result(choice)
             return True
         return False
+
+    def get_pending_approvals(self) -> List[Dict[str, Any]]:
+        """Return pending approval metadata for dashboards and APIs."""
+        pending = []
+        for approval_id, metadata in self._pending_metadata.items():
+            future = self._pending.get(approval_id)
+            if not future or future.done():
+                continue
+            pending.append(dict(metadata))
+        pending.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+        return pending
 
     def record_spending(
         self, team_id: str, task: str, tokens: Dict[str, int], cost: float,
@@ -706,6 +735,7 @@ class CostGate:
             "circuit_breaker": self._circuit_breaker.get_status() if self._circuit_breaker else None,
             "overflow_pool": budget.get("overflow_pool", 0.0),
             "overflow_used": round(self._get_overflow_usage(budget, hours), 4),
+            "pending_approvals_count": len(self.get_pending_approvals()),
         }
         return report
 
@@ -719,6 +749,8 @@ class CostGate:
                 "source": "litellm" if self.litellm_client else "local",
                 "mode": budget.get("mode", "post_hoc"),
                 "circuit_breaker": self._circuit_breaker.get_status() if self._circuit_breaker else None,
+                "pending_approvals": self.get_pending_approvals(),
+                "pending_approvals_count": len(self.get_pending_approvals()),
             }
 
         # Filter entries to the requested time window
@@ -757,6 +789,8 @@ class CostGate:
             "source": "litellm" if self.litellm_client else "local",
             "mode": budget.get("mode", "post_hoc"),
             "circuit_breaker": self._circuit_breaker.get_status() if self._circuit_breaker else None,
+            "pending_approvals": self.get_pending_approvals(),
+            "pending_approvals_count": len(self.get_pending_approvals()),
         }
         return result
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useFinanceSummary, useFinanceReport } from '@/lib/queries';
-import { useResetCircuitBreaker } from '@/lib/mutations';
+import { useResetCircuitBreaker, useResolveApproval } from '@/lib/mutations';
+import { getErrorMessage, getResponseNote } from '@/lib/api';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -27,23 +28,46 @@ export function FinancePage() {
   const summary = useFinanceSummary();
   const report = useFinanceReport(24);
   const resetCb = useResetCircuitBreaker();
+  const resolveApproval = useResolveApproval();
   const [resetMsg, setResetMsg] = useState<string | null>(null);
+  const [approvalMsg, setApprovalMsg] = useState<string | null>(null);
 
   if (summary.isLoading || report.isLoading) return <PageLoading />;
-  if (summary.error) return <ErrorAlert message={summary.error.message} />;
-  if (report.error) return <ErrorAlert message={report.error.message} />;
+  if (summary.error) return <ErrorAlert message={getErrorMessage(summary.error)} />;
+  if (report.error) return <ErrorAlert message={getErrorMessage(report.error)} />;
 
   const s = summary.data;
   const r = report.data;
+  const note = getResponseNote(s) ?? getResponseNote(r);
   const tripped = s?.circuit_breaker?.tripped ?? false;
+  const pendingApprovals = s?.pending_approvals ?? [];
+
+  if (note && !s?.total && !r?.window_spend) {
+    return (
+      <div className="p-6">
+        <EmptyState message={note} />
+      </div>
+    );
+  }
 
   function handleResetCircuitBreaker() {
     if (!window.confirm('Reset the circuit breaker? This will re-enable spending.')) return;
     setResetMsg(null);
     resetCb.mutate(undefined, {
       onSuccess: () => setResetMsg('Circuit breaker reset.'),
-      onError: (err) => setResetMsg(`Failed to reset: ${(err as Error).message}`),
+      onError: (err) => setResetMsg(`Failed to reset: ${getErrorMessage(err)}`),
     });
+  }
+
+  function handleApproval(approvalId: string, choice: 'approve' | 'downgrade' | 'reject') {
+    setApprovalMsg(null);
+    resolveApproval.mutate(
+      { approvalId, choice },
+      {
+        onSuccess: () => setApprovalMsg(`Approval ${approvalId} resolved as ${choice}.`),
+        onError: (err) => setApprovalMsg(`Approval failed: ${getErrorMessage(err)}`),
+      },
+    );
   }
 
   return (
@@ -122,6 +146,76 @@ export function FinancePage() {
           )}
         </Alert>
       )}
+
+      <div>
+        <h3 className="text-lg font-medium mb-3">Pending Approvals</h3>
+        {approvalMsg && (
+          <p className={`mb-3 text-sm ${approvalMsg.includes('failed') ? 'text-destructive' : 'text-green-600'}`}>
+            {approvalMsg}
+          </p>
+        )}
+        {pendingApprovals.length === 0 ? (
+          <EmptyState message="No pending approvals" />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Team</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Estimate</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Task</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pendingApprovals.map((approval) => (
+                <TableRow key={approval.approval_id}>
+                  <TableCell className="font-mono text-xs">{approval.approval_id}</TableCell>
+                  <TableCell>{approval.target_team}</TableCell>
+                  <TableCell>{approval.target_model}</TableCell>
+                  <TableCell>{formatDollars(approval.estimated_cost_usd)}</TableCell>
+                  <TableCell>{new Date(approval.created_at).toLocaleString()}</TableCell>
+                  <TableCell className="max-w-[340px] truncate" title={approval.task}>
+                    {approval.task}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={resolveApproval.isPending}
+                        onClick={() => handleApproval(approval.approval_id, 'approve')}
+                      >
+                        Approve
+                      </Button>
+                      {approval.suggested_downgrade && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={resolveApproval.isPending}
+                          onClick={() => handleApproval(approval.approval_id, 'downgrade')}
+                        >
+                          Downgrade
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={resolveApproval.isPending}
+                        onClick={() => handleApproval(approval.approval_id, 'reject')}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
 
       <div>
         <h3 className="text-lg font-medium mb-3">Finance Report (24h)</h3>

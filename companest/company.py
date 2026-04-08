@@ -46,6 +46,13 @@ def _validate_company_id(value: str) -> str:
     return value
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomically write UTF-8 text via a temporary file and replace."""
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
 #  Data Models 
 
 
@@ -321,7 +328,7 @@ class CompanyRegistry:
         config_path = company_dir / "company.yaml"
         data = config.model_dump(exclude_none=False)
         text = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        config_path.write_text(text, encoding="utf-8")
+        _atomic_write_text(config_path, text)
 
         self._configs[config.id] = config
         self._mtimes[config.id] = config_path.stat().st_mtime
@@ -402,7 +409,7 @@ class CompanyRegistry:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         data = [b.model_dump(exclude_none=False) for b in bindings]
         text = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        self._bindings_path.write_text(text, encoding="utf-8")
+        _atomic_write_text(self._bindings_path, text)
         self._global_bindings = bindings
         self._bindings_mtime = self._bindings_path.stat().st_mtime
         logger.info(f"[CompanyRegistry] Saved {len(bindings)} global bindings")

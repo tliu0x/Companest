@@ -18,6 +18,7 @@ export function useTriggerSchedulerTask() {
     mutationFn: (taskName: string) => apiPost(`/scheduler/${taskName}/trigger`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['scheduler-status'] });
+      qc.invalidateQueries({ queryKey: ['company'] });
     },
   });
 }
@@ -38,6 +39,20 @@ export function useResetCircuitBreaker() {
     mutationFn: () => apiPost('/finance/circuit-breaker/reset'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['finance-summary'] });
+      qc.invalidateQueries({ queryKey: ['finance-report'] });
+    },
+  });
+}
+
+export function useResolveApproval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ approvalId, choice }: { approvalId: string; choice: 'approve' | 'downgrade' | 'reject' }) =>
+      apiPost(`/finance/approve/${approvalId}`, { choice }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['finance-summary'] });
+      qc.invalidateQueries({ queryKey: ['finance-report'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
     },
   });
 }
@@ -61,6 +76,7 @@ export function useUpdateCompany() {
     onSuccess: (_, { id }) => {
       qc.invalidateQueries({ queryKey: ['companies'] });
       qc.invalidateQueries({ queryKey: ['company', id] });
+      qc.invalidateQueries({ queryKey: ['fleet-status'] });
     },
   });
 }
@@ -72,6 +88,7 @@ export function useDeleteCompany() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['companies'] });
       qc.invalidateQueries({ queryKey: ['fleet-status'] });
+      qc.invalidateQueries({ queryKey: ['company'] });
     },
   });
 }
@@ -84,6 +101,19 @@ export function useToggleCompany() {
     onSuccess: (_, { id }) => {
       qc.invalidateQueries({ queryKey: ['companies'] });
       qc.invalidateQueries({ queryKey: ['company', id] });
+      qc.invalidateQueries({ queryKey: ['fleet-status'] });
+    },
+  });
+}
+
+export function useAddCompanyBinding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ companyId, data }: { companyId: string; data: Record<string, unknown> }) =>
+      apiPost(`/companies/${companyId}/bind`, data),
+    onSuccess: (_, { companyId }) => {
+      qc.invalidateQueries({ queryKey: ['company', companyId] });
+      qc.invalidateQueries({ queryKey: ['companies'] });
     },
   });
 }
@@ -94,6 +124,18 @@ export function useSetBindings() {
     mutationFn: (bindings: unknown[]) => apiPut('/bindings', bindings),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bindings'] });
+    },
+  });
+}
+
+export function useRunTeamTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ teamId, data }: { teamId: string; data: Record<string, unknown> }) =>
+      apiPost(`/teams/${teamId}/run`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: ['teams'] });
     },
   });
 }

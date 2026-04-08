@@ -23,6 +23,28 @@ export interface JobsResponse {
   stats: Record<string, number>;
 }
 
+export interface CompanyJobsResponse {
+  jobs: Job[];
+  total: number;
+}
+
+export interface ConsoleEvent {
+  sequence_id: number;
+  type: string;
+  timestamp: string;
+  company_id: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface EventsResponse {
+  events: ConsoleEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+  latest_sequence_id: number;
+  note?: string;
+}
+
 // ---- Companies ----
 
 export interface CompanySummary {
@@ -32,11 +54,75 @@ export interface CompanySummary {
   enabled: boolean;
   bindings_count: number;
   ceo_enabled: boolean;
+  active_team_count: number;
+  recent_job_count: number;
+  last_activity_timestamp: string | null;
 }
 
 export interface CompaniesResponse {
   companies: CompanySummary[];
   total: number;
+  note?: string;
+}
+
+export interface CompanyBinding {
+  channel?: string | null;
+  chat_id?: string | null;
+  user_id?: string | null;
+}
+
+export interface CompanyScheduleConfig {
+  name: string;
+  team_id: string;
+  prompt: string;
+  interval_seconds: number;
+  mode: string;
+  enabled: boolean;
+}
+
+export interface CompanyPreferences {
+  default_mode: string;
+  preferred_teams: string[];
+  budget_hourly_usd: number;
+  budget_monthly_usd: number;
+}
+
+export interface CompanyCEOConfig {
+  model: string;
+  max_turns: number;
+  cycle_interval: number;
+  cycle_prompt?: string | null;
+  goals: string[];
+  kpis: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface CompanyFinanceSummary {
+  hourly_budget_usd: number;
+  monthly_budget_usd: number;
+  last_hour_spend: number;
+  last_24h_spend: number;
+}
+
+export interface CompanyDetail {
+  id: string;
+  name: string;
+  domain: string;
+  enabled: boolean;
+  bindings: CompanyBinding[];
+  preferences: CompanyPreferences;
+  ceo: CompanyCEOConfig;
+  schedules: CompanyScheduleConfig[];
+  env: Record<string, string>;
+  shared_teams: string[] | null;
+  routing_bindings: Array<Record<string, string>>;
+  memory_seed: Record<string, unknown>;
+  mcp_servers: Array<Record<string, unknown>>;
+  teams: string[];
+  schedule_status: Record<string, SchedulerTaskInfo>;
+  recent_jobs: Job[];
+  summary: CompanySummary;
+  finance?: CompanyFinanceSummary;
 }
 
 // ---- Fleet Status ----
@@ -89,6 +175,7 @@ export interface TeamsResponse {
   registered: string[];
   active: string[];
   configs: Record<string, TeamConfig>;
+  note?: string;
 }
 
 // ---- Schedules ----
@@ -120,6 +207,7 @@ export interface SchedulesResponse {
     active_jobs: number;
     next_run: string | null;
   };
+  note?: string;
 }
 
 // GET /api/scheduler/status returns { started, tasks: { name: {...} } }
@@ -137,6 +225,7 @@ export interface SchedulerTaskInfo {
 export interface SchedulerStatusResponse {
   started: boolean;
   tasks: Record<string, SchedulerTaskInfo>;
+  note?: string;
 }
 
 // ---- Finance ----
@@ -169,6 +258,9 @@ export interface FinanceSummary {
   source: string;
   mode: string;
   circuit_breaker: CircuitBreakerInfo | null;
+  pending_approvals: PendingApproval[];
+  pending_approvals_count: number;
+  note?: string;
 }
 
 // GET /api/finance/report — values are in dollars (float)
@@ -188,6 +280,24 @@ export interface FinanceReport {
   circuit_breaker: CircuitBreakerInfo | null;
   overflow_pool: number;
   overflow_used: number;
+  pending_approvals_count?: number;
+  note?: string;
+}
+
+export interface PendingApproval {
+  approval_id: string;
+  task: string;
+  reason: string;
+  priority: string;
+  estimated_cost_usd: number;
+  estimated_input_tokens: number;
+  estimated_output_tokens: number;
+  target_team: string;
+  target_model: string;
+  suggested_downgrade?: string | null;
+  today_spent: number;
+  daily_limit: number;
+  created_at: string;
 }
 
 // ---- Bindings ----
@@ -204,4 +314,24 @@ export interface GlobalBinding {
 
 export interface BindingsResponse {
   bindings: GlobalBinding[];
+}
+
+// ---- Meta ----
+
+export interface ApiCapabilities {
+  admin: boolean;
+  companies: boolean;
+  finance: boolean;
+  scheduler: boolean;
+  user_scheduler: boolean;
+  websocket: boolean;
+  events_history: boolean;
+  public_knowledge: boolean;
+}
+
+export interface MetaResponse {
+  service: string;
+  version: string;
+  timestamp: string;
+  capabilities: ApiCapabilities;
 }

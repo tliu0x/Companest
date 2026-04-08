@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useBindings } from '@/lib/queries';
 import { useSetBindings } from '@/lib/mutations';
+import { getErrorMessage } from '@/lib/api';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -17,12 +18,6 @@ export function BindingsPage() {
   const [editing, setEditing] = useState(false);
 
   const bindings = data?.bindings ?? [];
-
-  useEffect(() => {
-    if (data) {
-      setEditJson(JSON.stringify(data.bindings ?? [], null, 2));
-    }
-  }, [data]);
 
   function handleSave() {
     try {
@@ -45,7 +40,7 @@ export function BindingsPage() {
   }
 
   if (isLoading) return <PageLoading />;
-  if (error) return <ErrorAlert message={error.message} />;
+  if (error) return <ErrorAlert message={getErrorMessage(error)} />;
 
   return (
     <div className="p-6 space-y-6">
@@ -56,6 +51,9 @@ export function BindingsPage() {
           <Button
             variant={editing ? 'outline' : 'default'}
             onClick={() => {
+              if (!editing) {
+                setEditJson(JSON.stringify(bindings, null, 2));
+              }
               setEditing(!editing);
               setJsonError(null);
             }}
@@ -73,7 +71,7 @@ export function BindingsPage() {
           <CardContent className="space-y-3">
             {jsonError && <ErrorAlert message={jsonError} />}
             {setBindings.error && (
-              <ErrorAlert message={(setBindings.error as Error).message} />
+              <ErrorAlert message={getErrorMessage(setBindings.error)} />
             )}
             <textarea
               className="w-full h-80 font-mono text-xs border rounded-md p-3 bg-muted"

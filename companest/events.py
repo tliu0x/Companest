@@ -71,6 +71,13 @@ class EventBus:
         if callback not in self._any_listeners:
             self._any_listeners.append(callback)
 
+    def off_any(self, callback: EventCallback) -> None:
+        """Unsubscribe from wildcard events."""
+        try:
+            self._any_listeners.remove(callback)
+        except ValueError:
+            pass
+
     def off(self, event_type: EventType, callback: EventCallback) -> None:
         """Unsubscribe from a specific event type."""
         if event_type in self._listeners:

@@ -20,9 +20,9 @@ import uuid
 import asyncio
 import logging
 import json
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -324,6 +324,55 @@ class JobManager:
         if company_id:
             jobs = [j for j in jobs if j.company_id == company_id]
         return len(jobs)
+
+    def get_company_activity_snapshot(
+        self,
+        company_ids: Optional[Iterable[str]] = None,
+        recent_hours: float = 24.0,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return per-company job aggregates in a single pass over in-memory jobs."""
+        allowed_ids = set(company_ids) if company_ids is not None else None
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=recent_hours)
+        snapshot: Dict[str, Dict[str, Any]] = {}
+
+        def ensure_entry(company_id: str) -> Dict[str, Any]:
+            return snapshot.setdefault(
+                company_id,
+                {
+                    "total_jobs": 0,
+                    "recent_job_count": 0,
+                    "_last_activity_dt": None,
+                },
+            )
+
+        for job in self._jobs.values():
+            company_id = job.company_id
+            if not company_id:
+                continue
+            if allowed_ids is not None and company_id not in allowed_ids:
+                continue
+
+            entry = ensure_entry(company_id)
+            entry["total_jobs"] += 1
+            if job.created_at >= cutoff:
+                entry["recent_job_count"] += 1
+
+            activity = job.completed_at or job.started_at or job.created_at
+            last_activity = entry["_last_activity_dt"]
+            if activity and (last_activity is None or activity > last_activity):
+                entry["_last_activity_dt"] = activity
+
+        if allowed_ids is not None:
+            for company_id in allowed_ids:
+                ensure_entry(company_id)
+
+        for entry in snapshot.values():
+            last_activity = entry.pop("_last_activity_dt")
+            entry["last_activity_timestamp"] = (
+                last_activity.isoformat() if last_activity else None
+            )
+
+        return snapshot
 
     async def pause_for_approval(self, job_id: str, reason: str) -> bool:
         """

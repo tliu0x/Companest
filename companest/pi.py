@@ -365,6 +365,7 @@ class Pi:
     ) -> str:
         """Run via Claude Agent SDK (preferred) or Anthropic SDK (fallback)."""
         effective_model = model_override or self.model
+
         if Pi._agent_sdk_not_installed:
             return await self._run_claude_direct(task, system, model_override=effective_model)
 
@@ -649,6 +650,4 @@ class Pi:
         finally:
             if direct_client:
                 await direct_client.close()
-
-
 
