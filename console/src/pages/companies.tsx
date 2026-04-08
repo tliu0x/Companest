@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useCompanies } from '@/lib/queries';
 import { useToggleCompany, useDeleteCompany } from '@/lib/mutations';
+import { getErrorMessage, getResponseNote } from '@/lib/api';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -32,7 +33,7 @@ function DeleteConfirm({ companyId, onClose }: { companyId: string; onClose: () 
           Type <span className="font-mono font-bold">{companyId}</span> to confirm deletion.
         </p>
         {deleteCompany.error && (
-          <ErrorAlert message={(deleteCompany.error as Error).message} />
+          <ErrorAlert message={getErrorMessage(deleteCompany.error)} />
         )}
         <input
           className="w-full border rounded px-3 py-2 text-sm"
@@ -61,9 +62,10 @@ export function CompaniesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   if (isLoading) return <PageLoading />;
-  if (error) return <ErrorAlert message={error.message} />;
+  if (error) return <ErrorAlert message={getErrorMessage(error)} />;
 
   const companies = data?.companies ?? [];
+  const note = getResponseNote(data);
 
   return (
     <div className="p-6 space-y-6">
@@ -75,7 +77,7 @@ export function CompaniesPage() {
       </div>
 
       {companies.length === 0 ? (
-        <EmptyState message="No companies found" />
+        <EmptyState message={note ?? 'No companies found'} />
       ) : (
         <Table>
           <TableHeader>
@@ -84,6 +86,9 @@ export function CompaniesPage() {
               <TableHead>Name</TableHead>
               <TableHead>Domain</TableHead>
               <TableHead>Enabled</TableHead>
+              <TableHead>Teams</TableHead>
+              <TableHead>Jobs</TableHead>
+              <TableHead>Last Activity</TableHead>
               <TableHead>Bindings</TableHead>
               <TableHead>CEO Enabled</TableHead>
               <TableHead>Actions</TableHead>
@@ -93,7 +98,11 @@ export function CompaniesPage() {
             {companies.map((company) => (
               <TableRow key={company.id}>
                 <TableCell className="font-mono text-xs">{company.id}</TableCell>
-                <TableCell>{company.name}</TableCell>
+                <TableCell>
+                  <Link to="/console/companies/$companyId" params={{ companyId: company.id }} className="text-primary hover:underline">
+                    {company.name}
+                  </Link>
+                </TableCell>
                 <TableCell>{company.domain}</TableCell>
                 <TableCell>
                   <Badge
@@ -103,6 +112,9 @@ export function CompaniesPage() {
                     {company.enabled ? 'enabled' : 'disabled'}
                   </Badge>
                 </TableCell>
+                <TableCell>{company.active_team_count}</TableCell>
+                <TableCell>{company.recent_job_count}</TableCell>
+                <TableCell>{company.last_activity_timestamp ? new Date(company.last_activity_timestamp).toLocaleString() : '-'}</TableCell>
                 <TableCell>{company.bindings_count}</TableCell>
                 <TableCell>
                   <Badge
@@ -114,6 +126,9 @@ export function CompaniesPage() {
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
+                    <Link to="/console/companies/$companyId" params={{ companyId: company.id }}>
+                      <Button size="sm" variant="outline">View</Button>
+                    </Link>
                     <Button
                       size="sm"
                       variant="outline"

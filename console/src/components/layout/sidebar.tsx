@@ -1,5 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { LayoutDashboard, Building2, ListTodo, Users, Clock, DollarSign, Link2 } from 'lucide-react';
+import { LayoutDashboard, Building2, ListTodo, Users, Clock, DollarSign, Link2, Activity, Network } from 'lucide-react';
+import { useRealtime } from '@/lib/realtime';
+import { TOPOLOGY_ENABLED } from '@/lib/features';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -10,11 +12,17 @@ const navItems = [
   { to: '/console/schedules', label: 'Schedules', icon: Clock },
   { to: '/console/finance', label: 'Finance', icon: DollarSign },
   { to: '/console/bindings', label: 'Bindings', icon: Link2 },
+  { to: '/console/events', label: 'Events', icon: Activity },
 ];
 
 export function Sidebar() {
   const router = useRouterState();
   const currentPath = router.location.pathname;
+  const { getEventsUnreadCount } = useRealtime();
+  const eventsUnreadCount = getEventsUnreadCount();
+  const items = TOPOLOGY_ENABLED
+    ? [...navItems, { to: '/console/topology', label: 'Topology', icon: Network }]
+    : navItems;
 
   return (
     <aside className="w-56 border-r border-border bg-muted/30 min-h-screen p-4">
@@ -23,7 +31,7 @@ export function Sidebar() {
         <p className="text-xs text-muted-foreground">Console</p>
       </div>
       <nav className="space-y-1">
-        {navItems.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           const isActive = currentPath === item.to || (item.to !== '/console/' && currentPath.startsWith(item.to));
           return (
@@ -38,7 +46,12 @@ export function Sidebar() {
               )}
             >
               <Icon className="h-4 w-4" />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {item.to === '/console/events' && eventsUnreadCount > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-900">
+                  {eventsUnreadCount}
+                </span>
+              )}
             </Link>
           );
         })}

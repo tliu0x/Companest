@@ -1,5 +1,6 @@
 import { useSchedules, useSchedulerStatus } from '@/lib/queries';
 import { useTriggerSchedulerTask, useCancelSchedule } from '@/lib/mutations';
+import { getErrorMessage, getResponseNote } from '@/lib/api';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -102,11 +103,12 @@ export function SchedulesPage() {
   const scheduler = useSchedulerStatus();
 
   if (schedules.isLoading || scheduler.isLoading) return <PageLoading />;
-  if (schedules.error) return <ErrorAlert message={schedules.error.message} />;
-  if (scheduler.error) return <ErrorAlert message={scheduler.error.message} />;
+  if (schedules.error) return <ErrorAlert message={getErrorMessage(schedules.error)} />;
+  if (scheduler.error) return <ErrorAlert message={getErrorMessage(scheduler.error)} />;
 
   const jobs = schedules.data?.schedules ?? [];
   const taskEntries = Object.entries(scheduler.data?.tasks ?? {});
+  const note = getResponseNote(schedules.data) ?? getResponseNote(scheduler.data);
 
   return (
     <div className="p-6 space-y-6">
@@ -115,7 +117,7 @@ export function SchedulesPage() {
       <div>
         <h3 className="text-lg font-medium mb-3">User Schedules</h3>
         {jobs.length === 0 ? (
-          <EmptyState message="No user schedules found" />
+          <EmptyState message={note ?? 'No user schedules found'} />
         ) : (
           <Table>
             <TableHeader>
@@ -145,7 +147,7 @@ export function SchedulesPage() {
       <div>
         <h3 className="text-lg font-medium mb-3">System Scheduler Tasks</h3>
         {taskEntries.length === 0 ? (
-          <EmptyState message="No system scheduler tasks found" />
+          <EmptyState message={note ?? 'No system scheduler tasks found'} />
         ) : (
           <Table>
             <TableHeader>

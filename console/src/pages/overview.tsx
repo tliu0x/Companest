@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useFleetStatus } from '@/lib/queries';
+import { getErrorMessage } from '@/lib/api';
+import { useRealtime } from '@/lib/realtime';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { StatusBadge } from '@/components/shared/status-badge';
@@ -16,9 +19,16 @@ import {
 
 export function OverviewPage() {
   const { data, isLoading, error } = useFleetStatus();
+  const { getOverviewCompanyActivityCount, markOverviewSeen } = useRealtime();
+
+  useEffect(() => (
+    () => {
+      markOverviewSeen();
+    }
+  ), [markOverviewSeen]);
 
   if (isLoading) return <PageLoading />;
-  if (error) return <ErrorAlert message={error.message} />;
+  if (error) return <ErrorAlert message={getErrorMessage(error)} />;
   if (!data) return <ErrorAlert message="No fleet data available" />;
 
   const companiesEntries = Object.entries(data.companies ?? {});
@@ -102,9 +112,16 @@ export function OverviewPage() {
               {companiesEntries.map(([id, company]) => (
                 <TableRow key={id}>
                   <TableCell>
-                    <Link to="/console/companies" className="text-primary hover:underline">
-                      {company.name}
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link to="/console/companies/$companyId" params={{ companyId: id }} className="text-primary hover:underline">
+                        {company.name}
+                      </Link>
+                      {getOverviewCompanyActivityCount(id) > 0 && (
+                        <Badge variant="outline" className="bg-amber-100 text-amber-900">
+                          {getOverviewCompanyActivityCount(id)} new
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge

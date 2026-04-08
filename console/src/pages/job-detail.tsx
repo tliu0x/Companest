@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, Link } from '@tanstack/react-router';
 import { useJob } from '@/lib/queries';
 import { useCancelJob } from '@/lib/mutations';
+import { getErrorMessage } from '@/lib/api';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { StatusBadge } from '@/components/shared/status-badge';
@@ -23,12 +24,12 @@ export function JobDetailPage() {
     setCancelMsg(null);
     cancelJob.mutate(jobId, {
       onSuccess: () => setCancelMsg('Job cancelled.'),
-      onError: (err) => setCancelMsg(`Failed to cancel: ${(err as Error).message}`),
+      onError: (err) => setCancelMsg(`Failed to cancel: ${getErrorMessage(err)}`),
     });
   }
 
   if (isLoading) return <PageLoading />;
-  if (error) return <ErrorAlert message={error.message} />;
+  if (error) return <ErrorAlert message={getErrorMessage(error)} />;
   if (!job) return <ErrorAlert message="Job not found" />;
 
   return (

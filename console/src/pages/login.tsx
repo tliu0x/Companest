@@ -6,6 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { setToken } from '@/lib/api';
 
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+
 export function LoginPage() {
   const [token, setTokenValue] = useState('');
   const [error, setError] = useState('');
@@ -22,7 +24,7 @@ export function LoginPage() {
 
     // Test the token against the health-adjacent endpoint
     try {
-      const res = await fetch('/api/fleet/status', {
+      const res = await fetch(`${API_BASE}/fleet/status`, {
         headers: { Authorization: `Bearer ${token.trim()}` },
       });
       if (res.status === 401) {

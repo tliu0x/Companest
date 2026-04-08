@@ -10,6 +10,9 @@ import { FinancePage } from '@/pages/finance';
 import { BindingsPage } from '@/pages/bindings';
 import { JobDetailPage } from '@/pages/job-detail';
 import { CompanyCreatePage } from '@/pages/company-create';
+import { CompanyDetailPage } from '@/pages/company-detail';
+import { EventsPage } from '@/pages/events';
+import { TopologyPage } from '@/pages/topology';
 
 const rootRoute = createRootRoute();
 
@@ -73,10 +76,28 @@ const bindingsRoute = createRoute({
   component: BindingsPage,
 });
 
+const eventsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/console/events',
+  component: EventsPage,
+});
+
+const topologyRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/console/topology',
+  component: TopologyPage,
+});
+
 const companyCreateRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: '/console/companies/create',
   component: CompanyCreatePage,
+});
+
+const companyDetailRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/console/companies/$companyId',
+  component: CompanyDetailPage,
 });
 
 const routeTree = rootRoute.addChildren([
@@ -85,12 +106,15 @@ const routeTree = rootRoute.addChildren([
     overviewRoute,
     companiesRoute,
     companyCreateRoute,
+    companyDetailRoute,
     jobsRoute,
     jobDetailRoute,
     teamsRoute,
     schedulesRoute,
     financeRoute,
     bindingsRoute,
+    eventsRoute,
+    topologyRoute,
   ]),
 ]);
 

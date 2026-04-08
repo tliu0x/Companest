@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useJobs } from '@/lib/queries';
+import { getErrorMessage } from '@/lib/api';
 import { PageLoading } from '@/components/shared/loading';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { EmptyState } from '@/components/shared/empty-state';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableHeader,
@@ -20,16 +22,18 @@ const STATUS_FILTERS = ['all', 'pending', 'running', 'completed', 'failed'] as c
 
 export function JobsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [companyFilter, setCompanyFilter] = useState('');
   const [offset, setOffset] = useState(0);
 
   const { data, isLoading, error } = useJobs({
     status: statusFilter === 'all' ? undefined : statusFilter,
+    company_id: companyFilter.trim() || undefined,
     limit: PAGE_SIZE,
     offset,
   });
 
   if (isLoading) return <PageLoading />;
-  if (error) return <ErrorAlert message={error.message} />;
+  if (error) return <ErrorAlert message={getErrorMessage(error)} />;
   if (!data) return <ErrorAlert message="No jobs data available" />;
 
   const { jobs, total } = data;
@@ -44,21 +48,34 @@ export function JobsPage() {
         </h2>
       </div>
 
-      {/* Status filter */}
-      <div className="flex gap-2">
-        {STATUS_FILTERS.map((status) => (
-          <Button
-            key={status}
-            variant={statusFilter === status ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => {
-              setStatusFilter(status);
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-wrap gap-2">
+          {STATUS_FILTERS.map((status) => (
+            <Button
+              key={status}
+              variant={statusFilter === status ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setStatusFilter(status);
+                setOffset(0);
+              }}
+            >
+              {status.charAt(0).toUpperCase() + status.slice(1)}
+            </Button>
+          ))}
+        </div>
+
+        <div className="w-full lg:w-72 space-y-2">
+          <p className="text-sm text-muted-foreground">Filter by company ID</p>
+          <Input
+            value={companyFilter}
+            onChange={(e) => {
+              setCompanyFilter(e.target.value);
               setOffset(0);
             }}
-          >
-            {status.charAt(0).toUpperCase() + status.slice(1)}
-          </Button>
-        ))}
+            placeholder="prediction-market"
+          />
+        </div>
       </div>
 
       {jobs.length === 0 ? (

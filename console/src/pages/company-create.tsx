@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useCreateCompany } from '@/lib/mutations';
+import { getErrorMessage } from '@/lib/api';
 import { ErrorAlert } from '@/components/shared/error-alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -37,8 +38,11 @@ export function CompanyCreatePage() {
     if (domain.trim()) data.domain = domain.trim();
 
     createCompany.mutate(data, {
-      onSuccess: () => {
-        navigate({ to: '/console/companies' });
+      onSuccess: (response) => {
+        const nextId = typeof response === 'object' && response && 'id' in response
+          ? String((response as { id: unknown }).id ?? trimmedId)
+          : trimmedId;
+        navigate({ to: '/console/companies/$companyId', params: { companyId: nextId } });
       },
     });
   }
@@ -52,7 +56,7 @@ export function CompanyCreatePage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {createCompany.error && (
-              <ErrorAlert message={(createCompany.error as Error).message} />
+              <ErrorAlert message={getErrorMessage(createCompany.error)} />
             )}
 
             <div className="space-y-2">
