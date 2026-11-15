@@ -1,6 +1,7 @@
 import inspect
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,51 +48,35 @@ TOOL_PRESETS = {
     ],
 }
 
-# Default deny list -tools blocked unless Pi explicitly opts out with "none"
+# Blocked unless a Pi opts out with tools_deny: ["none"]
 DEFAULT_TOOLS_DENY = {"Bash"}
 
-# Built-in tool names (companest/builtin_tools.py)
 CLAUDE_BUILTIN_TOOLS = {
     "Read", "Write", "Edit", "Bash", "Glob", "Grep",
     "WebSearch", "WebFetch",
 }
-
-# Custom tool names (need MCP server or function definitions)
 CUSTOM_TOOL_NAMES = {"memory_read", "memory_write", "memory_list", "memory_index", "memory_search"}
-
-# Public knowledge tool names (need public_knowledge MCP server)
 PUBLIC_KNOWLEDGE_TOOL_NAMES = {"search_public_knowledge", "read_public_knowledge"}
-
-# Scheduler tool names (need separate MCP server with user context)
 SCHEDULER_TOOL_NAMES = {"schedule_task", "list_schedules", "cancel_schedule"}
-
-# Feed tool names (data collection, need feed MCP server)
 FEED_TOOL_NAMES = {
     "brave_search", "fetch_rss", "fetch_reddit", "fetch_hn", "fetch_x", "fetch_openbb",
     "fetch_polymarket", "fetch_kalshi", "fetch_metaculus",
 }
-
-# Sessions tool names (agent-to-agent messaging)
 SESSIONS_TOOL_NAMES = {"sessions_send", "sessions_list", "sessions_history"}
-
-# Orchestrator tool names (CEO agent calls run_team/run_auto)
 ORCHESTRATOR_TOOL_NAMES = {"run_team", "run_auto"}
-
-# Git tool names (coding agents, need git MCP server with workspace context)
 GIT_TOOL_NAMES = {"git_status", "git_diff", "git_log", "git_branch", "git_commit", "git_push"}
 
 
 @dataclass
 class SkillDefinition:
     """A global skill loaded from .companest/skills/{name}/skill.md."""
-    name: str           # directory name
-    tools: List[str]    # tool names this skill provides
-    description: str    # human-readable
+    name: str
+    tools: List[str]
+    description: str
     instructions: str   # injected into Pi system prompt when active
 
 
 def load_skills(base_path: str) -> Dict[str, SkillDefinition]:
-    """Scan .companest/skills/ directory, parse each skill.md into a SkillDefinition."""
     skills_dir = Path(base_path) / "skills"
     if not skills_dir.exists():
         return {}
@@ -105,16 +90,12 @@ def load_skills(base_path: str) -> Dict[str, SkillDefinition]:
         try:
             text = skill_md.read_text(encoding="utf-8")
             name = skill_dir.name
-
-            # Parse tools
             tools_match = re.search(r"^-\s*tools\s*:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
             tools = [t.strip() for t in tools_match.group(1).split(",")] if tools_match else []
 
-            # Parse description
             desc_match = re.search(r"^-\s*description\s*:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
             description = desc_match.group(1).strip() if desc_match else ""
 
-            # Parse instructions (everything after ## Instructions)
             instr_match = re.search(r"##\s+Instructions\s*\n(.*)", text, re.DOTALL | re.IGNORECASE)
             instructions = instr_match.group(1).strip() if instr_match else ""
 
@@ -130,7 +111,6 @@ def load_skills(base_path: str) -> Dict[str, SkillDefinition]:
 
 @dataclass
 class ToolDefinition:
-    """Define a tool once; definitions_to_langchain adapts it for the agent runtime."""
     name: str
     description: str
     parameters: Dict[str, dict]
@@ -138,7 +118,6 @@ class ToolDefinition:
 
 
 def _to_json_schema(params: Dict[str, dict]) -> dict:
-    """Convert the flat parameter dict to a JSON Schema object."""
     properties = {}
     required = []
     for name, spec in params.items():
@@ -152,7 +131,6 @@ def _to_json_schema(params: Dict[str, dict]) -> dict:
 
 
 def definitions_to_langchain(defs: List[ToolDefinition]) -> list:
-    """Convert ToolDefinitions to LangChain tools."""
     from langchain_core.tools import StructuredTool
 
     tools = []
@@ -173,17 +151,11 @@ def create_memory_tool_defs(
     memory: MemoryManager, team_id: str, pi_id: str,
     memory_backend: "Optional[MemoryBackend]" = None,
 ) -> List[ToolDefinition]:
-    """Create ToolDefinitions for memory operations."""
-
-    # Use the provided backend if available, otherwise default to FileBackend.
-    # All memory operations go through the backend so that switching backends
-    # (e.g. file -> qdrant) affects the entire memory surface, not just search.
     _backend = memory_backend if memory_backend is not None else FileBackend(memory)
     _search_service = MemorySearchService(_backend)
 
     async def memory_read(args):
-        key = args["key"]
-        data = _backend.read(team_id, key)
+        data = _backend.read(team_id, args["key"])
         return json.dumps(data, ensure_ascii=False, indent=2) if data is not None else "null"
 
     async def memory_write(args):
@@ -196,29 +168,24 @@ def create_memory_tool_defs(
         return f"Written to {team_id}/memory/{key}"
 
     async def memory_list(args):
-        keys = _backend.list_keys(team_id)
-        return json.dumps(keys)
+        return json.dumps(_backend.list_keys(team_id))
 
     async def memory_index(args):
-        index = _backend.get_index(team_id)
-        return json.dumps(index, indent=2, ensure_ascii=False)
+        return json.dumps(_backend.get_index(team_id), indent=2, ensure_ascii=False)
 
     async def memory_search(args):
-        query = args["query"]
-        mode = args.get("mode", "auto")
-        limit = int(args.get("limit", 20))
         include_archive = args.get("include_archive", True)
         explain = args.get("explain", False)
-        # Normalize string booleans from tool calls
+        # Models sometimes send booleans as strings
         if isinstance(include_archive, str):
             include_archive = include_archive.lower() not in ("false", "0", "no")
         if isinstance(explain, str):
             explain = explain.lower() in ("true", "1", "yes")
         results = _search_service.search(
             team_id,
-            query,
-            mode=mode,
-            limit=limit,
+            args["query"],
+            mode=args.get("mode", "auto"),
+            limit=int(args.get("limit", 20)),
             include_archive=include_archive,
             explain=explain,
         )
@@ -297,8 +264,6 @@ def create_memory_tool_defs(
 def create_scheduler_tool_defs(
     user_scheduler, user_id: str, chat_id: str, channel: str,
 ) -> List[ToolDefinition]:
-    """Create ToolDefinitions for scheduling operations."""
-
     async def schedule_task(args):
         try:
             trigger_args = json.loads(args["trigger_args"])
@@ -328,14 +293,12 @@ def create_scheduler_tool_defs(
         jobs = await user_scheduler.list_jobs(user_id=user_id)
         if not jobs:
             return "No active scheduled tasks."
-        lines = []
-        for j in jobs:
-            lines.append(
-                f"- [{j.id}] {j.description or j.task[:60]} "
-                f"({j.trigger_type}: {json.dumps(j.trigger_args)}) "
-                f"fires={j.fire_count}"
-            )
-        return "\n".join(lines)
+        return "\n".join(
+            f"- [{j.id}] {j.description or j.task[:60]} "
+            f"({j.trigger_type}: {json.dumps(j.trigger_args)}) "
+            f"fires={j.fire_count}"
+            for j in jobs
+        )
 
     async def cancel_schedule(args):
         ok = await user_scheduler.cancel_job(args["schedule_id"], user_id=user_id)
@@ -391,13 +354,11 @@ def create_scheduler_tool_defs(
 
 
 def create_feed_tool_defs() -> List[ToolDefinition]:
-    """Create ToolDefinitions for data feed operations."""
     from .knowledge import feeds
 
     def feed_handler(fetch_name: str):
-        # Resolve the fetcher at call time. Only arguments the fetcher declares
-        # are passed, coerced to the type of its default; omitted arguments use
-        # the fetcher's own defaults.
+        # The fetcher is resolved at call time; only arguments it declares are passed,
+        # coerced to the type of its default.
         async def handler(args):
             fetch = getattr(feeds, fetch_name)
             kwargs = {}
@@ -532,48 +493,33 @@ def create_feed_tool_defs() -> List[ToolDefinition]:
 
 
 def create_sessions_tool_defs(
-    memory: MemoryManager, team_id: str, pi_id: str, team_registry=None,
+    memory: MemoryManager, team_id: str, pi_id: str, *,
     company_id: Optional[str] = None,
     shared_teams: Optional[List[str]] = None,
 ) -> List[ToolDefinition]:
-    """Create ToolDefinitions for agent-to-agent messaging."""
     import datetime
 
     def _can_access_target(target: str) -> bool:
-        """Check if this Pi's company can access the target team."""
         if "/" not in target:
-            # Global team — allowed (same as orchestrator logic for sessions)
-            if company_id is None:
-                return True
-            if shared_teams is None:
-                return True
-            return target in shared_teams
-        owner = target.split("/", 1)[0]
-        return company_id is not None and company_id == owner
+            # Global team: open unless the company has a shared-team whitelist
+            return company_id is None or shared_teams is None or target in shared_teams
+        return company_id is not None and company_id == target.split("/", 1)[0]
 
     async def sessions_send(args):
         target = args["target_team"]
         if not _can_access_target(target):
             return f"Access denied: cannot send to {target} (cross-company)"
-        msg = args["message"]
         entry = {
             "from_team": team_id,
             "from_pi": pi_id,
-            "message": msg,
+            "message": args["message"],
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         memory.append_team_memory(target, "inbox.json", entry)
         return f"Message sent to {target}/inbox.json"
 
     async def sessions_list(args):
-        if team_registry and hasattr(team_registry, "list_teams"):
-            teams = [t for t in team_registry.list_teams()
-                     if t not in (team_registry.list_meta_teams() if hasattr(team_registry, "list_meta_teams") else [])]
-        else:
-            teams = memory.list_teams()
-        # Filter to only accessible teams
-        teams = [t for t in teams if _can_access_target(t)]
-        return json.dumps(teams)
+        return json.dumps([t for t in memory.list_teams() if _can_access_target(t)])
 
     async def sessions_history(args):
         target = args.get("team_id", team_id)
@@ -581,8 +527,6 @@ def create_sessions_tool_defs(
             return json.dumps({"error": f"Access denied: cannot read {target} (cross-company)"})
         limit = int(args.get("limit", 10))
         inbox = memory.read_team_memory(target, "inbox.json")
-        if inbox is None:
-            inbox = []
         messages = inbox[-limit:] if isinstance(inbox, list) else []
         return json.dumps(messages, ensure_ascii=False, indent=2)
 
@@ -615,7 +559,6 @@ def create_sessions_tool_defs(
 
 
 def create_git_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
-    """Create ToolDefinitions for git operations."""
     from . import git_tools
 
     workspace_path = ctx.extra.get("workspace_path", "")
@@ -747,35 +690,24 @@ def create_git_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
 
 
 def create_orchestrator_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
-    """Create ToolDefinitions for CEO Agent orchestrator tools (run_team, run_auto)."""
     run_team_fn = ctx.extra.get("run_team_fn")
     run_auto_fn = ctx.extra.get("run_auto_fn")
     company_id = ctx.extra.get("company_id")
+    uc = {"company_id": company_id} if company_id else {}
 
     async def run_team(args):
-        if not run_team_fn:
-            return "Error: run_team not available in this context"
         team_id = args["team_id"]
-        task = args["task"]
-        mode = args.get("mode", "cascade")
-        uc = {"company_id": company_id} if company_id else {}
         try:
-            result = await run_team_fn(
-                task=task, team_id=team_id, mode=mode, user_context=uc,
+            return await run_team_fn(
+                task=args["task"], team_id=team_id, mode=args.get("mode", "cascade"), user_context=dict(uc),
             )
-            return result
         except Exception as e:
             return f"Error running team {team_id}: {e}"
 
     async def run_auto(args):
-        if not run_auto_fn:
-            return "Error: run_auto not available in this context"
-        task = args["task"]
-        mode = args.get("mode")
-        uc = {"company_id": company_id} if company_id else {}
         try:
             result, decision = await run_auto_fn(
-                task=task, mode=mode, user_context=uc,
+                task=args["task"], mode=args.get("mode"), user_context=dict(uc),
             )
             return (
                 f"Routed to: {[t.team_id for t in decision.teams]} "
@@ -823,14 +755,12 @@ def create_orchestrator_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
 
 @dataclass
 class ToolContext:
-    """Execution context passed to tool factories."""
     memory: MemoryManager
     team_id: str
     pi_id: str
     tools_config: List[str]
     user_context: Optional[Dict[str, Any]] = None
     user_scheduler: Any = None
-    team_registry: Any = None
     tools_deny: Set[str] = field(default_factory=set)
     extra: Dict[str, Any] = field(default_factory=dict)
     memory_backend: Optional[MemoryBackend] = None
@@ -847,7 +777,6 @@ class ToolProvider:
 
 
 def _requires(names: Set[str], presets: tuple = (), prerequisite: Optional[Callable[[ToolContext], bool]] = None):
-    """Build a provider `requires` check."""
     def check(ctx: ToolContext, default_all: bool = False) -> bool:
         if prerequisite is not None and not prerequisite(ctx):
             return False
@@ -856,7 +785,7 @@ def _requires(names: Set[str], presets: tuple = (), prerequisite: Optional[Calla
 
 
 def _scheduler_defs(ctx: ToolContext) -> List[ToolDefinition]:
-    uc = ctx.user_context or {}
+    uc = ctx.user_context
     return create_scheduler_tool_defs(
         ctx.user_scheduler,
         user_id=uc.get("user_id", ""),
@@ -868,7 +797,6 @@ def _scheduler_defs(ctx: ToolContext) -> List[ToolDefinition]:
 def _sessions_defs(ctx: ToolContext) -> List[ToolDefinition]:
     return create_sessions_tool_defs(
         ctx.memory, ctx.team_id, ctx.pi_id,
-        team_registry=ctx.team_registry,
         company_id=ctx.company_id,
         shared_teams=ctx.extra.get("company_shared_teams"),
     )
@@ -885,24 +813,16 @@ def _builtin_defs(ctx: ToolContext) -> List[ToolDefinition]:
 
 
 def _public_knowledge_enabled(ctx: ToolContext) -> bool:
-    import os
     return os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true")
 
 
 class ToolRegistry:
-    """Pluggable tool registry."""
-
     def __init__(self):
         self._providers: Dict[str, ToolProvider] = {}
         self._custom_presets: Dict[str, List[str]] = {}
         self._skills: Dict[str, SkillDefinition] = {}
-        self._external_mcp_configs: Dict[str, dict] = {}  # name -> MCP server config
+        self._external_mcp_configs: Dict[str, dict] = {}  # company-scoped names are "{company_id}/{name}"
         self.memory_backend: Optional[MemoryBackend] = None  # set by orchestrator
-        self._company_mcp_names: Dict[str, set] = {}  # company_id -> set of scoped names
-        self._register_builtins()
-
-    def _register_builtins(self) -> None:
-        """Register the built-in tool providers."""
         for provider in (
             ToolProvider("builtin", CLAUDE_BUILTIN_TOOLS, _builtin_defs, requires=lambda ctx, default_all=False: True),
             ToolProvider(
@@ -921,12 +841,10 @@ class ToolRegistry:
                 "sessions", SESSIONS_TOOL_NAMES, _sessions_defs,
                 _requires(SESSIONS_TOOL_NAMES, ("messenger",)),
             ),
-            # Orchestrator tools need run_team_fn in the run context.
             ToolProvider(
                 "orchestrator", ORCHESTRATOR_TOOL_NAMES, create_orchestrator_tool_defs,
                 _requires(ORCHESTRATOR_TOOL_NAMES, ("ceo",), lambda ctx: bool(ctx.extra.get("run_team_fn"))),
             ),
-            # Git tools need a workspace attached to the run.
             ToolProvider(
                 "git", GIT_TOOL_NAMES, create_git_tool_defs,
                 _requires(GIT_TOOL_NAMES, ("coder", "code-reviewer"), lambda ctx: bool(ctx.extra.get("workspace_path"))),
@@ -939,118 +857,84 @@ class ToolRegistry:
             self.register(provider)
 
     def register(self, provider: ToolProvider) -> None:
-        """Add or replace a tool provider."""
         self._providers[provider.name] = provider
 
-    def unregister(self, name: str) -> None:
-        """Remove a tool provider."""
-        self._providers.pop(name, None)
-
-    def register_preset(self, name: str, tool_names: List[str]) -> None:
-        """Add a custom tool preset."""
-        self._custom_presets[name] = tool_names
-
     def register_skill(self, skill: SkillDefinition) -> None:
-        """Register a skill and add it as a custom preset."""
         self._skills[skill.name] = skill
         if skill.tools:
             self._custom_presets[skill.name] = skill.tools
 
     def register_external_mcp(self, name: str, sdk_config: dict) -> None:
-        """Register an external MCP server config (shared across all teams)."""
         self._external_mcp_configs[name] = sdk_config
 
     def register_company_mcp(self, company_id: str, name: str, sdk_config: dict) -> None:
-        """Register a company-scoped MCP server."""
-        scoped_name = f"{company_id}/{name}"
-        self._external_mcp_configs[scoped_name] = sdk_config
-        self._company_mcp_names.setdefault(company_id, set()).add(scoped_name)
-
-    def get_external_mcp_servers(self, company_id: Optional[str] = None) -> Dict[str, dict]:
-        """Return external MCP server configs."""
-        result = {}
-        for name, cfg in self._external_mcp_configs.items():
-            if "/" not in name:
-                result[name] = cfg
-            elif company_id and name.startswith(f"{company_id}/"):
-                result[name] = cfg
-        return result
+        self._external_mcp_configs[f"{company_id}/{name}"] = sdk_config
 
     def unregister_company_mcp(self, company_id: str) -> None:
-        """Remove all MCP servers belonging to a company."""
-        names = self._company_mcp_names.pop(company_id, set())
-        for name in names:
-            self._external_mcp_configs.pop(name, None)
+        for name in [n for n in self._external_mcp_configs if n.startswith(f"{company_id}/")]:
+            del self._external_mcp_configs[name]
 
     def get_skill_instructions(self, tools_config: List[str]) -> str:
-        """Return combined instructions for all active skills."""
-        parts = []
-        for skill in self._skills.values():
-            if not skill.instructions:
-                continue
-            if not tools_config:
-                parts.append(f"# Skill: {skill.name}\n{skill.instructions}")
-            elif skill.name in tools_config or any(t in tools_config for t in skill.tools):
-                parts.append(f"# Skill: {skill.name}\n{skill.instructions}")
-        return "\n\n".join(parts)
+        return "\n\n".join(
+            f"# Skill: {skill.name}\n{skill.instructions}"
+            for skill in self._skills.values()
+            if skill.instructions and (
+                not tools_config or skill.name in tools_config or any(t in tools_config for t in skill.tools)
+            )
+        )
 
-    def resolve_all_tools(self, tools_deny: Optional[Set[str]] = None) -> List[str]:
-        """Resolve ALL known tools minus deny set (for default-all mode)."""
-        all_tools: List[str] = []
+    def resolve_tool_names(
+        self, tools_config: List[str], tools_deny: Optional[Set[str]] = None,
+    ) -> List[str]:
+        """Allowed tool names; an empty tools_config means every tool except orchestrator and git."""
+        if tools_config:
+            expanded = [t for name in tools_config for t in self._custom_presets.get(name, [name])]
+            # A skill nested in a skill only contributes its exact-named non-core tools.
+            exact = set(expanded).union(*(self._custom_presets.get(name, ()) for name in expanded))
+            names = resolve_tool_names(expanded) + [
+                t for p in self._providers.values() if p.name not in ("memory", "scheduler", "feed", "sessions")
+                for t in p.tool_names if t in exact
+            ]
+        else:
+            names = [
+                n for p in self._providers.values() if p.name not in ("orchestrator", "git")
+                for n in sorted(p.tool_names)
+            ]
+        # Deny entries may use the legacy mcp__<server>__<tool> form.
+        deny = set(tools_deny or ()) | {d.rsplit("__", 1)[-1] for d in tools_deny or ()}
+        return [n for n in dict.fromkeys(names) if n not in deny]
 
-        # Built-in SDK tools
-        all_tools.extend(sorted(CLAUDE_BUILTIN_TOOLS))
-
-        # Custom tool names (with MCP prefix)
-        for name in sorted(CUSTOM_TOOL_NAMES):
-            all_tools.append(f"mcp__mem__{name}")
-        for name in sorted(SCHEDULER_TOOL_NAMES):
-            all_tools.append(f"mcp__sched__{name}")
-        for name in sorted(FEED_TOOL_NAMES):
-            all_tools.append(f"mcp__feed__{name}")
-        for name in sorted(SESSIONS_TOOL_NAMES):
-            all_tools.append(f"mcp__sessions__{name}")
-
-        # Tools from custom providers (skip orchestrator/git -require explicit opt-in)
-        for provider in self._providers.values():
-            if provider.name in ("memory", "scheduler", "feed", "sessions", "orchestrator", "git"):
-                continue
-            for tool_name in provider.tool_names:
-                all_tools.append(f"mcp__{provider.name}__{tool_name}")
-
-        # Dedupe
-        all_tools = list(dict.fromkeys(all_tools))
-
-        # Apply deny filter
-        if tools_deny:
-            all_tools = [t for t in all_tools if t not in tools_deny]
-
-        return all_tools
+    def _is_active(self, provider: ToolProvider, ctx: ToolContext) -> bool:
+        if not ctx.tools_config:
+            return provider.requires is None or provider.requires(ctx, default_all=True)
+        if provider.requires is not None:
+            return provider.requires(ctx)
+        # Exact names, one preset level deep: resolving further would grant memory tools to more Pis.
+        named = {
+            t for name in ctx.tools_config
+            for t in TOOL_PRESETS.get(name) or self._custom_presets.get(name) or [name]
+        }
+        return bool(provider.tool_names & named)
 
     def get_tool_defs(self, ctx: ToolContext) -> List[ToolDefinition]:
-        """ToolDefinitions from active providers that this Pi is allowed to use."""
-        allowed = {
-            name.rsplit("__", 1)[-1]
-            for name in self.resolve_tool_names(ctx.tools_config, tools_deny=ctx.tools_deny)
-        }
-        defs: List[ToolDefinition] = []
-        seen: Set[str] = set()
+        allowed = set(self.resolve_tool_names(ctx.tools_config, ctx.tools_deny))
+        defs: Dict[str, ToolDefinition] = {}
         for provider in self._providers.values():
-            if not provider.factory or not self._is_active(provider, ctx):
-                continue
-            for d in provider.factory(ctx) or []:
-                if d.name in allowed and d.name not in ctx.tools_deny and d.name not in seen:
-                    seen.add(d.name)
-                    defs.append(d)
-        return defs
+            if provider.factory and self._is_active(provider, ctx):
+                for d in provider.factory(ctx):
+                    if d.name in allowed:
+                        defs.setdefault(d.name, d)
+        return list(defs.values())
 
     def get_tools(self, ctx: ToolContext) -> list:
-        """LangChain tools for this Pi run."""
         return definitions_to_langchain(self.get_tool_defs(ctx))
 
-    async def get_external_mcp_tools(self, company_id: Optional[str] = None, tools_deny: Optional[Set[str]] = None) -> list:
-        """Load tools from the external MCP servers visible to this company."""
-        configs = self.get_external_mcp_servers(company_id=company_id)
+    async def get_external_mcp_tools(self, company_id: Optional[str] = None, tools_deny: Set[str] = frozenset()) -> list:
+        """Load tools from the global MCP servers and those scoped to this company."""
+        configs = {
+            name: cfg for name, cfg in self._external_mcp_configs.items()
+            if "/" not in name or (company_id and name.startswith(f"{company_id}/"))
+        }
         if not configs:
             return []
         from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -1062,74 +946,10 @@ class ToolRegistry:
                 tools.extend(await client.get_tools())
             except Exception as e:
                 logger.warning("External MCP server %r unavailable: %s", name, e)
-        deny = tools_deny or set()
-        return [t for t in tools if t.name not in deny]
-
-    def resolve_tool_names(
-        self, tools_config: List[str], tools_deny: Optional[Set[str]] = None,
-    ) -> List[str]:
-        """Resolve tool names, including custom provider prefixes."""
-        # Default-all mode: empty tools_config -all tools
-        if not tools_config:
-            return self.resolve_all_tools(tools_deny=tools_deny)
-
-        # Resolve custom presets (skills) alongside built-in presets
-        expanded = []
-        for name in tools_config:
-            if name in self._custom_presets:
-                expanded.extend(self._custom_presets[name])
-            else:
-                expanded.append(name)
-
-        resolved = resolve_tool_names(expanded)
-
-        # Add mcp__{provider}__{tool} prefixes for custom (non-builtin) providers
-        for provider in self._providers.values():
-            if provider.name in ("memory", "scheduler", "feed", "sessions"):
-                continue
-            for tool_name in provider.tool_names:
-                if tool_name in expanded or any(
-                    p in expanded for p in self._custom_presets
-                    if tool_name in self._custom_presets.get(p, [])
-                ):
-                    resolved.append(f"mcp__{provider.name}__{tool_name}")
-
-        resolved = list(dict.fromkeys(resolved))
-
-        # Apply deny filter
-        if tools_deny:
-            resolved = [t for t in resolved if t not in tools_deny]
-
-        return resolved
-
-    def list_providers(self) -> List[str]:
-        """List all registered provider names."""
-        return list(self._providers.keys())
-
-    def _is_active(self, provider: ToolProvider, ctx: ToolContext) -> bool:
-        """Check if a provider should be activated for this context."""
-        # Default-all mode: empty tools_config -all providers active
-        if not ctx.tools_config:
-            if provider.requires is not None:
-                # In default-all mode, only check prerequisites (not tools_config membership)
-                return provider.requires(ctx, default_all=True)
-            return True
-        if provider.requires is not None:
-            return provider.requires(ctx)
-        # Default: active if any of its tool names appear in tools_config
-        resolved_names = set()
-        for name in ctx.tools_config:
-            if name in TOOL_PRESETS:
-                resolved_names.update(TOOL_PRESETS[name])
-            elif name in self._custom_presets:
-                resolved_names.update(self._custom_presets[name])
-            else:
-                resolved_names.add(name)
-        return bool(provider.tool_names & resolved_names)
+        return [t for t in tools if t.name not in tools_deny]
 
 
 def _to_mcp_connection(cfg: dict) -> dict:
-    """Convert a stored MCP server config to a langchain-mcp-adapters connection."""
     transport = cfg.get("type", "stdio")
     if transport == "stdio":
         conn = {"transport": "stdio", "command": cfg["command"], "args": list(cfg.get("args", []))}
@@ -1142,82 +962,36 @@ def _to_mcp_connection(cfg: dict) -> dict:
     return conn
 
 
+_TOOL_ALIASES = {
+    "web_search": "WebSearch", "websearch": "WebSearch",
+    "web_fetch": "WebFetch", "webfetch": "WebFetch",
+    "read": "Read", "write": "Write", "edit": "Edit", "glob": "Glob", "grep": "Grep",
+    "bash": "Bash", "exec": "Bash",
+    "openbb": "fetch_openbb",
+}
+_LOWERCASE_TOOL_NAMES = (
+    CUSTOM_TOOL_NAMES | SCHEDULER_TOOL_NAMES | FEED_TOOL_NAMES | SESSIONS_TOOL_NAMES
+    | ORCHESTRATOR_TOOL_NAMES | GIT_TOOL_NAMES
+)
+
+
+def _normalize_tool_name(name: str) -> str:
+    lowered = name.lower()
+    if lowered in _TOOL_ALIASES:
+        return _TOOL_ALIASES[lowered]
+    # Unknown names keep their case; a legacy mcp__<server>__ prefix is dropped.
+    return lowered if lowered in _LOWERCASE_TOOL_NAMES else name.rsplit("__", 1)[-1]
+
+
 def resolve_tool_names(tools_config: List[str], _seen: Optional[set] = None) -> List[str]:
-    """Resolve tool config strings to actual tool names."""
+    """Expand presets and aliases into canonical tool names (deduped, order preserved)."""
     if _seen is None:
         _seen = set()
     resolved = []
     for name in tools_config:
-        # Check presets first (with cycle detection)
-        if name in TOOL_PRESETS:
-            if name in _seen:
-                continue
+        if name not in TOOL_PRESETS:
+            resolved.append(_normalize_tool_name(name))
+        elif name not in _seen:  # presets may reference each other
             _seen.add(name)
             resolved.extend(resolve_tool_names(TOOL_PRESETS[name], _seen))
-            continue
-
-        # Normalize common aliases
-        normalized = _normalize_tool_name(name)
-        if normalized in CLAUDE_BUILTIN_TOOLS:
-            resolved.append(normalized)
-        elif normalized in CUSTOM_TOOL_NAMES:
-            resolved.append(f"mcp__mem__{normalized}")
-        elif normalized in SCHEDULER_TOOL_NAMES:
-            resolved.append(f"mcp__sched__{normalized}")
-        elif normalized in FEED_TOOL_NAMES:
-            resolved.append(f"mcp__feed__{normalized}")
-        elif normalized in SESSIONS_TOOL_NAMES:
-            resolved.append(f"mcp__sessions__{normalized}")
-        elif normalized in ORCHESTRATOR_TOOL_NAMES:
-            resolved.append(f"mcp__orchestrator__{normalized}")
-        elif normalized in GIT_TOOL_NAMES:
-            resolved.append(f"mcp__git__{normalized}")
-        else:
-            # Pass through as-is (user might know what they're doing)
-            resolved.append(name)
-
-    return list(dict.fromkeys(resolved))  # dedupe preserving order
-
-
-def _normalize_tool_name(name: str) -> str:
-    """Normalize tool name aliases to canonical form."""
-    aliases = {
-        "web_search": "WebSearch",
-        "websearch": "WebSearch",
-        "web_fetch": "WebFetch",
-        "webfetch": "WebFetch",
-        "read": "Read",
-        "write": "Write",
-        "edit": "Edit",
-        "bash": "Bash",
-        "exec": "Bash",
-        "glob": "Glob",
-        "grep": "Grep",
-        "memory_read": "memory_read",
-        "memory_write": "memory_write",
-        "memory_list": "memory_list",
-        "memory_index": "memory_index",
-        "memory_search": "memory_search",
-        "schedule_task": "schedule_task",
-        "list_schedules": "list_schedules",
-        "cancel_schedule": "cancel_schedule",
-        "brave_search": "brave_search",
-        "fetch_rss": "fetch_rss",
-        "fetch_reddit": "fetch_reddit",
-        "fetch_hn": "fetch_hn",
-        "fetch_x": "fetch_x",
-        "fetch_openbb": "fetch_openbb",
-        "openbb": "fetch_openbb",
-        "sessions_send": "sessions_send",
-        "sessions_list": "sessions_list",
-        "sessions_history": "sessions_history",
-        "run_team": "run_team",
-        "run_auto": "run_auto",
-        "git_status": "git_status",
-        "git_diff": "git_diff",
-        "git_log": "git_log",
-        "git_branch": "git_branch",
-        "git_commit": "git_commit",
-        "git_push": "git_push",
-    }
-    return aliases.get(name.lower(), name)
+    return list(dict.fromkeys(resolved))

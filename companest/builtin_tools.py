@@ -35,7 +35,6 @@ def _is_public_host(host: str) -> bool:
 
 
 def create_builtin_tool_defs(ctx) -> List:
-    """Create the built-in ToolDefinitions available for this run."""
     from .tools import ToolDefinition
 
     defs = _web_tool_defs(ToolDefinition)
@@ -155,8 +154,7 @@ def _web_tool_defs(ToolDefinition) -> List:
             return "Error: refusing to fetch a non-public address"
         import httpx
         try:
-            # Redirects are not followed, so a public URL cannot bounce the
-            # request to an internal address.
+            # Redirects are not followed, so a public URL cannot bounce the request to an internal address.
             async with httpx.AsyncClient(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=False) as client:
                 resp = await client.get(url, headers={"User-Agent": "Companest/1.0"})
         except httpx.HTTPError as e:
