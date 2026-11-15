@@ -1,46 +1,20 @@
-"""
-Conditional execution mode -lead Pi evaluates -branch decision -execute.
-
-ConditionalMode: lead Pi receives the task and decides which team/mode
-to route to. Optionally loops back for multi-step decisions.
-"""
-
 import logging
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 
-from . import ExecutionMode, ProgressCallback
+from . import ExecutionMode, ProgressCallback, _lead_pi, _with_memory_task_hint
 from ..exceptions import PiError, TeamError
 from ..utils import extract_json_object
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..team import AgentTeam
+    from ..agents.team import AgentTeam
 
 logger = logging.getLogger(__name__)
 
-
-def _with_memory_task_hint(
-    user_context: Optional[Dict[str, Any]],
-    task_hint: str,
-) -> Dict[str, Any]:
-    """Attach a retrieval hint for internal conditional prompts."""
-    ctx = dict(user_context) if user_context else {}
-    if task_hint:
-        ctx["memory_task_hint"] = task_hint
-    return ctx
-
-# Type for the injected run_team function
 RunTeamFn = Callable[..., Coroutine[Any, Any, str]]
 
 
 class ConditionalMode(ExecutionMode):
-    """Conditional branching: lead Pi evaluates task -picks branch team -executes.
-
-    Flow:
-        1. Lead Pi evaluates task -returns branch decision (JSON)
-        2. Based on decision, call run_team_fn(branch_team, ...)
-        3. Optional: loop back to lead Pi for next-step decision (max_steps)
-    """
+    """Conditional branching: lead Pi evaluates task -picks branch team -executes."""
 
     def __init__(self, run_team_fn: RunTeamFn, max_steps: int = 5):
         self._run_team_fn = run_team_fn
@@ -57,17 +31,10 @@ class ConditionalMode(ExecutionMode):
         on_progress: ProgressCallback = None,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        if not team.lead_pi_id or team.lead_pi_id not in team.pis:
-            raise TeamError(
-                f"Team '{team.id}' has no valid lead_pi",
-                details={"lead_pi": team.lead_pi_id, "available": list(team.pis.keys())},
-            )
-
-        pi = team.pis[team.lead_pi_id]
+        pi = _lead_pi(team)
         accumulated_results: List[str] = []
 
         for step in range(self._max_steps):
-            # Build decision prompt with accumulated context
             progress = ""
             if accumulated_results:
                 progress = "\n\n## Previous Steps\n" + "\n---\n".join(
@@ -103,7 +70,6 @@ class ConditionalMode(ExecutionMode):
 
             decision = _parse_decision(raw)
 
-            # Retry once if JSON parsing failed
             if not decision:
                 logger.info(f"[Team:{team.id}] Decision parse failed, retrying with correction prompt")
                 try:
@@ -126,12 +92,10 @@ class ConditionalMode(ExecutionMode):
                 logger.warning(f"[Team:{team.id}] Could not parse decision after retry, returning raw LLM output")
                 return raw
 
-            # Validate required fields
             if not decision.get("done") and not decision.get("team"):
                 logger.warning(f"[Team:{team.id}] Decision missing 'team' and not done, returning raw")
                 return raw
 
-            # Done -return summary
             if decision.get("done"):
                 summary = decision.get("summary", "")
                 if summary:
@@ -140,8 +104,7 @@ class ConditionalMode(ExecutionMode):
                     return accumulated_results[-1]
                 return raw
 
-            # Route to branch team
-            branch_team = decision.get("team", "")
+            branch_team = decision["team"]
             branch_mode = decision.get("mode", "default")
             sub_task = decision.get("sub_task", task)
 
@@ -176,7 +139,6 @@ class ConditionalMode(ExecutionMode):
                     details={"step": step + 1, "team": branch_team},
                 )
 
-        # Max steps reached -return last result
         logger.warning(
             f"[Team:{team.id}] Conditional mode hit max_steps={self._max_steps}"
         )
@@ -185,7 +147,4 @@ class ConditionalMode(ExecutionMode):
         raise TeamError(f"Conditional mode produced no results after {self._max_steps} steps")
 
 
-def _parse_decision(raw: str) -> Optional[Dict[str, Any]]:
-    """Parse a JSON decision from LLM output using robust balanced-brace extraction."""
-    return extract_json_object(raw)
-
+_parse_decision = extract_json_object

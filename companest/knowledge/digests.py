@@ -1,36 +1,22 @@
-"""
-Company-private digest ingestion.
-
-External trader systems push structured digests (market snapshots, positions,
-PnL, risk, settlements, approval queues). Each digest is validated, deduplicated
-by (company_id, digest_type, idempotency_key) and stored per company in S3:
-
-    {prefix}{company_id}/{digest_type}/{idempotency_key}.json
-    {prefix}{company_id}/{digest_type}/latest.json
-
-The JSON schemas in contracts/digests/ mirror the models below.
-"""
+"""Company-private digest ingestion."""
 
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Set, Type
 
 from pydantic import BaseModel, Field
 
-from ..company import _SAFE_ID_RE
+from ..utils import synchronized
+from ..companies.company import _SAFE_ID_RE
 from .s3 import S3JsonStore
 
 logger = logging.getLogger(__name__)
 
 
-# -- Envelope (shared fields) --
-
-
 class DigestEnvelope(BaseModel):
-    """Common envelope fields shared by all digest types."""
-
     company_id: str = Field(..., description="Company that owns this digest")
     digest_type: str = Field(..., description="Type discriminator")
     schema_version: str = Field(..., description="Schema version string")
@@ -44,12 +30,7 @@ class DigestEnvelope(BaseModel):
     model_config = {"extra": "forbid"}
 
 
-# -- Nested item models --
-
-
 class MarketItem(BaseModel):
-    """A single market entry in a market snapshot."""
-
     ticker: str
     title: str
     yes_price: float = Field(..., ge=0, le=100)
@@ -61,8 +42,6 @@ class MarketItem(BaseModel):
 
 
 class PositionItem(BaseModel):
-    """A single position entry."""
-
     ticker: str
     market_title: Optional[str] = None
     side: Literal["yes", "no"]
@@ -75,8 +54,6 @@ class PositionItem(BaseModel):
 
 
 class SettlementItem(BaseModel):
-    """A single settlement event."""
-
     ticker: str
     market_title: Optional[str] = None
     outcome: Literal["yes", "no"]
@@ -88,8 +65,6 @@ class SettlementItem(BaseModel):
 
 
 class ApprovalItem(BaseModel):
-    """A single pending approval entry."""
-
     order_id: str
     ticker: str
     market_title: Optional[str] = None
@@ -102,28 +77,19 @@ class ApprovalItem(BaseModel):
     model_config = {"extra": "forbid"}
 
 
-# -- Digest models --
-
-
 class MarketSnapshotDigest(DigestEnvelope):
-    """Snapshot of markets a trader is actively watching."""
-
     digest_type: Literal["market_snapshot"] = "market_snapshot"
     schema_version: Literal["1.0.0"] = "1.0.0"
     markets: List[MarketItem]
 
 
 class PositionsDigest(DigestEnvelope):
-    """Current positions held by a trader."""
-
     digest_type: Literal["positions"] = "positions"
     schema_version: Literal["1.0.0"] = "1.0.0"
     positions: List[PositionItem]
 
 
 class PnLDigest(DigestEnvelope):
-    """Profit and loss summary for a trader."""
-
     digest_type: Literal["pnl"] = "pnl"
     schema_version: Literal["1.0.0"] = "1.0.0"
     daily_pnl: Optional[float] = Field(
@@ -144,8 +110,6 @@ class PnLDigest(DigestEnvelope):
 
 
 class RiskDigest(DigestEnvelope):
-    """Risk metrics for a trader."""
-
     digest_type: Literal["risk"] = "risk"
     schema_version: Literal["1.0.0"] = "1.0.0"
     total_exposure: float = Field(
@@ -170,22 +134,16 @@ class RiskDigest(DigestEnvelope):
 
 
 class SettlementDigest(DigestEnvelope):
-    """Recent settlement events for a trader."""
-
     digest_type: Literal["settlement"] = "settlement"
     schema_version: Literal["1.0.0"] = "1.0.0"
     settlements: List[SettlementItem]
 
 
 class ApprovalQueueDigest(DigestEnvelope):
-    """Pending trade approvals awaiting human review."""
-
     digest_type: Literal["approval_queue"] = "approval_queue"
     schema_version: Literal["1.0.0"] = "1.0.0"
     pending_approvals: List[ApprovalItem]
 
-
-# -- Type map --
 
 DIGEST_TYPE_MAP: Dict[str, Type[DigestEnvelope]] = {
     "market_snapshot": MarketSnapshotDigest,
@@ -197,19 +155,14 @@ DIGEST_TYPE_MAP: Dict[str, Type[DigestEnvelope]] = {
 }
 
 
-# -- Storage --
-
-
 class DigestS3Store(S3JsonStore):
-    """S3-backed storage for company-private digests."""
-
     def __init__(self, bucket: str = "", prefix: str = "companest-digests/",
                  region: str = "us-east-1", endpoint_url: Optional[str] = None) -> None:
         super().__init__(bucket, prefix, region, endpoint_url)
 
     def put_digest(self, company_id: str, digest_type: str,
                    digest_data: Dict[str, Any], idempotency_key: str) -> str:
-        """Store a digest and update the latest pointer. Returns the S3 key."""
+        """Store a digest and update the latest pointer."""
         body = json.dumps(digest_data, ensure_ascii=False, default=str)
         base = f"{company_id}/{digest_type}"
         key = self._put(f"{base}/{idempotency_key}.json", body)
@@ -217,17 +170,11 @@ class DigestS3Store(S3JsonStore):
         return key
 
     def get_latest_digest(self, company_id: str, digest_type: str) -> Optional[Dict[str, Any]]:
-        """Return the latest digest for a company and type, or None."""
         return self._get_json(f"{company_id}/{digest_type}/latest.json")
-
-
-# -- Ingestion --
 
 
 @dataclass
 class IngestResult:
-    """Result of a digest ingestion attempt."""
-
     accepted: bool
     reason: str
     digest_type: str
@@ -235,17 +182,12 @@ class IngestResult:
 
 
 class DigestIngestor:
-    """
-    Validates, deduplicates and stores digests.
-
-    Idempotency is tracked in memory (single instance): a repeated
-    (company_id, digest_type, idempotency_key) is accepted without re-uploading.
-    """
-
     def __init__(self, s3_store: DigestS3Store) -> None:
         self._s3_store = s3_store
         self._seen_keys: Set[str] = set()
+        self._io_lock = threading.RLock()
 
+    @synchronized
     def ingest(self, digest: DigestEnvelope) -> IngestResult:
         def result(accepted: bool, reason: str) -> IngestResult:
             return IngestResult(accepted, reason, digest.digest_type, digest.company_id)
@@ -273,11 +215,7 @@ class DigestIngestor:
         return result(True, "accepted")
 
 
-# -- HTTP API --
-
-
 def create_digest_router(s3_store: DigestS3Store):
-    """Build the FastAPI router for digest ingestion and retrieval."""
     from fastapi import APIRouter, HTTPException
 
     router = APIRouter(prefix="/api/companies")
@@ -292,7 +230,7 @@ def create_digest_router(s3_store: DigestS3Store):
         return model_cls
 
     @router.post("/{company_id}/digests/{digest_type}")
-    async def ingest_digest(company_id: str, digest_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def ingest_digest(company_id: str, digest_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         model_cls = check(company_id, digest_type)
         # Path parameters are authoritative for the envelope fields.
         payload["company_id"] = company_id
@@ -313,7 +251,7 @@ def create_digest_router(s3_store: DigestS3Store):
         }
 
     @router.get("/{company_id}/digests/{digest_type}/latest")
-    async def get_latest_digest(company_id: str, digest_type: str) -> Dict[str, Any]:
+    def get_latest_digest(company_id: str, digest_type: str) -> Dict[str, Any]:
         check(company_id, digest_type)
         data = s3_store.get_latest_digest(company_id, digest_type)
         if data is None:

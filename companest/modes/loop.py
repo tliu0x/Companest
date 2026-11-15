@@ -1,35 +1,16 @@
-"""
-Loop execution mode -decompose -iterate with fresh context -synthesize.
-
-Ralph Loop: each subtask runs as an independent Pi.run() call with a clean
-context window. Progress is persisted in team memory for auditing.
-"""
-
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from . import ExecutionMode, ProgressCallback
+from ..utils import run_sync, extract_json_array
+from . import ExecutionMode, ProgressCallback, _lead_pi, _with_memory_task_hint
 from ..exceptions import PiError, TeamError
-from ..utils import extract_json_array
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..team import AgentTeam
-    from ..pi import Pi
+    from ..agents.team import AgentTeam
+    from ..agents.pi import Pi
 
 logger = logging.getLogger(__name__)
-
-
-def _with_memory_task_hint(
-    user_context: Optional[Dict[str, Any]],
-    task_hint: str,
-) -> Dict[str, Any]:
-    """Attach a retrieval hint for internal loop prompts."""
-    ctx = dict(user_context) if user_context else {}
-    if task_hint:
-        ctx["memory_task_hint"] = task_hint
-    return ctx
 
 
 class LoopMode(ExecutionMode):
@@ -50,13 +31,7 @@ class LoopMode(ExecutionMode):
         on_progress: ProgressCallback = None,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        if not team.lead_pi_id or team.lead_pi_id not in team.pis:
-            raise TeamError(
-                f"Team '{team.id}' has no valid lead_pi",
-                details={"lead_pi": team.lead_pi_id, "available": list(team.pis.keys())},
-            )
-
-        pi = team.pis[team.lead_pi_id]
+        pi = _lead_pi(team)
         task_hash = hashlib.sha256(task.encode()).hexdigest()[:8]
         progress_key = f"progress-{task_hash}.json"
 
@@ -105,7 +80,7 @@ class LoopMode(ExecutionMode):
                 logger.warning(f"[Team:{team.id}] Subtask {i+1} failed: {e}")
                 entry = {"subtask": subtask, "status": "failed", "error": str(e)}
             results.append(entry)
-            team.memory.append_team_memory(team.id, progress_key, entry)
+            await run_sync(team.memory.append_team_memory, team.id, progress_key, entry)
 
         successful = [result for result in results if result["status"] == "done"]
         if not successful:
@@ -129,7 +104,7 @@ class LoopMode(ExecutionMode):
         )
 
         try:
-            team.memory.delete_team_memory(team.id, progress_key)
+            await run_sync(team.memory.delete_team_memory, team.id, progress_key)
         except Exception:
             pass
 
@@ -143,7 +118,6 @@ class LoopMode(ExecutionMode):
         cascade: bool,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
-        """Ask lead Pi to break a task into subtasks (JSON array)."""
         prompt = (
             f"Break this task into sequential subtasks (max {max_subtasks}).\n"
             "Return ONLY a JSON array of strings, each a clear actionable subtask.\n"
@@ -160,10 +134,6 @@ class LoopMode(ExecutionMode):
 
 
 def _parse_json_array(raw: str, max_items: int) -> List[str]:
-    """Extract a JSON array of strings from LLM output (may contain markdown).
-
-    Uses robust balanced-bracket extraction from utils, with a line-based fallback.
-    """
     parsed = extract_json_array(raw, max_items=max_items)
     if parsed is not None:
         return [str(x) for x in parsed]
@@ -177,9 +147,6 @@ def _parse_json_array(raw: str, max_items: int) -> List[str]:
 
 
 def _format_progress(results: List[Dict]) -> str:
-    """Brief progress summary for injection into subtask prompts (stays in smart zone)."""
-    if not results:
-        return ""
     lines = []
     for i, result in enumerate(results):
         status = "Done" if result["status"] == "done" else "Failed"
@@ -189,7 +156,6 @@ def _format_progress(results: List[Dict]) -> str:
 
 
 def _format_full_results(results: List[Dict]) -> str:
-    """Full results for the synthesis step."""
     parts = []
     for i, result in enumerate(results):
         if result["status"] == "done":
@@ -197,6 +163,6 @@ def _format_full_results(results: List[Dict]) -> str:
         else:
             parts.append(
                 f"### Subtask {i+1}: {result['subtask']}\n"
-                f"[FAILED: {result.get('error', 'unknown')}]"
+                f"[FAILED: {result['error']}]"
             )
     return "\n\n".join(parts)

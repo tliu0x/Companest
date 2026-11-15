@@ -1,18 +1,3 @@
-"""
-Companest Memory Manager
-
-Hierarchical memory system for Pi Agent Teams:
-- Master level: soul.md, identity.md, user.md, global memory/
-- Shared level: shared/ (read-only for all teams)
-- Team level: teams/{id}/memory/ (shared within team)
-- Pi level: teams/{id}/pis/{pi_id}/ (soul.md per pi)
-
-Responsibilities:
-- Read/write memory files (JSON, Markdown)
-- Build system prompts by composing soul + memory + context
-- Provide MCP server for Pi memory tools
-"""
-
 import copy
 import json
 import logging
@@ -26,16 +11,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from ..utils import synchronized
 from ..exceptions import CompanestError
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryError(CompanestError):
-    """Raised for memory operation failures."""
     pass
-
-# Keep MemoryError local since it shadows builtin  not in exceptions.py
 
 
 @dataclass
@@ -59,35 +42,14 @@ class _DirCacheEntry:
 
 
 INDEX_FILENAME = ".index.json"
-ARCHIVE_INDEX_FILENAME = ".index.json"
 
-# Token budget for long-term memory in system prompts
-_MEMORY_TOKEN_BUDGET = 2000  # ~2000 tokens
-_CHARS_PER_TOKEN = 4  # conservative estimate
-
-
-@dataclass
-class MemoryEntryMeta:
-    """inode-like metadata for a single memory file."""
-    created_at: str          # ISO 8601
-    updated_at: str          # ISO 8601
-    access_count: int = 0
-    last_accessed: str = ""  # ISO 8601
-    size_bytes: int = 0
-    importance: float = 0.0  # 0.0-1.0, dreamer scores this
-    tier: str = "short"      # "short" | "long"
-    tags: List[str] = field(default_factory=list)
-    summary: str = ""        # one-line summary from dreaming
+_MEMORY_TOKEN_BUDGET = 2000
+_CHARS_PER_TOKEN = 4
 
 
 @dataclass
 class EnrichmentSource:
-    """
-    A data source that enriches system prompts.
-
-    External projects can register custom enrichment sources
-    to inject domain-specific context into Pi system prompts.
-    """
+    """A data source that enriches system prompts."""
     source_team_id: str
     memory_key: str
     section_title: str
@@ -97,88 +59,49 @@ class EnrichmentSource:
 
 
 class MemoryManager:
-    """
-    Hierarchical memory manager for Companest.
-
-    Directory layout:
-        base_path/
-         soul.md
-         identity.md
-         user.md
-         memory/
-         shared/
-         teams/{team_id}/
-             soul.md
-             memory/
-             pis/{pi_id}/soul.md
-    """
-
-    # Allowed characters for path components (team_id, pi_id, key)
     _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_./-]*$")
 
     def __init__(self, base_path: str = ".companest"):
         self.base_path = Path(base_path).resolve()
-        self._append_lock = threading.Lock()
-        self._enrichment_sources: List[EnrichmentSource] = []
-        # Three-layer mtime-based cache
+        self._io_lock = self._append_lock = threading.RLock()
         self._file_cache: Dict[Path, _FileCacheEntry] = {}
         self._prompt_cache: Dict[Tuple[str, str], _PromptCacheEntry] = {}
         self._dir_cache: Dict[Path, _DirCacheEntry] = {}
-        self._register_default_enrichments()
+        self._enrichment_sources: List[EnrichmentSource] = [
+            EnrichmentSource(
+                source_team_id="research",
+                memory_key="briefing.json",
+                section_title="World Briefing",
+                formatter=self._format_research_briefing,
+                exclude_teams={"research"},
+            ),
+            EnrichmentSource(
+                source_team_id="info-collection",
+                memory_key="feed.json",
+                section_title="Recent Feed",
+                formatter=self._format_info_feed,
+                exclude_teams={"info-collection"},
+            ),
+        ]
         self._team_path_overrides: Dict[str, Path] = {}
         if not self.base_path.exists():
             logger.warning(f"Memory base path does not exist: {self.base_path}")
 
-    def _register_default_enrichments(self) -> None:
-        """Register the two built-in enrichment sources."""
-        self._enrichment_sources.append(EnrichmentSource(
-            source_team_id="research",
-            memory_key="briefing.json",
-            section_title="World Briefing",
-            formatter=self._format_research_briefing,
-            exclude_teams={"research"},
-        ))
-        self._enrichment_sources.append(EnrichmentSource(
-            source_team_id="info-collection",
-            memory_key="feed.json",
-            section_title="Recent Feed",
-            formatter=self._format_info_feed,
-            exclude_teams={"info-collection"},
-        ))
-
+    @synchronized
     def register_enrichment(self, source: EnrichmentSource) -> None:
-        """Register a custom enrichment source."""
         self._enrichment_sources.append(source)
 
+    @synchronized
     def remove_enrichments_by_company(self, company_id: str) -> int:
-        """Remove all enrichment sources belonging to a company."""
         before = len(self._enrichment_sources)
         self._enrichment_sources = [s for s in self._enrichment_sources if s.company_id != company_id]
         return before - len(self._enrichment_sources)
 
-    #  Master level
-
-    def read_master_soul(self) -> str:
-        return self._read_file(self.base_path / "soul.md")
-
-    def read_master_identity(self) -> str:
-        return self._read_file(self.base_path / "identity.md")
-
+    @synchronized
     def read_master_user(self) -> str:
         return self._read_file(self.base_path / "user.md")
 
-    def read_global_memory(self, key: str) -> Any:
-        self._validate_path_component(key, "key")
-        return self._read_json(self.base_path / "memory" / key)
-
-    def write_global_memory(self, key: str, data: Any) -> None:
-        self._validate_path_component(key, "key")
-        path = self.base_path / "memory" / key
-        self._write_json(path, data)
-        self._file_cache.pop(path.resolve(), None)
-
-    #  Path validation 
-
+    @synchronized
     def _validate_path_component(self, value: str, label: str) -> str:
         """Validate a path component to prevent path traversal."""
         if not value:
@@ -189,86 +112,36 @@ class MemoryManager:
             raise MemoryError(f"Invalid {label}: {value!r} (alphanumeric, dash, underscore, dot only)")
         return value
 
-    def _validate_resolved_path(self, path: Path) -> Path:
-        """Ensure resolved path stays within base_path."""
-        resolved = path.resolve()
-        base_str = str(self.base_path)
-        if not (resolved == self.base_path or str(resolved).startswith(base_str + os.sep)):
-            raise MemoryError(f"Path escapes base directory: {path}")
-        return resolved
-
-    #  Shared level (read-only for teams) 
-
-    def read_shared(self, key: str) -> Any:
-        self._validate_path_component(key, "key")
-        return self._read_json(self.base_path / "shared" / key)
-
-    def write_shared(self, key: str, data: Any) -> None:
-        self._validate_path_component(key, "key")
-        path = self.base_path / "shared" / key
-        self._write_json(path, data)
-        self._file_cache.pop(path.resolve(), None)
-
-    #  Company shared memory 
-
-    def company_shared_path(self, company_id: str) -> Path:
-        """Path to a company's shared memory directory."""
-        self._validate_path_component(company_id, "company_id")
-        p = self.base_path / "companies" / company_id / "shared"
-        p.mkdir(parents=True, exist_ok=True)
-        return p
-
-    def read_company_shared(self, company_id: str, key: str) -> Any:
-        """Read from a company's shared memory namespace."""
-        self._validate_path_component(key, "key")
-        return self._read_json(self.company_shared_path(company_id) / key)
-
-    def write_company_shared(self, company_id: str, key: str, data: Any) -> None:
-        """Write to a company's shared memory namespace."""
-        self._validate_path_component(key, "key")
-        path = self.company_shared_path(company_id) / key
-        self._write_json(path, data)
-        self._file_cache.pop(path.resolve(), None)
-
-    def list_company_shared(self, company_id: str) -> List[str]:
-        """List keys in a company's shared memory."""
-        d = self.company_shared_path(company_id)
-        if not d.exists():
-            return []
-        return sorted(
-            f.name for f in d.iterdir()
-            if f.is_file() and not f.name.startswith(".")
-        )
-
+    @synchronized
     def register_team_path(self, team_id: str, path: Path) -> None:
         """Register a physical path override for a namespaced team."""
         self._team_path_overrides[team_id] = path.resolve()
 
-    def unregister_team_path(self, team_id: str) -> None:
-        self._team_path_overrides.pop(team_id, None)
-
+    @synchronized
     def unregister_company_paths(self, company_id: str) -> None:
         to_remove = [k for k in self._team_path_overrides if k.startswith(f"{company_id}/")]
         for k in to_remove:
             del self._team_path_overrides[k]
 
-    #  Team level
-
+    @synchronized
     def team_path(self, team_id: str) -> Path:
         if team_id in self._team_path_overrides:
             return self._team_path_overrides[team_id]
         self._validate_path_component(team_id, "team_id")
         return self.base_path / "teams" / team_id
 
+    @synchronized
     def read_team_soul(self, team_id: str) -> str:
         return self._read_file(self.team_path(team_id) / "soul.md")
 
+    @synchronized
     def read_team_memory(self, team_id: str, key: str) -> Any:
         self._validate_path_component(key, "key")
         data = self._read_json(self.team_path(team_id) / "memory" / key)
         self._update_index_on_read(team_id, key)
         return data
 
+    @synchronized
     def write_team_memory(self, team_id: str, key: str, data: Any) -> None:
         self._validate_path_component(key, "key")
         path = self.team_path(team_id) / "memory" / key
@@ -278,6 +151,7 @@ class MemoryManager:
         self._invalidate_prompt_cache_for_team(team_id)
         self._update_index_on_write(team_id, key, data)
 
+    @synchronized
     def append_team_memory(self, team_id: str, key: str, entry: Any) -> None:
         """Append an entry to a JSON array in team memory (thread-safe)."""
         self._validate_path_component(key, "key")
@@ -293,6 +167,7 @@ class MemoryManager:
             self._invalidate_prompt_cache_for_team(team_id)
             self._update_index_on_write(team_id, key, existing)
 
+    @synchronized
     def list_team_memory(self, team_id: str) -> List[str]:
         mem_dir = self.team_path(team_id) / "memory"
         resolved = mem_dir.resolve()
@@ -309,9 +184,7 @@ class MemoryManager:
         self._dir_cache[resolved] = _DirCacheEntry(mtime=st.st_mtime, entries=entries)
         return entries
 
-    def team_exists(self, team_id: str) -> bool:
-        return (self.team_path(team_id) / "team.md").exists()
-
+    @synchronized
     def list_teams(self) -> List[str]:
         teams_dir = self.base_path / "teams"
         if not teams_dir.exists():
@@ -321,31 +194,41 @@ class MemoryManager:
             if d.is_dir() and (d / "team.md").exists()
         ]
 
-    #  Index management (inode-like metadata) 
-
+    @synchronized
     def _index_path(self, team_id: str) -> Path:
-        """Return path to teams/{team_id}/memory/.index.json."""
         return self.team_path(team_id) / "memory" / INDEX_FILENAME
 
+    @synchronized
     def _read_index(self, team_id: str) -> Dict[str, dict]:
-        """Read .index.json; rebuild from files if missing (lazy init)."""
         path = self._index_path(team_id)
         if not path.exists():
-            mem_dir = self.team_path(team_id) / "memory"
-            if not mem_dir.exists():
-                return {}
             return self._rebuild_index(team_id)
         data = self._read_json(path)
         return data if isinstance(data, dict) else {}
 
+    @synchronized
     def _write_index(self, team_id: str, index: Dict[str, dict]) -> None:
-        """Write .index.json and invalidate related caches."""
         path = self._index_path(team_id)
         self._write_json(path, index)
         self._file_cache.pop(path.resolve(), None)
 
+    @staticmethod
+    def _new_meta(created_at: str, updated_at: str, last_accessed: str, size: int) -> dict:
+        return {
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "access_count": 0,
+            "last_accessed": last_accessed,
+            "size_bytes": size,
+            "importance": 0.0,  # 0.0-1.0, scored by the dreamer
+            "tier": "short",    # "short" | "long"
+            "tags": [],
+            "summary": "",
+        }
+
+    @synchronized
     def _rebuild_index(self, team_id: str) -> Dict[str, dict]:
-        """Rebuild index from actual memory files (migration path)."""
+        """Rebuild the index from the memory files on disk."""
         mem_dir = self.team_path(team_id) / "memory"
         if not mem_dir.exists():
             return {}
@@ -358,26 +241,17 @@ class MemoryManager:
                 st = f.stat()
             except OSError:
                 continue
-            index[f.name] = {
-                "created_at": datetime.fromtimestamp(
-                    st.st_ctime, tz=timezone.utc,
-                ).isoformat(),
-                "updated_at": datetime.fromtimestamp(
-                    st.st_mtime, tz=timezone.utc,
-                ).isoformat(),
-                "access_count": 0,
-                "last_accessed": now,
-                "size_bytes": st.st_size,
-                "importance": 0.0,
-                "tier": "short",
-                "tags": [],
-                "summary": "",
-            }
+            index[f.name] = self._new_meta(
+                datetime.fromtimestamp(st.st_ctime, tz=timezone.utc).isoformat(),
+                datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                now,
+                st.st_size,
+            )
         self._write_index(team_id, index)
         return index
 
+    @synchronized
     def _update_index_on_write(self, team_id: str, key: str, data: Any) -> None:
-        """Update index after a write operation."""
         try:
             index = self._read_index(team_id)
             now = datetime.now(timezone.utc).isoformat()
@@ -391,23 +265,13 @@ class MemoryManager:
                 index[key]["updated_at"] = now
                 index[key]["size_bytes"] = size
             else:
-                index[key] = {
-                    "created_at": now,
-                    "updated_at": now,
-                    "access_count": 0,
-                    "last_accessed": now,
-                    "size_bytes": size,
-                    "importance": 0.0,
-                    "tier": "short",
-                    "tags": [],
-                    "summary": "",
-                }
+                index[key] = self._new_meta(now, now, now, size)
             self._write_index(team_id, index)
         except Exception as e:
             logger.debug(f"Index update on write failed (non-blocking): {e}")
 
+    @synchronized
     def _update_index_on_read(self, team_id: str, key: str) -> None:
-        """Increment access_count on read (best-effort)."""
         try:
             index = self._read_index(team_id)
             if key in index:
@@ -417,26 +281,23 @@ class MemoryManager:
         except Exception:
             pass  # best-effort
 
+    @synchronized
     def _remove_from_index(self, team_id: str, key: str) -> None:
-        """Remove a key from the index."""
         index = self._read_index(team_id)
         if key in index:
             del index[key]
             self._write_index(team_id, index)
 
-    #  Public index API 
-
+    @synchronized
     def get_memory_index(self, team_id: str) -> Dict[str, dict]:
-        """Return the full memory index for a team."""
         return self._read_index(team_id)
 
+    @synchronized
     def get_entry_meta(self, team_id: str, key: str) -> Optional[dict]:
-        """Return inode metadata for a single memory entry."""
-        index = self._read_index(team_id)
-        return index.get(key)
+        return self._read_index(team_id).get(key)
 
+    @synchronized
     def delete_team_memory(self, team_id: str, key: str) -> None:
-        """Delete a memory file and its index entry."""
         self._validate_path_component(key, "key")
         path = self.team_path(team_id) / "memory" / key
         if path.exists():
@@ -446,6 +307,7 @@ class MemoryManager:
         self._remove_from_index(team_id, key)
         self._invalidate_prompt_cache_for_team(team_id)
 
+    @synchronized
     def archive_team_memory(self, team_id: str, key: str) -> None:
         """Move a memory file to archive/ and update indices."""
         self._validate_path_component(key, "key")
@@ -454,7 +316,6 @@ class MemoryManager:
         dst_dir.mkdir(parents=True, exist_ok=True)
         dst = dst_dir / key
 
-        # Copy metadata to archive index
         meta = self.get_entry_meta(team_id, key)
         if meta:
             archive_index = self._read_archive_index(team_id)
@@ -462,16 +323,15 @@ class MemoryManager:
             archive_index[key] = meta
             self._write_archive_index(team_id, archive_index)
 
-        # Move file
         if src.exists():
             shutil.move(str(src), str(dst))
 
-        # Clean up memory index + caches
         self._remove_from_index(team_id, key)
         self._file_cache.pop(src.resolve(), None)
         self._dir_cache.pop(src.parent.resolve(), None)
         self._invalidate_prompt_cache_for_team(team_id)
 
+    @synchronized
     def search_archive(self, team_id: str, query: str, limit: int = 10) -> List[dict]:
         """Search archive entries by summary and tags (case-insensitive substring)."""
         archive_index = self._read_archive_index(team_id)
@@ -482,33 +342,31 @@ class MemoryManager:
             tags = [t.lower() for t in meta.get("tags", [])]
             if query_lower in summary or any(query_lower in t for t in tags):
                 results.append({"key": key, **meta})
-        # Sort by importance DESC, then by archived_at DESC
         results.sort(
             key=lambda r: (-r.get("importance", 0), r.get("archived_at", "")),
         )
         return results[:limit]
 
+    @synchronized
     def read_overview(self, team_id: str) -> str:
-        """Read the .overview.md file for a team. Returns empty string if missing."""
-        path = self.team_path(team_id) / "memory" / ".overview.md"
-        return self._read_file(path)
+        return self._read_file(self.team_path(team_id) / "memory" / ".overview.md")
 
+    @synchronized
     def _read_archive_index(self, team_id: str) -> Dict[str, dict]:
-        """Read archive/.index.json for a team."""
-        path = self.team_path(team_id) / "archive" / ARCHIVE_INDEX_FILENAME
+        path = self.team_path(team_id) / "archive" / INDEX_FILENAME
         if not path.exists():
             return {}
         data = self._read_json(path)
         return data if isinstance(data, dict) else {}
 
+    @synchronized
     def _write_archive_index(self, team_id: str, index: Dict[str, dict]) -> None:
-        """Write archive/.index.json for a team."""
-        path = self.team_path(team_id) / "archive" / ARCHIVE_INDEX_FILENAME
+        path = self.team_path(team_id) / "archive" / INDEX_FILENAME
         self._write_json(path, index)
         self._file_cache.pop(path.resolve(), None)
 
+    @synchronized
     def update_entry_meta(self, team_id: str, key: str, **fields) -> None:
-        """Update specific fields of an index entry (importance, tier, summary, tags)."""
         allowed = {"importance", "tier", "summary", "tags"}
         invalid = set(fields) - allowed
         if invalid:
@@ -519,36 +377,20 @@ class MemoryManager:
         index[key].update(fields)
         self._write_index(team_id, index)
 
-    #  Pi level 
-
+    @synchronized
     def read_pi_soul(self, team_id: str, pi_id: str) -> str:
         self._validate_path_component(pi_id, "pi_id")
         return self._read_file(
             self.team_path(team_id) / "pis" / pi_id / "soul.md"
         )
 
-    #  System prompt builder 
-
+    @synchronized
     def build_system_prompt(
         self, team_id: str, pi_id: str, company_context: Optional[str] = None,
     ) -> str:
-        """
-        Compose a system prompt for a Pi by layering:
-        1. Pi's own soul.md
-        2. Team's soul.md
-        3. Company context (if provided  domain knowledge from CompanyConfig)
-        4. Master's user.md (user context)
-        5. Research briefing (if available, skipped for research team itself)
-        6. Team memory summary (key names)
-
-        Uses Layer 2 prompt cache: stat-checks all dependency files,
-        returns cached prompt if none have changed.
-        """
-        # Include company_context in cache key to differentiate prompts
         cache_key = (team_id, pi_id)
         current_stats = self._collect_prompt_dependency_stats(team_id, pi_id)
 
-        # When company_context is present, skip prompt cache (company context is dynamic)
         if not company_context:
             cached = self._prompt_cache.get(cache_key)
             if cached is not None and cached.dependency_mtimes == current_stats:
@@ -556,26 +398,21 @@ class MemoryManager:
 
         parts = []
 
-        # Pi soul
         pi_soul = self.read_pi_soul(team_id, pi_id)
         if pi_soul:
             parts.append(pi_soul)
 
-        # Team soul
         team_soul = self.read_team_soul(team_id)
         if team_soul:
             parts.append(f"## Team Context\n{team_soul}")
 
-        # Company context (domain knowledge injected by orchestrator)
         if company_context:
             parts.append(f"## Company Context\n{company_context}")
 
-        # User context
         user_md = self.read_master_user()
         if user_md:
             parts.append(f"## User\n{user_md}")
 
-        # Enrichment sources (research briefing, info feed, custom)
         for source in self._enrichment_sources:
             if source.exclude_teams and team_id in source.exclude_teams:
                 continue
@@ -588,7 +425,6 @@ class MemoryManager:
                 if section:
                     parts.append(section)
 
-        # Team memory keys (let Pi know what's available)
         mem_keys = self.list_team_memory(team_id)
         if mem_keys:
             keys_str = ", ".join(mem_keys)
@@ -598,17 +434,14 @@ class MemoryManager:
                 f"Use memory_read/memory_write tools to access."
             )
 
-        # Memory overview + long-term summaries with token budget
         try:
             budget_chars = _MEMORY_TOKEN_BUDGET * _CHARS_PER_TOKEN
 
-            # 1. Overview (always included if present, pre-budgeted ~500 tokens)
             overview = self.read_overview(team_id)
             if overview:
                 parts.append(f"## Memory Overview\n{overview}")
                 budget_chars -= len(overview)
 
-            # 2. Individual long-tier summaries, ranked by importance
             index = self._read_index(team_id)
             long_entries = [
                 (key, meta) for key, meta in index.items()
@@ -632,9 +465,8 @@ class MemoryManager:
         except Exception:
             pass  # non-blocking
 
-        prompt = "\n\n---\n\n".join(parts) if parts else ""
-        # Re-collect stats after build: _read_index may have created
-        # .index.json (lazy rebuild), changing the memory dir mtime.
+        prompt = "\n\n---\n\n".join(parts)
+        # Re-collect: _read_index may have lazily created .index.json, changing the memory dir mtime.
         final_stats = self._collect_prompt_dependency_stats(team_id, pi_id)
         self._prompt_cache[cache_key] = _PromptCacheEntry(
             prompt=prompt,
@@ -642,12 +474,10 @@ class MemoryManager:
         )
         return prompt
 
-    #  Enrichment formatters 
-
     _MAX_BRIEFING_ITEMS = 15
 
+    @synchronized
     def _format_research_briefing(self, data: Any) -> Optional[str]:
-        """Format research briefing data as a World Briefing section."""
         if not isinstance(data, dict):
             return None
 
@@ -657,11 +487,8 @@ class MemoryManager:
 
         updated_at = data.get("updated_at", "unknown")
 
-        # Cap at max items
-        capped = items[: self._MAX_BRIEFING_ITEMS]
-
         lines = []
-        for item in capped:
+        for item in items[: self._MAX_BRIEFING_ITEMS]:
             if not isinstance(item, dict):
                 continue
             headline = item.get("headline", "")
@@ -683,8 +510,8 @@ class MemoryManager:
 
     _MAX_FEED_ITEMS = 20
 
+    @synchronized
     def _format_info_feed(self, data: Any) -> Optional[str]:
-        """Format info-collection feed data as a Recent Feed section."""
         if not isinstance(data, dict):
             return None
 
@@ -694,10 +521,8 @@ class MemoryManager:
 
         updated_at = data.get("updated_at", "unknown")
 
-        capped = items[: self._MAX_FEED_ITEMS]
-
         lines = []
-        for item in capped:
+        for item in items[: self._MAX_FEED_ITEMS]:
             if not isinstance(item, dict):
                 continue
             title = item.get("title", "")
@@ -715,10 +540,8 @@ class MemoryManager:
             + "\n".join(lines)
         )
 
-    #  Scan all teams for archiver 
-
+    @synchronized
     def get_all_memory_stats(self) -> Dict[str, Any]:
-        """Get memory stats for all teams (used by archiver)."""
         stats = {}
         for team_id in self.list_teams():
             mem_dir = self.team_path(team_id) / "memory"
@@ -735,39 +558,32 @@ class MemoryManager:
                 }
         return stats
 
-    #  Cache management 
-
+    @synchronized
     def clear_cache(self) -> None:
-        """Clear all three cache layers. Called on hot-reload and registry reload."""
         self._file_cache.clear()
         self._prompt_cache.clear()
         self._dir_cache.clear()
 
+    @synchronized
     def _stat_safe(self, path: Path) -> Optional[os.stat_result]:
-        """stat() that returns None on missing/inaccessible files."""
         try:
             return path.stat()
-        except (FileNotFoundError, OSError):
+        except OSError:
             return None
 
+    @synchronized
     def _collect_prompt_dependency_stats(
         self, team_id: str, pi_id: str,
     ) -> Dict[str, float]:
-        """Stat all files that build_system_prompt depends on.
-
-        Returns {resolved_path_str: mtime} for cache comparison.
-        Missing files get mtime 0.0 so their appearance triggers invalidation.
-        """
+        """Stat all files that build_system_prompt depends on."""
         paths: List[Path] = []
 
-        # Pi soul, team soul, user.md
         self._validate_path_component(pi_id, "pi_id")
         team_dir = self.team_path(team_id)
         paths.append(team_dir / "pis" / pi_id / "soul.md")
         paths.append(team_dir / "soul.md")
         paths.append(self.base_path / "user.md")
 
-        # Enrichment source files
         for source in self._enrichment_sources:
             if source.exclude_teams and team_id in source.exclude_teams:
                 continue
@@ -777,7 +593,6 @@ class MemoryManager:
             except MemoryError:
                 pass
 
-        # Team memory directory (for key listing) + overview
         paths.append(team_dir / "memory")
         paths.append(team_dir / "memory" / ".overview.md")
 
@@ -788,21 +603,13 @@ class MemoryManager:
             stats[str(resolved)] = st.st_mtime if st else 0.0
         return stats
 
+    @synchronized
     def _invalidate_prompt_cache_for_team(self, team_id: str) -> None:
-        """Invalidate prompt cache entries affected by a team's memory write.
-
-        Direct: invalidates all prompt cache entries for this team.
-        Indirect: if this team is an enrichment source for other teams,
-        invalidates those consuming teams' prompt caches too.
-        """
-        # Direct: remove all entries for this team_id
         keys_to_remove = [k for k in self._prompt_cache if k[0] == team_id]
 
-        # Indirect: check if this team is an enrichment source
+        # A team that is an enrichment source also invalidates every team consuming it.
         for source in self._enrichment_sources:
             if source.source_team_id == team_id:
-                # All teams that consume this source need invalidation
-                # (i.e., all teams NOT in exclude_teams)
                 keys_to_remove.extend(
                     k for k in self._prompt_cache
                     if k[0] != team_id
@@ -812,8 +619,7 @@ class MemoryManager:
         for k in set(keys_to_remove):
             self._prompt_cache.pop(k, None)
 
-    #  Internal helpers 
-
+    @synchronized
     def _read_file(self, path: Path) -> str:
         resolved = path.resolve()
         st = self._stat_safe(resolved)
@@ -836,6 +642,7 @@ class MemoryManager:
             logger.warning(f"Failed to read {path}: {e}")
             return ""
 
+    @synchronized
     def _read_json(self, path: Path) -> Any:
         resolved = path.resolve()
         st = self._stat_safe(resolved)
@@ -847,7 +654,7 @@ class MemoryManager:
                 and cached.is_json
                 and cached.mtime == st.st_mtime
                 and cached.size == st.st_size):
-            # Return a deep copy to prevent callers from mutating cached data
+            # Deep copy so callers cannot mutate cached data
             return copy.deepcopy(cached.content)
         try:
             raw = path.read_text(encoding="utf-8")
@@ -863,18 +670,17 @@ class MemoryManager:
             logger.warning(f"Failed to read {path}: {e}")
             return None
 
+    @synchronized
     def _write_json(self, path: Path, data: Any) -> None:
         self._atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
+    @synchronized
     def _write_file(self, path: Path, content: str) -> None:
         self._atomic_write(path, content)
 
+    @synchronized
     def _atomic_write(self, path: Path, content: str) -> None:
-        """Write content to path atomically via temp file + os.replace().
-
-        Ensures that concurrent readers never see a partially-written file.
-        os.replace() is atomic on POSIX (same filesystem).
-        """
+        """Write content to path atomically via temp file + os.replace()."""
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             fd, tmp_path = tempfile.mkstemp(
@@ -887,7 +693,6 @@ class MemoryManager:
                     os.fsync(f.fileno())
                 os.replace(tmp_path, str(path))
             except BaseException:
-                # Clean up temp file on any error
                 try:
                     os.unlink(tmp_path)
                 except OSError:

@@ -1,23 +1,7 @@
 #!/usr/bin/env bash
-#
-# companest-ctl  local control for Companest EC2 instance
-#
-# Usage:
-#   ./companest-ctl.sh create    First-time: terraform apply (creates everything)
-#   ./companest-ctl.sh deploy    rsync code to EC2 + restart all services
-#   ./companest-ctl.sh up        Start stopped instance (~20s)
-#   ./companest-ctl.sh down      Stop instance (keeps data, stops billing compute)
-#   ./companest-ctl.sh ssh       SSH into instance
-#   ./companest-ctl.sh status    Show instance state
-#   ./companest-ctl.sh logs      Tail Companest logs via SSH
-#   ./companest-ctl.sh litellm-logs  Tail LiteLLM proxy logs
-#   ./companest-ctl.sh openbb-logs   Tail OpenBB API server logs
-#   ./companest-ctl.sh destroy   Tear down everything (terraform destroy)
-#
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Read instance ID and region from terraform state
 get_instance_id() {
   terraform output -raw instance_id 2>/dev/null
 }
@@ -57,7 +41,6 @@ case "${1:-help}" in
 
     echo "Deploying to $COMPANEST_IP..."
 
-    # 1. rsync code to EC2
     rsync -az --delete \
       --exclude '.git' --exclude '__pycache__' --exclude '.pytest_cache' \
       --exclude 'infra/.terraform' --exclude 'infra/*.tfstate*' \
@@ -66,7 +49,6 @@ case "${1:-help}" in
       -e "ssh $SSH_OPTS" \
       "$REPO_ROOT/" "ubuntu@$COMPANEST_IP:/home/ubuntu/Companest/"
 
-    # 2. Upload .env (contains API keys, not included in rsync)
     if [ -f "$REPO_ROOT/deploy/.env" ]; then
       echo "Uploading deploy/.env..."
       scp $SSH_OPTS "$REPO_ROOT/deploy/.env" "ubuntu@$COMPANEST_IP:/home/ubuntu/Companest/deploy/.env"
@@ -76,19 +58,14 @@ case "${1:-help}" in
 
     echo "Setting up remote..."
 
-    # 3. Install deps + setup systemd + restart Companest
     ssh $SSH_OPTS "ubuntu@$COMPANEST_IP" bash <<'REMOTE'
     set -euo pipefail
     cd /home/ubuntu/Companest
 
-    # Install Python deps
-    python3 -m pip install --break-system-packages -q -r requirements.txt
-    python3 -m pip install --break-system-packages -q python-telegram-bot -e .
+    python3 -m pip install --break-system-packages -q python-telegram-bot -e ".[agents,server,gateway,scheduler,s3]"
 
-    # Fallback: create .env from example if neither local nor remote exists
     [ -f deploy/.env ] || cp deploy/.env.example deploy/.env
 
-    # Install systemd services (idempotent)
     PYTHON_BIN=$(which python3)
     sudo tee /etc/systemd/system/master-gateway.service > /dev/null <<UNIT
 [Unit]
@@ -98,7 +75,7 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/Companest
-ExecStart=$PYTHON_BIN scripts/master_gateway.py --port 19000
+ExecStart=$PYTHON_BIN -m companest.gateway.server --port 19000
 Restart=always
 RestartSec=5
 EnvironmentFile=/home/ubuntu/Companest/deploy/.env
@@ -123,7 +100,6 @@ EnvironmentFile=/home/ubuntu/Companest/deploy/.env
 WantedBy=multi-user.target
 UNIT
 
-    # Start LiteLLM proxy (Docker)
     cd /home/ubuntu/Companest/deploy/litellm
     docker compose down 2>/dev/null || true
     docker compose up -d
@@ -139,7 +115,6 @@ UNIT
     fi
     cd /home/ubuntu/Companest
 
-    # Install OpenBB API server (financial data)
     if [ -f deploy/openbb/setup.sh ]; then
       echo "Setting up OpenBB API..."
       bash deploy/openbb/setup.sh

@@ -1,46 +1,18 @@
-"""
-Collaborative execution mode -multi-Pi pipeline.
-
-Output of Pi A feeds into Pi B, etc. Useful for multi-stage
-processing (e.g. research -> analyze -> summarize).
-
-Each Pi in the pipeline receives structured context including the
-original task, its position in the pipeline, and the previous stage output.
-"""
-
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from . import ExecutionMode, ProgressCallback
-from ..exceptions import PiError, TeamError
+from ..utils import run_sync
+from . import ExecutionMode, ProgressCallback, _with_memory_task_hint
+from ..exceptions import TeamError
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..team import AgentTeam
+    from ..agents.team import AgentTeam
 
 logger = logging.getLogger(__name__)
 
 
-def _with_memory_task_hint(
-    user_context: Optional[Dict[str, Any]],
-    task_hint: str,
-) -> Dict[str, Any]:
-    """Attach a retrieval hint for internal pipeline prompts."""
-    ctx = dict(user_context) if user_context else {}
-    if task_hint:
-        ctx["memory_task_hint"] = task_hint
-    return ctx
-
-
 class CollaborativeMode(ExecutionMode):
-    """Multi-Pi pipeline: output of Pi A -> input of Pi B.
-
-    Args:
-        pipeline: Ordered list of Pi IDs. Defaults to all Pis in team order.
-        cascade: Whether to use cascade model selection for each stage.
-        stop_on_failure: If True (default), abort pipeline on first failure.
-            If False, skip the failed stage and pass previous output forward.
-    """
+    """Multi-Pi pipeline: output of Pi A -> input of Pi B."""
 
     def __init__(
         self,
@@ -67,7 +39,6 @@ class CollaborativeMode(ExecutionMode):
         if not pipeline:
             raise TeamError(f"Team '{team.id}' has no Pis for collaborative pipeline")
 
-        # Validate all Pi IDs exist
         for pi_id in pipeline:
             if pi_id not in team.pis:
                 raise TeamError(
@@ -88,14 +59,12 @@ class CollaborativeMode(ExecutionMode):
                     f"\u2699\ufe0f Pipeline stage {stage_num}/{total_stages}: {pi_id}"
                 )
 
-            # Build structured prompt for this stage
             prompt = _build_stage_prompt(
                 task=task,
                 stage_num=stage_num,
                 total_stages=total_stages,
                 pi_id=pi_id,
                 previous_output=current_output,
-                stage_results=stage_results,
             )
 
             try:
@@ -112,7 +81,7 @@ class CollaborativeMode(ExecutionMode):
                     "status": "done",
                     "output": result,
                 })
-            except (PiError, Exception) as e:
+            except Exception as e:
                 logger.warning(
                     f"[Team:{team.id}] Pipeline stage {stage_num} ({pi_id}) failed: {e}"
                 )
@@ -132,16 +101,13 @@ class CollaborativeMode(ExecutionMode):
                             "completed_stages": stage_idx,
                         },
                     )
-                # skip mode: continue with previous output
                 if on_progress:
                     await on_progress(
                         f"\u26a0\ufe0f Stage {stage_num} ({pi_id}) failed, skipping"
                     )
 
-        # Record pipeline execution in team memory
         try:
-            import json
-            team.memory.append_team_memory(
+            await run_sync(team.memory.append_team_memory,
                 team.id, "pipeline-log.json",
                 {"stages": len(pipeline), "results": [
                     {"pi": r["pi_id"], "status": r["status"]}
@@ -166,9 +132,7 @@ def _build_stage_prompt(
     total_stages: int,
     pi_id: str,
     previous_output: str,
-    stage_results: List[Dict[str, Any]],
 ) -> str:
-    """Build a structured prompt for a pipeline stage."""
     parts = [
         f"## Original Task\n{task}",
         f"\n## Pipeline Context\nYou are **stage {stage_num} of {total_stages}** in a processing pipeline (role: {pi_id}).",
@@ -188,5 +152,3 @@ def _build_stage_prompt(
         )
 
     return "\n".join(parts)
-
-

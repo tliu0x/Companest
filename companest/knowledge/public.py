@@ -1,15 +1,5 @@
-"""
-Shared public knowledge.
+"""Shared public knowledge."""
 
-Documents are stored in S3 as docs/{doc_id}.json, with a JSONL index at
-index/latest.jsonl (every field except the summary) so searches need a single
-read. The index is capped at INDEX_CAP entries and drops expired documents on
-every write.
-
-HTTP API and agent tools are enabled by ENABLE_PUBLIC_KNOWLEDGE_V1 and
-configured through the PK_S3_* environment variables. The JSON schema in
-contracts/public_knowledge_doc.schema.json mirrors PublicKnowledgeDoc.
-"""
 
 import json
 import logging
@@ -20,28 +10,23 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..utils import offload
 from .s3 import S3JsonStore
 
 logger = logging.getLogger(__name__)
 
-INDEX_CAP = 10_000
 DEFAULT_PREFIX = "companest-public-knowledge/"
 
 
-# -- Models --
-
-
 class PublicKnowledgeDoc(BaseModel):
-    """A structured document in the shared public knowledge pool."""
-
     doc_id: str = Field(..., description="Unique document identifier (UUID)")
 
     @field_validator("doc_id")
     @classmethod
     def validate_doc_id_is_uuid(cls, v: str) -> str:
-        """Enforce that doc_id is a valid UUID string, matching the JSON schema."""
-        UUID(v)  # raises ValueError if not a valid UUID
+        UUID(v)
         return v
+
     source_type: Literal["news", "research", "filing", "social", "prediction_market"] = Field(
         ..., description="Category of the information source"
     )
@@ -70,8 +55,6 @@ class PublicKnowledgeDoc(BaseModel):
 
 
 class PublicKnowledgeIndexEntry(BaseModel):
-    """Index entry: same fields as PublicKnowledgeDoc minus summary."""
-
     doc_id: str
     source_type: Literal["news", "research", "filing", "social", "prediction_market"]
     title: str = Field(..., min_length=1, max_length=500)
@@ -84,31 +67,15 @@ class PublicKnowledgeIndexEntry(BaseModel):
 
     @classmethod
     def from_doc(cls, doc: PublicKnowledgeDoc) -> "PublicKnowledgeIndexEntry":
-        """Create an index entry from a full document (drops summary)."""
-        return cls(
-            doc_id=doc.doc_id,
-            source_type=doc.source_type,
-            title=doc.title,
-            tags=doc.tags,
-            source_url=doc.source_url,
-            published_at=doc.published_at,
-            fresh_until=doc.fresh_until,
-            confidence=doc.confidence,
-            visibility=doc.visibility,
-        )
+        return cls(**doc.model_dump(exclude={"summary"}))
 
 
 class SearchQuery(BaseModel):
-    """Query parameters for searching the public knowledge index."""
-
     tags: Optional[List[str]] = Field(default=None, description="Filter by tags (any match)")
     source_type: Optional[str] = Field(default=None, description="Filter by exact source_type")
     fresh_only: bool = Field(default=False, description="Only return docs where fresh_until > now")
     keyword: Optional[str] = Field(default=None, description="Case-insensitive title search")
     limit: int = Field(default=20, ge=1, le=200, description="Max results to return")
-
-
-# -- Storage --
 
 
 def _is_fresh(entry: "PublicKnowledgeIndexEntry", now: datetime) -> bool:
@@ -128,26 +95,16 @@ def _s3_settings_from_env() -> dict:
 
 
 class PublicKnowledgeS3Store(S3JsonStore):
-    """Full documents, one JSON object per doc_id."""
-
     def __init__(self, bucket: str = "", prefix: str = DEFAULT_PREFIX,
                  region: str = "us-east-1", endpoint_url: Optional[str] = None) -> None:
         super().__init__(bucket, prefix, region, endpoint_url)
-
-    def put_doc(self, doc: PublicKnowledgeDoc) -> str:
-        return self._put(f"docs/{doc.doc_id}.json", doc.model_dump_json(indent=2))
 
     def get_doc(self, doc_id: str) -> Optional[PublicKnowledgeDoc]:
         data = self._get_json(f"docs/{doc_id}.json")
         return None if data is None else PublicKnowledgeDoc(**data)
 
-    def delete_doc(self, doc_id: str) -> None:
-        self._delete(f"docs/{doc_id}.json")
-
 
 class IndexStore(S3JsonStore):
-    """The JSONL search index."""
-
     KEY = "index/latest.jsonl"
 
     def __init__(self, bucket: str = "", prefix: str = DEFAULT_PREFIX,
@@ -171,98 +128,28 @@ class IndexStore(S3JsonStore):
                 logger.warning("Skipping invalid index line %d: %s", line_num, e)
         return entries
 
-    def save_index(self, entries: List[PublicKnowledgeIndexEntry]) -> None:
-        """Write the index, dropping expired entries and enforcing the cap."""
-        now = datetime.now(timezone.utc)
-        active = [e for e in entries if _is_fresh(e, now)]
-        if len(active) > INDEX_CAP:
-            active.sort(key=lambda e: e.published_at, reverse=True)
-            active = active[:INDEX_CAP]
-        body = "".join(e.model_dump_json() + "\n" for e in active)
-        self._put(self.KEY, body, content_type="application/x-ndjson")
-
-    def add_entry(self, entry: PublicKnowledgeIndexEntry) -> None:
-        """Add an entry, replacing any existing one with the same doc_id."""
-        entries = [e for e in self.load_index() if e.doc_id != entry.doc_id]
-        self.save_index(entries + [entry])
-
-    def remove_entry(self, doc_id: str) -> None:
-        self.save_index([e for e in self.load_index() if e.doc_id != doc_id])
-
-
-class PublicKnowledgePublisher:
-    """Keeps the document store and the index in sync."""
-
-    def __init__(self, s3_store: PublicKnowledgeS3Store, index_store: IndexStore) -> None:
-        self._s3_store = s3_store
-        self._index_store = index_store
-
-    def publish(self, doc: PublicKnowledgeDoc) -> str:
-        key = self._s3_store.put_doc(doc)
-        self._index_store.add_entry(PublicKnowledgeIndexEntry.from_doc(doc))
-        return key
-
-    def unpublish(self, doc_id: str) -> None:
-        self._s3_store.delete_doc(doc_id)
-        self._index_store.remove_entry(doc_id)
-
-
-# -- Search --
-
 
 def search(
     query: SearchQuery,
     index: List[PublicKnowledgeIndexEntry],
 ) -> List[PublicKnowledgeIndexEntry]:
-    """
-    Filter and sort index entries based on the search query.
-
-    Filters:
-    - tags: any match (entry has at least one of the query tags)
-    - source_type: exact match
-    - fresh_only: fresh_until > now
-    - keyword: case-insensitive substring match on title
-
-    Sort: published_at descending
-    Limit: query.limit (default 20)
-    """
     results = list(index)
-
-    # Filter by tags (any match)
     if query.tags:
         query_tags_lower = {t.lower() for t in query.tags}
-        results = [
-            e for e in results
-            if any(t.lower() in query_tags_lower for t in e.tags)
-        ]
-
-    # Filter by source_type (exact match)
+        results = [e for e in results if any(t.lower() in query_tags_lower for t in e.tags)]
     if query.source_type:
         results = [e for e in results if e.source_type == query.source_type]
-
     if query.fresh_only:
         now = datetime.now(timezone.utc)
         results = [e for e in results if _is_fresh(e, now)]
-
-    # Filter by keyword (case-insensitive title contains)
     if query.keyword:
         kw = query.keyword.lower()
         results = [e for e in results if kw in e.title.lower()]
-
-    # Sort by published_at descending
     results.sort(key=lambda e: e.published_at, reverse=True)
-
-    # Apply limit
-    results = results[: query.limit]
-
-    return results
-
-
-# -- HTTP API --
+    return results[: query.limit]
 
 
 def create_public_knowledge_router():
-    """Build the FastAPI router for /api/public-knowledge."""
     from fastapi import APIRouter, HTTPException, Query
 
     router = APIRouter(prefix="/api/public-knowledge", tags=["public-knowledge"])
@@ -271,7 +158,7 @@ def create_public_knowledge_router():
     index_store = IndexStore(**settings)
 
     @router.get("/search")
-    async def search_public_knowledge(
+    def search_public_knowledge(
         tags: Optional[str] = Query(default=None, description="Comma-separated tags"),
         source_type: Optional[str] = Query(default=None, description="Filter by source type"),
         fresh: bool = Query(default=False, description="Only fresh documents"),
@@ -293,16 +180,13 @@ def create_public_knowledge_router():
         }
 
     @router.get("/{doc_id}")
-    async def get_public_knowledge_doc(doc_id: str):
+    def get_public_knowledge_doc(doc_id: str):
         doc = store.get_doc(doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
         return doc.model_dump(mode="json")
 
     return router
-
-
-# -- Agent tools --
 
 
 def create_public_knowledge_tool_defs(
@@ -312,7 +196,7 @@ def create_public_knowledge_tool_defs(
     endpoint_url: str = "",
 ) -> List:
     """Create the search/read ToolDefinitions. Arguments default to the PK_S3_* environment."""
-    from ..tools import ToolDefinition
+    from ..agents.tools import ToolDefinition
 
     settings = _s3_settings_from_env()
     if bucket:
@@ -320,30 +204,21 @@ def create_public_knowledge_tool_defs(
     _store = PublicKnowledgeS3Store(**settings)
     _index_store = IndexStore(**settings)
 
-    async def search_public_knowledge(args: dict) -> str:
-        """Search the public knowledge index."""
+    @offload
+    def search_public_knowledge(args: dict) -> str:
         tags_raw = args.get("tags", "")
-        tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else None
-
         query = SearchQuery(
-            tags=tags,
+            tags=[t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else None,
             source_type=args.get("source_type") or None,
             fresh_only=bool(args.get("fresh_only", False)),
             keyword=args.get("keyword") or None,
             limit=int(args.get("limit", 20)),
         )
+        results = search(query, _index_store.load_index())
+        return json.dumps([r.model_dump(mode="json") for r in results], ensure_ascii=False, indent=2)
 
-        entries = _index_store.load_index()
-        results = search(query, entries)
-
-        return json.dumps(
-            [r.model_dump(mode="json") for r in results],
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    async def read_public_knowledge(args: dict) -> str:
-        """Read a full public knowledge document by ID."""
+    @offload
+    def read_public_knowledge(args: dict) -> str:
         doc_id = args["doc_id"]
         doc = _store.get_doc(doc_id)
         if doc is None:

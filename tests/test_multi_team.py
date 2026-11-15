@@ -2,8 +2,8 @@
 
 import pytest
 
-from companest.multi_team import run_multi_team
-from companest.router import RoutingDecision, TeamAssignment
+from companest.orchestration.multi_team import run_multi_team
+from companest.orchestration.router import RoutingDecision, TeamAssignment
 
 
 @pytest.mark.asyncio

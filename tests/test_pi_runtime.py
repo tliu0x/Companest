@@ -1,6 +1,8 @@
 """Tests for the LangChain-based Pi runtime, driven by a scripted fake model."""
 
+import asyncio
 import json
+from types import SimpleNamespace
 from typing import Any, List
 from unittest.mock import patch
 
@@ -11,8 +13,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 from companest.exceptions import PiError
 from companest.memory import MemoryManager
-from companest.pi import Pi, PiConfig
-from companest.tools import ToolContext, ToolDefinition, ToolProvider, ToolRegistry, _to_mcp_connection
+from companest.agents.pi import Pi, PiConfig
+from companest.agents.tools import ToolContext, ToolDefinition, ToolProvider, ToolRegistry, _to_mcp_connection
+from companest.companies.company import CompanyConfig
 
 
 class ScriptedModel(BaseChatModel):
@@ -70,7 +73,7 @@ def _make_pi(memory, tools=None, tools_deny=None, max_turns=5, registry=None):
 
 
 async def _run(pi, model, task="do the task"):
-    with patch("companest.pi.build_chat_model", return_value=model):
+    with patch("companest.agents.pi.build_chat_model", return_value=model):
         return await pi.run(task)
 
 
@@ -93,9 +96,7 @@ async def test_tool_call_loop_writes_memory(memory):
 
     assert await _run(pi, model) == "saved"
     assert memory.read_team_memory("alpha", "note.json") == {"x": 1}
-    # The tool result is fed back to the model on the second step.
     assert model.seen_messages[1][-1].type == "tool"
-    # Usage is summed over both model steps.
     assert pi.last_usage["input_tokens"] == 30 and pi.last_usage["output_tokens"] == 12
 
 
@@ -146,7 +147,7 @@ async def test_empty_response_raises_pi_error(memory):
 @pytest.mark.asyncio
 async def test_model_failure_is_wrapped_in_pi_error(memory):
     pi = _make_pi(memory)
-    with patch("companest.pi.build_chat_model", side_effect=RuntimeError("boom")):
+    with patch("companest.agents.pi.build_chat_model", side_effect=RuntimeError("boom")):
         with pytest.raises(PiError, match="boom"):
             await pi.run("task")
 
@@ -237,3 +238,68 @@ def test_mcp_connection_conversion():
         "transport": "streamable_http", "url": "https://mcp.example.com", "headers": {"A": "b"},
     }
     assert _to_mcp_connection({"type": "sse", "url": "https://mcp.example.com/sse"})["transport"] == "sse"
+
+
+@pytest.mark.asyncio
+async def test_external_tools_honor_plain_and_legacy_deny_names(monkeypatch):
+    class MCPClient:
+        def __init__(self, configs):
+            self.server = next(iter(configs))
+
+        async def get_tools(self):
+            return [
+                SimpleNamespace(name=name, server=self.server)
+                for name in ("write", "read", "inspect")
+            ]
+
+    monkeypatch.setattr("langchain_mcp_adapters.client.MultiServerMCPClient", MCPClient)
+    registry = ToolRegistry()
+    config = {"command": "unused"}
+    registry.register_external_mcp("global", config)
+    registry.register_company_mcp("alpha", "private", config)
+    registry.register_company_mcp("beta", "private", config)
+
+    tools = await registry.get_external_mcp_tools("alpha", {"inspect", "mcp__private__write"})
+
+    assert {(tool.server, tool.name) for tool in tools} == {
+        ("global", "read"), ("global", "write"), ("alpha/private", "read"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_shared_pi_uses_each_runs_company_and_workspace(api_runtime, monkeypatch, tmp_path):
+    _, orch, _ = api_runtime()
+    orch.company_registry.save(CompanyConfig(id="alpha", name="Alpha", shared_teams=["general"]))
+    orch.company_registry.save(
+        CompanyConfig(id="beta", name="Beta", shared_teams=["general", "other"]),
+    )
+    (tmp_path / "workspaces.json").write_text(json.dumps({"demo": {"path": str(tmp_path)}}))
+    orch.workspace_registry.load()
+    both_running = asyncio.Event()
+    contexts = {}
+    entered = 0
+
+    async def run_agent(pi, task, system, model):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both_running.set()
+        await both_running.wait()
+        ctx = pi._build_tool_context()
+        contexts[task] = (
+            ctx.company_id, ctx.extra["company_shared_teams"], ctx.extra.get("workspace_path"),
+        )
+        return "done"
+
+    monkeypatch.setattr(Pi, "_run_agent", run_agent)
+    await asyncio.wait_for(asyncio.gather(
+        orch.run_team("first", "general", skip_cost_check=True,
+                      user_context={"company_id": "alpha", "workspace_id": "demo"}),
+        orch.run_team("second", "general", skip_cost_check=True,
+                      user_context={"company_id": "beta"}),
+    ), timeout=5)
+
+    assert contexts == {
+        "first": ("alpha", ["general"], str(tmp_path)),
+        "second": ("beta", ["general", "other"], None),
+    }

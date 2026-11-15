@@ -51,6 +51,8 @@ companest team run general "Summarize this project"
 
 ## Registering External Companies
 
+For a Claude Code session using the running service, see [CLI/API session access](./claude-session.md).
+
 If you want a separate repo to register itself into a running Companest control plane, start here:
 
 - [`company-onboarding.md`](./company-onboarding.md)

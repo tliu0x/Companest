@@ -1,53 +1,34 @@
-"""
-Companest - Pi Agent Team Orchestrator
+"""Companest - Pi Agent Team Orchestrator"""
 
-Routes tasks to Pi Agent Teams that call LLM APIs directly via SDK.
-Master connection receives tasks from Telegram/chat gateway.
-
-Core Components:
-- CompanestOrchestrator: Central coordinator (team routing)
-- Pi Agent Teams: Department-structured agent collaboration
-- CostGate: Three-tier cost approval (auto/notify/escalate)
-- SmartRouter: LLM-powered auto-routing
-- MemoryManager: Hierarchical memory (master -> team -> pi)
-- EventBus: Async pub/sub lifecycle events
-- ToolRegistry: Pluggable tool provider system
-"""
-
-#  Always-available core imports 
 from .config import (
     CompanestConfig,
     APIConfig,
     MasterConfig,
 )
-from .orchestrator import CompanestOrchestrator
+from .orchestration.orchestrator import CompanestOrchestrator
 from .events import EventBus, Event, EventType
-from .tools import ToolRegistry, ToolProvider, ToolContext, DEFAULT_TOOLS_DENY, SESSIONS_TOOL_NAMES
+from .agents.tools import ToolRegistry, ToolProvider, ToolContext, DEFAULT_TOOLS_DENY, SESSIONS_TOOL_NAMES
 from .parser import (
     MarkdownConfigParser,
     ParseResult,
-    CodeBlock,
-    parse_markdown_config,
-    validate_config_file,
     generate_config_template,
 )
 from .memory import (
     MemoryManager, EnrichmentSource, Dreamer, DreamerError,
     MemoryBackend, FileBackend, QdrantBackend, MemorySearchService,
-    S3Sync, S3SyncConfig,
 )
-from .pi import Pi, PiConfig
-from .team import AgentTeam, TeamConfig, TeamRegistry
-from .cost_gate import CostGate, CostEstimate, CostDecision, UserNotifier
-from .cascade import (
+from .agents.pi import Pi, PiConfig
+from .agents.team import AgentTeam, TeamConfig, TeamRegistry
+from .orchestration.cost_gate import CostGate, CostEstimate, CostDecision, UserNotifier
+from .agents.cascade import (
     CascadeEngine,
     CascadeStrategy,
     CascadeMetrics,
     AdequacyChecker,
     ModelTier,
 )
-from .scheduler import Scheduler
-from .router import TeamRouter, SmartRouter, RoutingDecision, TeamAssignment, RoutingBinding
+from .jobs.scheduler import Scheduler
+from .orchestration.router import TeamRouter, SmartRouter, RoutingDecision, TeamAssignment, RoutingBinding
 from .modes import (
     ExecutionMode,
     ModeRegistry,
@@ -58,10 +39,10 @@ from .modes import (
     CouncilMode,
     CollaborativeMode,
 )
-from .company import CompanyConfig, CompanyRegistry, CompanyError, GlobalBinding, ResolveResult
-from .component import CompanyComponent, CompanyContext, CompanyMemoryNamespace
-from .output import OutputSink, MemorySink, WebhookSink, CallbackSink, TelegramReportSink
-from .ceo_engine import build_cycle_prompt, generate_ceo_soul
+from .companies.company import CompanyConfig, CompanyRegistry, CompanyError, GlobalBinding, ResolveResult
+from .companies.component import CompanyComponent, CompanyContext, CompanyMemoryNamespace
+from .companies.output import OutputSink, MemorySink
+from .companies.ceo_engine import build_cycle_prompt, generate_ceo_soul
 from .exceptions import (
     CompanestError,
     ConfigurationError,
@@ -73,96 +54,74 @@ from .exceptions import (
     JobError,
     PiError,
     TeamError,
-    CostGateError,
     ArchiverError,
     SchedulerError,
 )
 
-#  Optional imports (may fail if extra deps not installed) 
 
 try:
-    from .client import GatewayClient
+    from .gateway.client import GatewayClient
 except ImportError:
     GatewayClient = None
 
 try:
-    from .jobs import JobManager, Job, JobStatus
+    from .jobs.jobs import JobManager, Job, JobStatus
 except ImportError:
     JobManager = None
     Job = None
     JobStatus = None
 
 try:
-    from .server import CompanestAPIServer
+    from .server.server import CompanestAPIServer
 except ImportError:
     CompanestAPIServer = None
 
 try:
-    from .master import MasterConnection
+    from .gateway.master import MasterConnection
 except ImportError:
     MasterConnection = None
 
 try:
-    from .archiver import MemoryArchiver
+    from .memory.archiver import MemoryArchiver
 except ImportError:
     MemoryArchiver = None
 
 try:
-    from .user_scheduler import UserScheduler
+    from .jobs.user_scheduler import UserScheduler
 except ImportError:
     UserScheduler = None
 
 
-#  Build __all__ dynamically (exclude None entries) 
-
 _all_names = [
-    # Config
     "CompanestConfig", "APIConfig", "MasterConfig",
-    # Company
     "CompanyConfig", "CompanyRegistry", "CompanyError", "GlobalBinding", "ResolveResult",
-    # Component
     "CompanyComponent", "CompanyContext", "CompanyMemoryNamespace",
-    # Output sinks
-    "OutputSink", "MemorySink", "WebhookSink", "CallbackSink", "TelegramReportSink",
-    # CEO engine
+    "OutputSink", "MemorySink",
     "build_cycle_prompt", "generate_ceo_soul",
-    # Orchestrator
     "CompanestOrchestrator",
-    # Events
     "EventBus", "Event", "EventType",
-    # Tools
     "ToolRegistry", "ToolProvider", "ToolContext",
-    # Client (optional)
     "GatewayClient",
-    # Jobs (optional)
     "JobManager", "Job", "JobStatus",
-    # Server (optional)
     "CompanestAPIServer",
-    # Master (optional)
     "MasterConnection",
-    # Parser
-    "MarkdownConfigParser", "ParseResult", "CodeBlock",
-    "parse_markdown_config", "validate_config_file", "generate_config_template",
-    # Pi Agent Teams
+    "MarkdownConfigParser", "ParseResult", "generate_config_template",
     "MemoryManager", "EnrichmentSource", "Dreamer", "DreamerError",
     "Pi", "PiConfig",
     "AgentTeam", "TeamConfig", "TeamRegistry",
     "CostGate", "CostEstimate", "CostDecision", "UserNotifier",
-    # Cascade
     "CascadeEngine", "CascadeStrategy", "CascadeMetrics", "AdequacyChecker", "ModelTier",
     "MemoryArchiver",
     "UserScheduler",
     "Scheduler",
     "TeamRouter", "SmartRouter", "RoutingDecision", "TeamAssignment", "RoutingBinding",
     "DEFAULT_TOOLS_DENY", "SESSIONS_TOOL_NAMES",
-    # Execution Modes
     "ExecutionMode", "ModeRegistry", "build_default_registry", "VALID_MODES",
     "DefaultMode", "LoopMode", "CouncilMode", "CollaborativeMode",
-    # Exceptions
     "CompanestError", "ConfigurationError", "OrchestratorError",
     "GatewayError", "GatewayConnectionError", "GatewayAuthError",
     "MasterError", "JobError", "PiError", "TeamError",
-    "CostGateError", "ArchiverError", "SchedulerError", "CompanyError",
+    "ArchiverError", "SchedulerError", "CompanyError",
 ]
 
 __all__ = [name for name in _all_names if globals().get(name) is not None]

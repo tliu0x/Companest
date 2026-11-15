@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Cloud-init for Companest EC2 (Ubuntu 24.04 ARM64)
-# Only prepares the environment  code is deployed via `companest-ctl.sh deploy`
 set -euo pipefail
 exec > /var/log/companest-setup.log 2>&1
 

@@ -1,42 +1,20 @@
-"""
-Companest Qdrant Backend  Vector Store Memory Backend
-
-Wraps a FileBackend for durable read/write and layers Qdrant on top for
-semantic search. Every write/append/delete synchronizes the vector index.
-
-Requires:
-- qdrant-client >= 1.9.0
-- A running Qdrant instance (or uses in-memory/local for dev)
-
-The backend embeds memory entry summaries + key names using a lightweight
-embedding model via Qdrant's built-in FastEmbed integration, so no separate
-embedding service is needed.
-"""
-
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
+from ..utils import synchronized
 from .backend import MemoryBackend, FileBackend
 from .manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
-# Qdrant collection naming: companest_memory_{team_id}
 _COLLECTION_PREFIX = "companest_memory_"
 _DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 _VECTOR_SIZE = 384  # bge-small-en-v1.5 output dimension
 
 
 class QdrantBackend(MemoryBackend):
-    """
-    Hybrid memory backend: FileBackend for storage + Qdrant for semantic search.
-
-    Data flow:
-    - read/write/append/delete  delegated to FileBackend (files remain source of truth)
-    - write/append/delete also update the Qdrant vector index
-    - semantic_search  Qdrant similarity query
-    - exact search (get_index, search_archive)  delegated to FileBackend
-    """
+    """Hybrid memory backend: FileBackend for storage + Qdrant for semantic search."""
 
     def __init__(
         self,
@@ -47,6 +25,7 @@ class QdrantBackend(MemoryBackend):
         prefer_grpc: bool = False,
         in_memory: bool = False,
     ) -> None:
+        self._io_lock = threading.RLock()
         self._file_backend = FileBackend(manager)
         self._qdrant_url = qdrant_url
         self._qdrant_api_key = qdrant_api_key
@@ -57,8 +36,8 @@ class QdrantBackend(MemoryBackend):
         self._embedder = None
         self._initialized_collections: set = set()
 
+    @synchronized
     def _get_client(self):
-        """Lazy-init Qdrant client."""
         if self._client is None:
             try:
                 from qdrant_client import QdrantClient
@@ -77,8 +56,8 @@ class QdrantBackend(MemoryBackend):
                 )
         return self._client
 
+    @synchronized
     def _get_embedder(self):
-        """Lazy-init embedding model via fastembed."""
         if self._embedder is None:
             try:
                 from fastembed import TextEmbedding
@@ -90,18 +69,17 @@ class QdrantBackend(MemoryBackend):
             self._embedder = TextEmbedding(model_name=self._embedding_model)
         return self._embedder
 
+    @synchronized
     def _embed(self, texts: List[str]) -> List[List[float]]:
-        """Embed a list of texts."""
-        embedder = self._get_embedder()
-        return list(embedder.embed(texts))
+        return list(self._get_embedder().embed(texts))
 
+    @synchronized
     def _collection_name(self, team_id: str) -> str:
-        """Sanitized Qdrant collection name."""
         safe_id = team_id.replace("/", "_").replace("\\", "_")
         return f"{_COLLECTION_PREFIX}{safe_id}"
 
+    @synchronized
     def _ensure_collection(self, team_id: str) -> None:
-        """Create collection if it doesn't exist yet."""
         name = self._collection_name(team_id)
         if name in self._initialized_collections:
             return
@@ -121,6 +99,7 @@ class QdrantBackend(MemoryBackend):
 
         self._initialized_collections.add(name)
 
+    @synchronized
     def _entry_to_text(self, key: str, meta: dict) -> str:
         """Build a searchable text representation of a memory entry."""
         parts = [key]
@@ -130,8 +109,8 @@ class QdrantBackend(MemoryBackend):
             parts.append(" ".join(meta["tags"]))
         return " | ".join(parts)
 
+    @synchronized
     def _upsert_entry(self, team_id: str, key: str) -> None:
-        """Index or re-index a single entry in Qdrant."""
         self._ensure_collection(team_id)
         client = self._get_client()
         name = self._collection_name(team_id)
@@ -154,8 +133,8 @@ class QdrantBackend(MemoryBackend):
             ],
         )
 
+    @synchronized
     def _delete_entry(self, team_id: str, key: str) -> None:
-        """Remove a single entry from Qdrant."""
         name = self._collection_name(team_id)
         if name not in self._initialized_collections:
             return
@@ -173,99 +152,77 @@ class QdrantBackend(MemoryBackend):
         import uuid
         return str(uuid.UUID(hashlib.md5(key.encode()).hexdigest()))
 
-    #  Capability flags 
-
     @property
+    @synchronized
     def supports_semantic_search(self) -> bool:
         return True
 
-    @property
-    def supports_snapshot(self) -> bool:
-        return True
+    @synchronized
+    def _index_safe(self, team_id: str, key: str, verb: str) -> None:
+        try:
+            self._upsert_entry(team_id, key)
+        except Exception as e:
+            logger.warning("Failed to %s %s/%s in Qdrant: %s", verb, team_id, key, e)
 
-    @property
-    def supports_native_compaction(self) -> bool:
-        return False
+    @synchronized
+    def _unindex_safe(self, team_id: str, key: str, verb: str) -> None:
+        try:
+            self._delete_entry(team_id, key)
+        except Exception as e:
+            logger.warning("Failed to %s %s/%s from Qdrant: %s", verb, team_id, key, e)
 
-    #  Required operations (delegate to FileBackend, sync index) 
-
+    @synchronized
     def read(self, team_id: str, key: str) -> Any:
         return self._file_backend.read(team_id, key)
 
+    @synchronized
     def write(self, team_id: str, key: str, data: Any) -> None:
         self._file_backend.write(team_id, key, data)
-        try:
-            self._upsert_entry(team_id, key)
-        except Exception as e:
-            logger.warning("Failed to index %s/%s in Qdrant: %s", team_id, key, e)
+        self._index_safe(team_id, key, "index")
 
+    @synchronized
     def append(self, team_id: str, key: str, entry: Any) -> None:
         self._file_backend.append(team_id, key, entry)
-        try:
-            self._upsert_entry(team_id, key)
-        except Exception as e:
-            logger.warning("Failed to index %s/%s in Qdrant: %s", team_id, key, e)
+        self._index_safe(team_id, key, "index")
 
+    @synchronized
     def list_keys(self, team_id: str) -> List[str]:
         return self._file_backend.list_keys(team_id)
 
+    @synchronized
     def delete(self, team_id: str, key: str) -> None:
         self._file_backend.delete(team_id, key)
-        try:
-            self._delete_entry(team_id, key)
-        except Exception as e:
-            logger.warning("Failed to remove %s/%s from Qdrant: %s", team_id, key, e)
+        self._unindex_safe(team_id, key, "remove")
 
+    @synchronized
     def get_index(self, team_id: str) -> Dict[str, dict]:
         return self._file_backend.get_index(team_id)
 
+    @synchronized
     def update_meta(self, team_id: str, key: str, **fields) -> None:
         self._file_backend.update_meta(team_id, key, **fields)
-        try:
-            self._upsert_entry(team_id, key)
-        except Exception as e:
-            logger.warning("Failed to re-index %s/%s in Qdrant: %s", team_id, key, e)
+        self._index_safe(team_id, key, "re-index")
 
+    @synchronized
     def archive(self, team_id: str, key: str) -> None:
         self._file_backend.archive(team_id, key)
-        try:
-            self._delete_entry(team_id, key)
-        except Exception as e:
-            logger.warning("Failed to remove archived %s/%s from Qdrant: %s", team_id, key, e)
+        self._unindex_safe(team_id, key, "remove archived")
 
+    @synchronized
     def search_archive(
         self, team_id: str, query: str, limit: int = 10,
     ) -> List[dict]:
         return self._file_backend.search_archive(team_id, query, limit)
 
+    @synchronized
     def read_overview(self, team_id: str) -> str:
         return self._file_backend.read_overview(team_id)
 
+    @synchronized
     def get_all_stats(self) -> Dict[str, Any]:
         return self._file_backend.get_all_stats()
 
-    #  Snapshot (delegate to FileBackend) 
-
-    def export_snapshot(self, team_id: str) -> Dict[str, Any]:
-        return self._file_backend.export_snapshot(team_id)
-
-    def restore_snapshot(self, team_id: str, snapshot: Dict[str, Any]) -> None:
-        self._file_backend.restore_snapshot(team_id, snapshot)
-        # Re-index all restored entries
-        try:
-            self._ensure_collection(team_id)
-            index = self._file_backend.get_index(team_id)
-            for key in index:
-                self._upsert_entry(team_id, key)
-            logger.info(
-                "Re-indexed %d entries for team %s after snapshot restore",
-                len(index), team_id,
-            )
-        except Exception as e:
-            logger.warning("Failed to re-index team %s after restore: %s", team_id, e)
-
-    #  Semantic search 
-
+    @synchronized
     def semantic_search(
         self,
         team_id: str,
@@ -274,11 +231,6 @@ class QdrantBackend(MemoryBackend):
         limit: int = 20,
         include_archive: bool = True,
     ) -> List[Dict[str, Any]]:
-        """
-        Vector similarity search over team memory entries.
-
-        Returns list of dicts with 'key', 'score', 'source', and metadata.
-        """
         self._ensure_collection(team_id)
         client = self._get_client()
         name = self._collection_name(team_id)
@@ -304,48 +256,3 @@ class QdrantBackend(MemoryBackend):
             })
 
         return results
-
-    #  Helpers 
-
-    @property
-    def manager(self) -> MemoryManager:
-        """Access the underlying MemoryManager (e.g. for prompt building)."""
-        return self._file_backend.manager
-
-    def reindex_team(self, team_id: str) -> int:
-        """
-        Full reindex of a team's memory into Qdrant.
-
-        Useful after bulk import or if the index is out of sync.
-        Returns the number of entries indexed.
-        """
-        self._ensure_collection(team_id)
-        index = self._file_backend.get_index(team_id)
-        if not index:
-            return 0
-
-        texts = []
-        keys = []
-        for key, meta in index.items():
-            texts.append(self._entry_to_text(key, meta))
-            keys.append(key)
-
-        vectors = self._embed(texts)
-
-        from qdrant_client.models import PointStruct
-        points = [
-            PointStruct(
-                id=self._key_to_point_id(key),
-                vector=vec,
-                payload={"key": key, "team_id": team_id, **index[key]},
-            )
-            for key, vec in zip(keys, vectors)
-        ]
-
-        client = self._get_client()
-        name = self._collection_name(team_id)
-        # Batch upsert (Qdrant handles batching internally)
-        client.upsert(collection_name=name, points=points)
-
-        logger.info("Reindexed %d entries for team %s", len(points), team_id)
-        return len(points)

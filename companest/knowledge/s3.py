@@ -2,18 +2,16 @@
 
 import json
 import logging
+import threading
 from typing import Any, Dict, Optional
+
+from ..utils import synchronized
 
 logger = logging.getLogger(__name__)
 
 
 class S3JsonStore:
-    """
-    Minimal S3 object store with a lazily created boto3 client.
-
-    boto3 is imported on first use so the module loads without the s3 extra;
-    tests inject a mock client by assigning `_s3`.
-    """
+    """Minimal S3 object store with a lazily created boto3 client."""
 
     def __init__(
         self,
@@ -27,7 +25,9 @@ class S3JsonStore:
         self.region = region
         self.endpoint_url = endpoint_url or None
         self._s3 = None
+        self._io_lock = threading.RLock()
 
+    @synchronized
     def _get_s3(self):
         if self._s3 is None:
             try:
@@ -44,7 +44,6 @@ class S3JsonStore:
         return self._s3
 
     def _put(self, key: str, body: str, content_type: str = "application/json") -> str:
-        """Write a text object under the prefix and return its full key."""
         full_key = self.prefix + key
         self._get_s3().put_object(
             Bucket=self.bucket,
@@ -74,7 +73,6 @@ class S3JsonStore:
 
 
 def _is_missing_key(error: Exception) -> bool:
-    """True for boto3's NoSuchKey / 404 errors."""
     if type(error).__name__ == "NoSuchKey":
         return True
     response = getattr(error, "response", None)

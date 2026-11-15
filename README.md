@@ -4,11 +4,21 @@ Multi-Agent Company Incubator
 
 Companest is a control plane for agent-native companies. It runs shared teams and company-private teams in the same runtime, routes work across teams, manages background execution, and exposes an API for multi-company operation.
 
-This repository is the first public alpha release of a system that has already gone through a longer private incubation phase.
-
 ## Status
 
 Alpha, but usable today as a shared runtime for multiple companies. Interfaces may still change while packaging, docs, and operational defaults continue to harden.
+
+## Public Repository Privacy
+
+This repository is public. Keep personal information out of tracked files, Git history, commit messages, and public PR descriptions or comments. This rule applies to human contributors and coding agents.
+
+- Do not include personal names, private email addresses, phone numbers, addresses, personal account identifiers, local home-directory paths, or links to private AI sessions. Keep repository URLs needed for installation, attribution, and security reporting; do not add unrelated personal profiles or account history.
+- Use fictional data and placeholders in documentation, examples, fixtures, and logs. Keep real credentials, personal configuration, and runtime data outside version control.
+- Before committing, configure and verify a non-personal Git author and committer identity for this checkout. Do not assume the machine's global Git identity is safe for publication; a noreply email alone does not hide a personal author name.
+- Before pushing or publishing a PR, review staged content, outgoing commit metadata and messages, and the PR text for personal information. Never reproduce actual personal data in a cleanup description or test fixture.
+- If personal information was already published, remove it from current content and audit every affected branch, tag, and historical commit. A new deletion commit does not remove older copies. Coordinate any history rewrite and follow up on retained PR references or cached views with the hosting provider.
+
+See [SECURITY.md](./SECURITY.md) for private security reporting.
 
 ## What Companest Does
 
@@ -89,6 +99,8 @@ Environment variable interpolation supports `${VAR}` and `${VAR:-default}`.
 
 ## External Company Workflow
 
+Claude Code sessions can submit and track jobs directly through the CLI or HTTP API, without the message gateway. See [Claude session access](./examples/claude-session.md) for authenticated setup, JSON output, company/workspace scope and reconnecting to existing jobs.
+
 Companest can act as a shared control plane for external company repos that register themselves by manifest.
 
 - Registration guide: [`examples/company-onboarding.md`](./examples/company-onboarding.md)
@@ -114,7 +126,6 @@ See [`examples/company-onboarding.md`](./examples/company-onboarding.md) for the
 - Company onboarding: [`examples/company-onboarding.md`](./examples/company-onboarding.md)
 - Generic company template: [`examples/company-template/README.md`](./examples/company-template/README.md)
 - Prediction market example: [`examples/prediction-market/README.md`](./examples/prediction-market/README.md)
-- Release notes draft: [`docs/release-notes-platform-readiness.md`](./docs/release-notes-platform-readiness.md)
 - Production config baseline: [`deploy/config.prod.md`](./deploy/config.prod.md)
 
 ## CLI

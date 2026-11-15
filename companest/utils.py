@@ -1,106 +1,82 @@
-"""
-Companest shared utilities.
-
-Robust JSON extraction from LLM output, shared across modes and dreamer.
-"""
-
+import asyncio
 import json
 import re
-from typing import Any, Dict, List, Optional
+from functools import wraps
+from typing import Any, Dict, Iterator, List, Optional
+
+
+async def run_sync(func, /, *args, **kwargs):
+    """Offload blocking work; finish its cleanup before propagating cancellation."""
+    return await finish_on_cancel(asyncio.to_thread(func, *args, **kwargs))
+
+
+async def finish_on_cancel(awaitable):
+    """Finish an in-flight operation before releasing its caller's resources."""
+    task = asyncio.create_task(awaitable)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            task.exception()
+        raise
+
+
+def offload(func):
+    @wraps(func)
+    async def wrapped(*args, **kwargs):
+        return await run_sync(func, *args, **kwargs)
+    return wrapped
+
+
+def synchronized(func):
+    """Serialize a synchronous object's I/O and cache mutations with its RLock."""
+    @wraps(func)
+    def wrapped(self, *args, **kwargs):
+        with self._io_lock:
+            return func(self, *args, **kwargs)
+    return wrapped
+
+
+def _json_candidates(text: str, open_char: str, close_char: str) -> Iterator[str]:
+    yield text
+    md_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL)
+    if md_match:
+        yield md_match.group(1).strip()
+    balanced = _extract_balanced(text, open_char, close_char)
+    if balanced is not None:
+        yield balanced
+
+
+def _extract_json(raw: str, kind: type, open_char: str, close_char: str):
+    for candidate in _json_candidates(raw.strip(), open_char, close_char):
+        try:
+            parsed = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(parsed, kind):
+            return parsed
+    return None
 
 
 def extract_json_object(raw: str) -> Optional[Dict[str, Any]]:
-    """Extract a JSON object from LLM output that may contain surrounding text.
-
-    Strategy (in order):
-    1. Direct json.loads
-    2. Extract from markdown code block (```json ... ``` or ``` ... ```)
-    3. Balanced-brace extraction (handles nested {})
-    """
-    stripped = raw.strip()
-
-    # 1. Direct parse
-    try:
-        parsed = json.loads(stripped)
-        if isinstance(parsed, dict):
-            return parsed
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # 2. Markdown code block
-    md_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", stripped, re.DOTALL)
-    if md_match:
-        try:
-            parsed = json.loads(md_match.group(1).strip())
-            if isinstance(parsed, dict):
-                return parsed
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # 3. Balanced brace extraction  find the first top-level { ... }
-    result = _extract_balanced(stripped, "{", "}")
-    if result is not None:
-        try:
-            parsed = json.loads(result)
-            if isinstance(parsed, dict):
-                return parsed
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    return None
+    """Extract a JSON object from LLM output that may contain surrounding text."""
+    return _extract_json(raw, dict, "{", "}")
 
 
 def extract_json_array(raw: str, max_items: int = 0) -> Optional[List[Any]]:
-    """Extract a JSON array from LLM output that may contain surrounding text.
-
-    Strategy (in order):
-    1. Direct json.loads
-    2. Extract from markdown code block
-    3. Balanced-bracket extraction (handles nested [])
-
-    Args:
-        raw: Raw LLM output text
-        max_items: If >0, truncate the array to this many items
-    """
-    stripped = raw.strip()
-
-    # 1. Direct parse
-    try:
-        parsed = json.loads(stripped)
-        if isinstance(parsed, list):
-            return parsed[:max_items] if max_items else parsed
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # 2. Markdown code block
-    md_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", stripped, re.DOTALL)
-    if md_match:
-        try:
-            parsed = json.loads(md_match.group(1).strip())
-            if isinstance(parsed, list):
-                return parsed[:max_items] if max_items else parsed
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # 3. Balanced bracket extraction
-    result = _extract_balanced(stripped, "[", "]")
-    if result is not None:
-        try:
-            parsed = json.loads(result)
-            if isinstance(parsed, list):
-                return parsed[:max_items] if max_items else parsed
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    return None
+    """Extract a JSON array from LLM output that may contain surrounding text."""
+    parsed = _extract_json(raw, list, "[", "]")
+    return parsed[:max_items] if parsed and max_items else parsed
 
 
 def _extract_balanced(text: str, open_char: str, close_char: str) -> Optional[str]:
-    """Extract the first balanced substring delimited by open/close chars.
-
-    Handles nested delimiters and JSON strings (skips chars inside quotes).
-    Returns the matched substring including delimiters, or None.
-    """
     start = text.find(open_char)
     if start == -1:
         return None

@@ -4,9 +4,9 @@ import asyncio
 import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock
 
-from companest.master import MasterConnection
+from companest.gateway.master import MasterConnection
 from companest.config import MasterConfig
-from companest.router import RoutingDecision, TeamAssignment
+from companest.orchestration.router import RoutingDecision, TeamAssignment
 
 
 @pytest.fixture
@@ -23,12 +23,11 @@ def master_config():
 @pytest.fixture
 def mock_orchestrator():
     orch = MagicMock()
-    orch.get_status.return_value = {"status": "idle", "teams_initialized": True}
+    orch.get_status_async = AsyncMock(return_value={"status": "idle", "teams_initialized": True})
+    orch.get_teams_status_async = AsyncMock(return_value={})
 
-    # Mock run_team()
     orch.run_team = AsyncMock(return_value="Team result")
 
-    # Mock run_auto()  returns (result, RoutingDecision)
     auto_decision = RoutingDecision(
         teams=[TeamAssignment(team_id="engineering", instruction="Fix the Python bug")],
         strategy="single",
@@ -37,7 +36,6 @@ def mock_orchestrator():
     )
     orch.run_auto = AsyncMock(return_value=("Team result", auto_decision))
 
-    # Mock team_registry for auto-routing
     orch.team_registry = MagicMock()
     orch.team_registry.list_teams.return_value = [
         "engineering", "stock", "finance"
@@ -51,7 +49,6 @@ def master_conn(master_config, mock_orchestrator):
     return MasterConnection(master_config, mock_orchestrator)
 
 
-# ---- Tests ----
 
 class TestPing:
     @pytest.mark.asyncio
@@ -167,7 +164,6 @@ class TestTaskAuto:
             "req-6", "task.execute", {"task": "Write hello world"}
         )
 
-        # Should still work via auto-routing
         mock_orchestrator.run_auto.assert_awaited_once()
         assert len(sent) == 1
         assert sent[0][0][1] is True  # ok
@@ -211,7 +207,6 @@ class TestConcurrency:
         """Max concurrent tasks should be enforced by semaphore."""
         master_config.max_concurrent_tasks = 1
 
-        # Orchestrator that takes 0.3s per task
         running = []
         peak = [0]
 
@@ -231,14 +226,12 @@ class TestConcurrency:
         conn._client.is_connected = True
         conn._client.send_response = AsyncMock()
 
-        # Fire 3 tasks concurrently via task.team
         await asyncio.gather(
             conn._handle_inbound_request("r1", "task.team", {"task": "a", "team_id": "eng"}),
             conn._handle_inbound_request("r2", "task.team", {"task": "b", "team_id": "eng"}),
             conn._handle_inbound_request("r3", "task.team", {"task": "c", "team_id": "eng"}),
         )
 
-        # With semaphore=1, peak concurrency should be 1
         assert peak[0] == 1
 
 
@@ -251,13 +244,11 @@ class TestOnInboundRequest:
 
         loop = asyncio.new_event_loop()
         try:
-            # Run inside event loop so create_task works
             async def _test():
                 master_conn._on_inbound_request({
                     "type": "req", "id": "t1", "method": "ping", "params": {}
                 })
                 assert "t1" in master_conn._active_tasks
-                # Let the task finish
                 await master_conn._active_tasks["t1"]
 
             loop.run_until_complete(_test())

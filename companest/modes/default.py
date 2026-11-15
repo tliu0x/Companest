@@ -1,18 +1,9 @@
-"""
-Default execution mode  single Pi, optional cascade.
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
-DefaultMode(cascade=False)  "default" mode
-DefaultMode(cascade=True)   registered as "cascade" mode
-"""
+from . import ExecutionMode, ProgressCallback, _lead_pi
 
-from typing import Any, Dict, Optional
-
-from . import ExecutionMode, ProgressCallback
-from ..exceptions import TeamError
-
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from ..team import AgentTeam
+    from ..agents.team import AgentTeam
 
 
 class DefaultMode(ExecutionMode):
@@ -32,12 +23,7 @@ class DefaultMode(ExecutionMode):
         on_progress: ProgressCallback = None,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        if not team.lead_pi_id or team.lead_pi_id not in team.pis:
-            raise TeamError(
-                f"Team '{team.id}' has no valid lead_pi",
-                details={"lead_pi": team.lead_pi_id, "available": list(team.pis.keys())},
-            )
-        pi = team.pis[team.lead_pi_id]
+        pi = _lead_pi(team)
         if on_progress:
             await on_progress(
                 f"\U0001f916 {team.id}/{pi.id} ({pi.model.split('/')[-1]})"

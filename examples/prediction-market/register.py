@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Register the prediction-market company via the Companest API.
-
-Usage:
-    python register.py [base_url]
-
-Examples:
-    python register.py                          # default: http://localhost:8000
-    python register.py http://companest:8000    # custom server
-    COMPANEST_API_TOKEN=xxx python register.py  # with auth
-"""
+"""Register the prediction-market company via the Companest API."""
 
 import json
 import os

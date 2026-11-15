@@ -1,31 +1,11 @@
-"""Verify all default model configurations converge on deepseek-chat.
+"""Verify all default model configurations converge on deepseek-chat."""
 
-After the cost-reduction PR, every component that picks a default model
-should agree on 'deepseek-chat' (not a mix of Claude and DeepSeek).
-"""
-
-from companest.company import CompanyCEOConfig
-from companest.pi import PiConfig
-from companest.team import _parse_pi_sections
+from companest.companies.company import CompanyCEOConfig
+from companest.agents.pi import PiConfig
+from companest.agents.team import _parse_pi_sections
 
 
-EXPECTED_DEFAULT = "deepseek-chat"
-
-
-def test_pi_config_default_model():
-    """PiConfig default should be deepseek-chat."""
-    cfg = PiConfig(id="test")
-    assert cfg.model == EXPECTED_DEFAULT
-
-
-def test_company_ceo_default_model():
-    """CompanyCEOConfig default should be deepseek-chat."""
-    cfg = CompanyCEOConfig()
-    assert cfg.model == EXPECTED_DEFAULT
-
-
-def test_team_md_parser_default_model():
-    """When team.md omits the model field, parser should default to deepseek-chat."""
+def test_default_models_converge():
     team_md = (
         "# Team: test-team\n"
         "- role: general\n"
@@ -37,4 +17,4 @@ def test_team_md_parser_default_model():
     )
     pis = _parse_pi_sections(team_md)
     assert len(pis) == 1
-    assert pis[0].model == EXPECTED_DEFAULT
+    assert pis[0].model == PiConfig(id="test").model == CompanyCEOConfig().model == "deepseek-chat"

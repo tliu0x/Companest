@@ -14,13 +14,13 @@
 ## Start Here
 
 - CLI entry and operator workflows: `companest/cli.py`
-- API serving: `companest/server.py`
+- API serving: `companest/server/server.py`
 - Configuration and discovery: `companest/config.py`, `README.md`, `examples/minimal-setup/.companest/config.md`
-- Teams, Pis, routing, and execution modes: `companest/team.py`, `companest/pi.py`, `companest/router.py`, `companest/modes/`, `companest/orchestrator.py`, `companest/multi_team.py`
-- Jobs, background work, and scheduling: `companest/jobs.py`, `companest/background.py`, `companest/scheduler.py`, `companest/user_scheduler.py`
+- Teams, Pis, routing, and execution modes: `companest/agents/team.py`, `companest/agents/pi.py`, `companest/orchestration/router.py`, `companest/modes/`, `companest/orchestration/orchestrator.py`, `companest/orchestration/multi_team.py`
+- Jobs, background work, and scheduling: `companest/jobs/jobs.py`, `companest/orchestration/background.py`, `companest/jobs/scheduler.py`, `companest/jobs/user_scheduler.py`
 - Memory: `companest/memory/`
 - Feeds, public knowledge, and digests: `companest/knowledge/`
-- Company onboarding and public examples: `examples/`, `deploy/config.prod.md`, `docs/`
+- Company onboarding and public examples: `examples/`, `deploy/config.prod.md`
 
 ## Source Of Truth
 
@@ -42,7 +42,7 @@ python -m compileall companest tests -q
 ## Working Rules
 
 - Keep examples runnable. If you change config shape, manifests, or onboarding flow, update `README.md`, `examples/`, and `deploy/config.prod.md` in the same change.
-- For CLI or API behavior changes, read `companest/cli.py`, `companest/server.py`, and the relevant tests before editing.
+- For CLI or API behavior changes, read `companest/cli.py`, `companest/server/server.py`, and the relevant tests before editing.
 - For team-mode behavior changes, inspect the matching file in `companest/modes/` and the paired tests in `tests/test_modes.py`, `tests/test_team_mode.py`, and nearby mode-specific tests.
 - For memory or knowledge (feeds, digests, public knowledge) changes, run the focused tests such as `tests/test_memory_*`, `tests/test_feeds.py`, `tests/test_digests.py`, and `tests/test_public_knowledge.py`.
 - Keep changes scoped. Do not mix provider, scheduler, and API refactors unless the task truly spans them.
