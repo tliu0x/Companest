@@ -169,6 +169,20 @@ from direct memory-search calls; semantic/hybrid search is no longer exposed.
 This change does not delete data from an old external service or its volumes.
 Company permissions, scoped mounts and shared storage locks still apply.
 
+File memory now records category, immutable versions and job/Pi provenance.
+Keep each team's `.memory-history` and `.memory-pending.json` with its persistent
+memory mount and backups. A pending file commit is completed on the next managed
+access; model/tool work is not replayed. All writers must use the same lock mount
+and updated MemoryManager; deploy control and actor images together. Do not edit
+revision files or internal journals directly. History is retained without automatic
+pruning, including content removed from active memory.
+
+Existing files need no bulk migration: their first managed edit retains a legacy
+baseline, without changing IDs or content keys. Update direct tool consumers for
+the paged memory_read/list/index responses and write/restore version checks.
+Dreamer groups by category, archives exact source revisions and skips concurrent
+changes. See the [memory lifecycle and tool contract](../../companest/memory/README.md).
+
 ## Verification scope
 
 Earlier in this branch, the pinned control plane and counter launched in an

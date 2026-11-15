@@ -16,4 +16,5 @@ class MemorySink(OutputSink):
 
     async def emit(self, company_id: str, cycle_result: dict) -> None:
         team_id = f"company-{company_id}"
-        await run_sync(self._memory.append_team_memory, team_id, "cycle-results.json", cycle_result)
+        await run_sync(self._memory.append_team_memory, team_id, "cycle-results.json", cycle_result,
+                       category="task", pinned=True)

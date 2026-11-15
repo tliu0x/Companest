@@ -17,6 +17,9 @@ Substrate 负责实例生命周期，Companest 只适配调用和执行自身业
 控制面 jobs.db 保存提交意图、actor 引用/UID、能力凭据和最终结果。
 actor 的独立持久卷保存 task journal，业务记忆与 workspace 则使用长期共享挂载。
 这三类数据的生命周期不同，删除完成的 actor 不应删除业务存储。
+actor 将已接受请求的 job_id/company_id 注入记忆来源上下文，Pi 追加 pi_id；
+嵌套任务和后台整理沿用这个 job_id，不从模型工具参数读取来源身份。
+团队内的 memory pending journal 只恢复文件提交一致性，不重跑 actor、模型或工具。
 
 接受请求时先写 journal 再启动协程；客户端在写入期间断开也必须完成接受步骤。
 相同任务重复请求只能得到已有记录，不能再次执行。

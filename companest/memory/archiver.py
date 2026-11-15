@@ -73,7 +73,7 @@ class MemoryArchiver:
                 "teams": self.memory.list_teams(),
             }
 
-            self.memory.append_team_memory("memory", "backup-log.json", metadata)
+            self.memory.append_team_memory("memory", "backup-log.json", metadata, category="task", pinned=True)
 
             logger.info(
                 f"[Archiver] Snapshot uploaded: s3://{self.bucket}/{key} "

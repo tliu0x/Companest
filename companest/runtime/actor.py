@@ -140,6 +140,8 @@ class ActorWorkload:
                     )
                 team_id = context.get("team_id")
                 with ExitStack() as locks:
+                    from ..memory import memory_provenance
+                    locks.enter_context(memory_provenance(job_id=request.job_id, company_id=self.company_id))
                     workspace_id = context.get("workspace_id")
                     if workspace_id:
                         ws = orchestrator.workspace_registry.get(workspace_id)

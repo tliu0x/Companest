@@ -155,9 +155,21 @@ class CompanyMemoryNamespace:
         self._validate_team_id(team_id)
         return self._mgr.read_team_memory(team_id, key)
 
-    def write_team_memory(self, team_id: str, key: str, data: Any) -> None:
+    def write_team_memory(self, team_id: str, key: str, data: Any, **metadata) -> int:
         self._validate_team_id(team_id)
-        self._mgr.write_team_memory(team_id, key, data)
+        return self._mgr.write_team_memory(team_id, key, data, **metadata)
+
+    def read_memory_entry(self, team_id: str, key: str, **options):
+        self._validate_team_id(team_id)
+        return self._mgr.read_memory_entry(team_id, key, **options)
+
+    def list_memory_versions(self, team_id: str, key: str, **options):
+        self._validate_team_id(team_id)
+        return self._mgr.list_memory_versions(team_id, key, **options)
+
+    def restore_memory_version(self, team_id: str, key: str, version: int, *, expected_version: int) -> int:
+        self._validate_team_id(team_id)
+        return self._mgr.restore_memory_version(team_id, key, version, expected_version=expected_version)
 
     def list_team_memory(self, team_id: str) -> List[str]:
         self._validate_team_id(team_id)

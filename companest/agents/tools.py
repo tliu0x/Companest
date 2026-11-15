@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from ..utils import offload
-from ..memory import MemoryManager, MemoryBackend, FileBackend, MemorySearchService
+from ..memory import MemoryManager, MemoryBackend, FileBackend, MemorySearchService, memory_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,8 @@ TOOL_PRESETS = {
     "analyst": ["WebSearch", "memory_read", "memory_write", "memory_list", "memory_index", "memory_search"],
     "reporter": ["memory_read"],
     "reviewer": ["Read", "Glob", "Grep", "memory_read"],
-    "archiver": ["memory_read", "memory_write", "memory_list", "memory_index", "memory_search"],
+    "archiver": ["memory_read", "memory_write", "memory_list", "memory_index", "memory_search",
+                 "memory_overview", "memory_history", "memory_restore"],
     "accountant": ["memory_read", "memory_write"],
     "scheduler": ["schedule_task", "list_schedules", "cancel_schedule"],
     "collector": [
@@ -57,7 +58,8 @@ CLAUDE_BUILTIN_TOOLS = {
     "Read", "Write", "Edit", "Bash", "Glob", "Grep",
     "WebSearch", "WebFetch",
 }
-CUSTOM_TOOL_NAMES = {"memory_read", "memory_write", "memory_list", "memory_index", "memory_search"}
+CUSTOM_TOOL_NAMES = {"memory_read", "memory_write", "memory_list", "memory_index", "memory_search",
+                     "memory_overview", "memory_history", "memory_restore"}
 PUBLIC_KNOWLEDGE_TOOL_NAMES = {"search_public_knowledge", "read_public_knowledge"}
 SCHEDULER_TOOL_NAMES = {"schedule_task", "list_schedules", "cancel_schedule"}
 FEED_TOOL_NAMES = {
@@ -156,10 +158,20 @@ def create_memory_tool_defs(
     _backend = memory_backend if memory_backend is not None else FileBackend(memory)
     _search_service = MemorySearchService(_backend)
 
+    def _page(items, args):
+        offset, limit = int(args.get("offset", 0)), int(args.get("limit", 20))
+        if offset < 0 or not 1 <= limit <= 100:
+            raise ValueError("offset must be nonnegative and limit must be between 1 and 100")
+        end = min(offset + limit, len(items))
+        return {"entries": items[offset:end], "next_offset": end if end < len(items) else None,
+                "total": len(items)}
+
     @offload
     def memory_read(args):
-        data = _backend.read(team_id, args["key"])
-        return json.dumps(data, ensure_ascii=False, indent=2) if data is not None else "null"
+        result = _backend.read_entry(team_id, args["key"], source=args.get("source", "active"),
+                                     version=args.get("version"), offset=int(args.get("offset", 0)),
+                                     limit=int(args.get("limit", 4000)))
+        return json.dumps(result, ensure_ascii=False)
 
     @offload
     def memory_write(args):
@@ -168,92 +180,79 @@ def create_memory_tool_defs(
             data = json.loads(args["value"])
         except json.JSONDecodeError:
             data = args["value"]
-        _backend.write(team_id, key, data)
-        return f"Written to {team_id}/memory/{key}"
+        fields = {k: args[k] for k in ("category", "summary", "tags") if k in args}
+        with memory_provenance(kind="agent", pi_id=pi_id):
+            version = _backend.write(team_id, key, data, expected_version=args.get("expected_version", 0), **fields)
+        return json.dumps({"team_id": team_id, "key": key, "version": version})
 
     @offload
     def memory_list(args):
-        return json.dumps(_backend.list_keys(team_id))
+        return json.dumps(_page(sorted(_backend.list_keys(team_id)), args))
 
     @offload
     def memory_index(args):
-        return json.dumps(_backend.get_index(team_id), indent=2, ensure_ascii=False)
+        category = args.get("category")
+        _search_service.validate_category(category)
+        entries = [{"key": key, **meta} for key, meta in sorted(_backend.get_index(team_id).items())
+                   if category is None or meta.get("category", "unclassified") == category]
+        return json.dumps(_page(entries, args), ensure_ascii=False)
 
     @offload
     def memory_search(args):
         include_archive = args.get("include_archive", True)
         explain = args.get("explain", False)
-        # Models sometimes send booleans as strings
         if isinstance(include_archive, str):
             include_archive = include_archive.lower() not in ("false", "0", "no")
         if isinstance(explain, str):
             explain = explain.lower() in ("true", "1", "yes")
-        results = _search_service.search(
-            team_id,
-            args["query"],
-            limit=int(args.get("limit", 20)),
-            include_archive=include_archive,
-            explain=explain,
-        )
-        return json.dumps(results, ensure_ascii=False, indent=2)
+        results = _search_service.search(team_id, args["query"], limit=int(args.get("limit", 20)),
+                                         include_archive=include_archive, explain=explain,
+                                         category=args.get("category"))
+        return json.dumps(results, ensure_ascii=False)
 
+    @offload
+    def memory_overview(args):
+        return _backend.read_overview(team_id)[:2400]
+
+    @offload
+    def memory_history(args):
+        return json.dumps(_backend.list_versions(team_id, args["key"], limit=int(args.get("limit", 20)),
+                                                 before_version=args.get("before_version")), ensure_ascii=False)
+
+    @offload
+    def memory_restore(args):
+        with memory_provenance(pi_id=pi_id):
+            version = _backend.restore(team_id, args["key"], args["version"], expected_version=args["expected_version"])
+        return json.dumps({"team_id": team_id, "key": args["key"], "version": version})
+
+    key_param = {"type": "string", "description": "Existing memory key, unchanged (e.g. notes.json)"}
+    category_param = {"type": "string", "enum": ["fact", "task", "experience", "unclassified"], "optional": True,
+                      "description": "fact: durable facts; task: working notes; experience: reusable lessons; unclassified: legacy/unknown"}
+    offset_param = {"type": "integer", "default": 0, "optional": True, "description": "Offset returned by the previous page"}
+    limit_param = {"type": "integer", "default": 20, "optional": True, "description": "Page size, 1 to 100"}
     return [
-        ToolDefinition(
-            name="memory_read",
-            description="Read a key from team shared memory. Returns JSON content or null.",
-            parameters={"key": {"type": "string", "description": "Memory file name (e.g. watchlist.json)"}},
-            handler=memory_read,
-        ),
-        ToolDefinition(
-            name="memory_write",
-            description="Write a key-value to team shared memory. Value should be valid JSON.",
-            parameters={
-                "key": {"type": "string", "description": "Memory file name (e.g. watchlist.json)"},
-                "value": {"type": "string", "description": "JSON string to write"},
-            },
-            handler=memory_write,
-        ),
-        ToolDefinition(
-            name="memory_list",
-            description="List all keys in team shared memory.",
-            parameters={},
-            handler=memory_list,
-        ),
-        ToolDefinition(
-            name="memory_index",
-            description="List all memory entries with metadata (importance, tier, access_count, summary).",
-            parameters={},
-            handler=memory_index,
-        ),
-        ToolDefinition(
-            name="memory_search",
-            description=(
-                "Search team memory and archive by keyword. Returns matching entries "
-                "ranked by relevance."
-            ),
-            parameters={
-                "query": {
-                    "type": "string",
-                    "description": "Search term (matches against key names, summary, and tags)",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results to return (default 20)",
-                    "default": 20,
-                },
-                "include_archive": {
-                    "type": "boolean",
-                    "description": "Include archived entries in search (default true)",
-                    "default": True,
-                },
-                "explain": {
-                    "type": "boolean",
-                    "description": "Include scoring details (_score, _mode) in results (default false)",
-                    "default": False,
-                },
-            },
-            handler=memory_search,
-        ),
+        ToolDefinition("memory_read", "Read one page of active/archive memory or an immutable version. Returns text, version and next_offset; reuse version when paging.",
+                       {"key": key_param, "source": {"type": "string", "enum": ["active", "archive"], "optional": True},
+                        "version": {"type": "integer", "optional": True}, "offset": offset_param,
+                        "limit": {"type": "integer", "default": 4000, "optional": True, "description": "Characters per page, 1 to 16000"}}, memory_read),
+        ToolDefinition("memory_write", "Save categorized JSON memory. Use expected_version=0 for a new key; read and supply the current version before replacing existing content. Source job and Pi are recorded automatically.",
+                       {"key": key_param, "value": {"type": "string", "description": "JSON content"},
+                        "expected_version": {"type": "integer", "default": 0, "optional": True}, "category": category_param,
+                        "summary": {"type": "string", "optional": True, "description": "Searchable summary, at most 4000 characters"},
+                        "tags": {"type": "array", "items": {"type": "string"}, "optional": True}}, memory_write),
+        ToolDefinition("memory_list", "List a page of active memory keys.",
+                       {"offset": offset_param, "limit": limit_param}, memory_list),
+        ToolDefinition("memory_index", "Browse categorized memory metadata, versions and provenance without reading content.",
+                       {"category": category_param, "offset": offset_param, "limit": limit_param}, memory_index),
+        ToolDefinition("memory_search", "Search key names, summaries and tags. Results contain metadata and versions; use memory_read for source content.",
+                       {"query": {"type": "string"}, "category": category_param, "limit": limit_param,
+                        "include_archive": {"type": "boolean", "default": True, "optional": True},
+                        "explain": {"type": "boolean", "default": False, "optional": True}}, memory_search),
+        ToolDefinition("memory_overview", "Read the team's short memory overview before searching for details.", {}, memory_overview),
+        ToolDefinition("memory_history", "List earlier revisions with provenance; contents are read separately using memory_read(version).",
+                       {"key": key_param, "limit": limit_param, "before_version": {"type": "integer", "optional": True}}, memory_history),
+        ToolDefinition("memory_restore", "Restore an earlier revision as a NEW active version, keeping history. Supply the latest version to avoid overwriting concurrent changes.",
+                       {"key": key_param, "version": {"type": "integer"}, "expected_version": {"type": "integer"}}, memory_restore),
     ]
 
 
@@ -512,7 +511,7 @@ def create_sessions_tool_defs(
             "message": args["message"],
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
-        memory.append_team_memory(target, "inbox.json", entry)
+        memory.append_team_memory(target, "inbox.json", entry, category="task", pinned=True)
         return f"Message sent to {target}/inbox.json"
 
     @offload

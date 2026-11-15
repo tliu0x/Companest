@@ -26,3 +26,5 @@ actor 需要的团队、模型、MCP 与记忆配置必须存在于该 scope 的
 CompanyMemoryNamespace 的运行时方法只接收完整 team_id（例如 `acme/research`），
 不会把短名称自动加上公司前缀。旧 manifest 的目录名仅在配置初始化时解析一次；
 TeamConfig 创建后，其 ID 经路由、工具和存储原样传递，物理目录保存在 source_dir 中。
+CompanyMemoryNamespace 的分类写入、分页读取、版本历史和恢复使用同一完整 team_id 校验，
+不能通过历史接口访问其他公司的条目。版本文件保存在原团队目录内，并受相同挂载权限限制。

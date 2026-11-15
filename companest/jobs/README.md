@@ -19,8 +19,8 @@ Substrate 管理执行实例的生命周期，Companest 的计划只决定业务
 | 公司自定义计划 | 执行 company.yaml 中指定的 team、prompt、mode。 | 绑定公司提交 JobManager；适合定时研究、监控和报告。 |
 | 信息补全任务 | 更新研究 briefing 或信息 feed，供后续任务使用。 | 调用 research/info-collection；更新共享或授权的团队记忆。 |
 | 按需信息刷新 | 自动路由业务请求前，围绕当前问题补充少量信息。 | 在当前 actor 中调用 info-collection，继承公司/用户/workspace；不是另建无归属的任务。 |
-| `maintenance=dream` | 评估记忆重要性、压缩、清理并生成概要。 | 按 Substrate 配置的 scope 提交 actor；记录 Dreamer 统计。 |
-| `maintenance=consolidate` | 合并长期记忆，归档原条目。 | 按 scope 提交 actor，写入长期记忆和 dream log。 |
+| `maintenance=dream` | 评分与摘要、按分类整理过期短期内容、归档低价值条目并生成概要。 | 按 scope 提交 actor；写入 job 来源和版本，冲突时跳过过时结果，记录 Dreamer 统计。 |
+| `maintenance=consolidate` | 按分类合并长期记忆、去重并归档原条目。 | 原文、来源版本和结果在同一文件提交中保留；记录 dream log，不做永久删除。 |
 | 用户计划任务 | 执行用户创建的提醒、周期分析或一次性工作。 | 继承创建时保存的 company/user/chat/channel/workspace；完成后经通知回调返回结果。 |
 
 ## 系统计划名称、周期和用途
@@ -43,6 +43,8 @@ Substrate 管理执行实例的生命周期，Companest 的计划只决定业务
 | 用户 schedule 的 ID | `cron` / `interval` / `date`，由 trigger_args 指定 | 持久化用户规则，触发上述用户计划 job。 |
 
 这些本地计划没有第二套 actor 状态机，也不以本地等待超时来宣告远端执行失败。
+记忆备份包含版本历史和待完成的文件提交日志；恢复后首次访问会完成文件一致性恢复。
+Dreamer 返回的旧字段 `gc_deleted` 仍表示归档数，未删除历史原文；详见 [memory 管理](../memory/README.md)。
 同一系统计划串行等待回调；APScheduler 用 `max_instances=1` 和 coalescing 避免同一进程中重复并发触发。
 
 ## 状态、重启和不确定结果

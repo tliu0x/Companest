@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from .backend import MemoryBackend
+from .history import CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +67,18 @@ class MemorySearchService:
         limit: int = 20,
         include_archive: bool = True,
         explain: bool = False,
+        category: str | None = None,
     ) -> List[dict]:
+        self.validate_category(category)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
         logger.debug("memory_search team=%s query=%r limit=%d", team_id, query, limit)
-        results = self._exact_search(team_id, query, include_archive=include_archive)
+        results = self._exact_search(team_id, query, include_archive=include_archive, category=category)
 
         seen: Dict[tuple, SearchResult] = {}
         for result in results:
+            if category is not None and result.meta.get("category", "unclassified") != category:
+                continue
             pair = (result.key, result.source)
             if pair not in seen or result.score > seen[pair].score:
                 seen[pair] = result
@@ -79,6 +86,11 @@ class MemorySearchService:
         deduped.sort(key=lambda result: result.score, reverse=True)
 
         return [result.to_dict(explain=explain) for result in deduped[:limit]]
+
+    @staticmethod
+    def validate_category(category):
+        if category is not None and category not in CATEGORIES:
+            raise ValueError("Unknown memory category")
 
     def retrieve_for_task(
         self,
@@ -94,7 +106,7 @@ class MemorySearchService:
         if not task or limit <= 0 or budget_chars <= 0:
             return []
 
-        search_limit = max(limit * 3, 12)
+        search_limit = min(max(limit * 3, 12), 100)
         candidates: Dict[tuple, dict] = {}
 
         for result in self.search(
@@ -106,7 +118,7 @@ class MemorySearchService:
         ):
             self._merge_retrieval_candidate(candidates, result)
 
-        term_limit = max(limit * 2, 8)
+        term_limit = min(max(limit * 2, 8), 100)
         for term in self._task_terms(task):
             for result in self.search(
                 team_id,
@@ -145,6 +157,8 @@ class MemorySearchService:
                 "score": float(result.get("_score", 0.0) or 0.0),
                 "mode": result.get("_mode", "exact"),
                 "matched_terms": list(result.get("_matched_terms", [])),
+                "version": result.get("version", 1),
+                "category": result.get("category", "unclassified"),
             }
 
             entry_size = self._estimate_prompt_size(entry)
@@ -173,6 +187,7 @@ class MemorySearchService:
         query: str,
         *,
         include_archive: bool = True,
+        category: str | None = None,
     ) -> List[SearchResult]:
         """Keyword matching against key names, tags, and summaries."""
         query_lower = query.lower()
@@ -192,7 +207,7 @@ class MemorySearchService:
             ))
 
         if include_archive:
-            for result in self._backend.search_archive(team_id, query):
+            for result in self._backend.search_archive(team_id, query, limit=100, category=category):
                 key = result.pop("key", "")
                 importance = result.get("importance", 0.0)
                 base = max(
@@ -240,8 +255,8 @@ class MemorySearchService:
         """Extract a compact set of meaningful keywords from a task string."""
         terms: List[str] = []
         seen = set()
-        for raw in re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}", task.lower()):
-            if len(raw) < 3 or raw in _COMMON_QUERY_TERMS or raw in seen:
+        for raw in re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}|[\u4e00-\u9fff]{2,}", task.lower()):
+            if (len(raw) < 3 and raw.isascii()) or raw in _COMMON_QUERY_TERMS or raw in seen:
                 continue
             seen.add(raw)
             terms.append(raw)

@@ -182,6 +182,12 @@ the persistent data mount. Retrieval matches keys, summaries and tags by keyword
 task context still includes relevant snippets within a character budget.
 No vector database, embedding model or FTS5 is required.
 
+Entries are categorized as facts, task notes or reusable experiences. Legacy
+entries remain unclassified unless explicitly categorized. Writes retain immutable versions and
+job/Pi provenance; tools use version checks to prevent lost updates. Agents read
+a short overview, search metadata and page through selected content. Dreamer
+consolidates within a category and archives source revisions for later recovery.
+
 Existing IDs, file paths and memory data are unchanged. Remove the retired
 `memory_config` block from older configs; unsupported backend names fail
 validation. See [memory details](companest/memory/README.md) and

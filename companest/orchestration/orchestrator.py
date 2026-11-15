@@ -368,7 +368,7 @@ class CompanestOrchestrator:
             team_id = seed_name if "/" in seed_name or seed_name == f"company-{company.id}" else f"{company.id}/{seed_name}"
             for key, content in team_seed.items():
                 if ns.read_team_memory(team_id, key) is None:
-                    ns.write_team_memory(team_id, key, content)
+                    ns.write_team_memory(team_id, key, content, pinned=True)
 
     def _init_company(self, company: CompanyConfig) -> None:
         root = self.memory.base_path / "companies" / company.id / "teams"

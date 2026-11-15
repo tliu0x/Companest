@@ -483,7 +483,7 @@ class CostGate:
         }
         if company_id:
             entry["company"] = company_id
-        self.memory.append_team_memory("finance", "spending-log.json", entry)
+        self.memory.append_team_memory("finance", "spending-log.json", entry, category="task", pinned=True)
 
         if self._circuit_breaker:
             self._circuit_breaker.record(effective_cost, team_id)

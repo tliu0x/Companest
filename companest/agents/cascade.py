@@ -197,7 +197,7 @@ class CascadeMetrics:
     def save(self, memory: "MemoryManager", team_id: str) -> None:
         memory.write_team_memory(team_id, "cascade-metrics.json", {
             "model_stats": self.model_stats,
-        })
+        }, category="task", pinned=True)
 
 
 REFUSAL_PATTERNS = re.compile(

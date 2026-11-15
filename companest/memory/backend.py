@@ -13,7 +13,7 @@ class MemoryBackend(ABC):
         ...
 
     @abstractmethod
-    def write(self, team_id: str, key: str, data: Any) -> None:
+    def write(self, team_id: str, key: str, data: Any, **metadata) -> int:
         ...
 
     @abstractmethod
@@ -45,7 +45,7 @@ class MemoryBackend(ABC):
 
     @abstractmethod
     def search_archive(
-        self, team_id: str, query: str, limit: int = 10,
+        self, team_id: str, query: str, limit: int = 10, *, category: str | None = None,
     ) -> List[dict]:
         ...
 
@@ -58,6 +58,18 @@ class MemoryBackend(ABC):
     def get_all_stats(self) -> Dict[str, Any]:
         ...
 
+    @abstractmethod
+    def read_entry(self, team_id: str, key: str, **options) -> dict:
+        ...
+
+    @abstractmethod
+    def list_versions(self, team_id: str, key: str, **options) -> List[dict]:
+        ...
+
+    @abstractmethod
+    def restore(self, team_id: str, key: str, version: int, *, expected_version: int) -> int:
+        ...
+
 
 class FileBackend(MemoryBackend):
     """Thin adapter that delegates to MemoryManager."""
@@ -68,8 +80,8 @@ class FileBackend(MemoryBackend):
     def read(self, team_id: str, key: str) -> Any:
         return self._mgr.read_team_memory(team_id, key)
 
-    def write(self, team_id: str, key: str, data: Any) -> None:
-        self._mgr.write_team_memory(team_id, key, data)
+    def write(self, team_id: str, key: str, data: Any, **metadata) -> int:
+        return self._mgr.write_team_memory(team_id, key, data, **metadata)
 
     def append(self, team_id: str, key: str, entry: Any) -> None:
         self._mgr.append_team_memory(team_id, key, entry)
@@ -90,12 +102,21 @@ class FileBackend(MemoryBackend):
         self._mgr.archive_team_memory(team_id, key)
 
     def search_archive(
-        self, team_id: str, query: str, limit: int = 10,
+        self, team_id: str, query: str, limit: int = 10, *, category: str | None = None,
     ) -> List[dict]:
-        return self._mgr.search_archive(team_id, query, limit)
+        return self._mgr.search_archive(team_id, query, limit, category=category)
 
     def read_overview(self, team_id: str) -> str:
         return self._mgr.read_overview(team_id)
 
     def get_all_stats(self) -> Dict[str, Any]:
         return self._mgr.get_all_memory_stats()
+
+    def read_entry(self, team_id: str, key: str, **options) -> dict:
+        return self._mgr.read_memory_entry(team_id, key, **options)
+
+    def list_versions(self, team_id: str, key: str, **options) -> List[dict]:
+        return self._mgr.list_memory_versions(team_id, key, **options)
+
+    def restore(self, team_id: str, key: str, version: int, *, expected_version: int) -> int:
+        return self._mgr.restore_memory_version(team_id, key, version, expected_version=expected_version)

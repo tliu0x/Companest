@@ -58,10 +58,6 @@ def _write_aged(mm, key, importance, access_count):
     mm._write_index("alpha", index)
 
 
-def _long_term_entry_lines(prompt):
-    long_section = prompt.split("## Long-term Memory\n")[1].split("\n\n---\n\n")[0]
-    return [line for line in long_section.split("\n") if line.startswith("- ")]
-
 @pytest.mark.asyncio
 async def test_dream_log_persists_summaries_and_errors(dreamer, mm, monkeypatch):
     async def run_team(team_id, dry_run=False):
@@ -301,11 +297,11 @@ class TestDreamingGC:
         assert "recent.json" not in dreamer._gc_expired("alpha")
 
 
-class TestCoWSnapshot:
+class TestMaintenanceFailure:
 
     @pytest.mark.asyncio
-    async def test_snapshot_and_restore(self, dreamer, mm):
-        """On dream failure, index is restored from snapshot."""
+    async def test_scoring_failure_preserves_memory(self, dreamer, mm):
+        """A failed model call cannot alter content or overwrite concurrent metadata."""
         mm.write_team_memory("alpha", "entry.json", {"data": 1})
         original_index = copy.deepcopy(mm.get_memory_index("alpha"))
 
@@ -478,7 +474,7 @@ class TestArchive:
 
 class TestTokenBudget:
 
-    def test_long_term_respects_budget(self, mm):
+    def test_long_term_details_are_loaded_on_demand(self, mm):
         for i in range(50):
             key = f"entry{i}.json"
             mm.write_team_memory("alpha", key, {"data": i})
@@ -490,15 +486,12 @@ class TestTokenBudget:
             )
 
         prompt = mm.build_system_prompt("alpha", "lead")
-        assert "Long-term Memory" in prompt
-        # The ~8000 char budget cannot hold all 50 summaries
-        assert len(_long_term_entry_lines(prompt)) < 50
+        assert "Long-term Memory" not in prompt
+        assert "Long summary for entry" not in prompt
+        assert "memory_search" in prompt
+        assert len(prompt) < 1600
 
-    def test_overview_consumes_budget(self, mm):
-        """Overview text consumes part of the token budget, leaving less room for summaries."""
-        # ~7500 of the 8000 char budget
-        (mm.team_path("alpha") / "memory" / ".overview.md").write_text("x" * 7500)
-
+    def test_overview_is_bounded_and_invalidated_by_writes(self, mm):
         for i in range(20):
             key = f"entry{i}.json"
             mm.write_team_memory("alpha", key, {"data": i})
@@ -509,7 +502,11 @@ class TestTokenBudget:
                 summary=f"This is a detailed summary for entry number {i} with significant content " * 2,
             )
 
+        (mm.team_path("alpha") / "memory" / ".overview.md").write_text("x" * 7500)
         prompt = mm.build_system_prompt("alpha", "lead")
         assert "Memory Overview" in prompt
-        if "Long-term Memory" in prompt:
-            assert len(_long_term_entry_lines(prompt)) < 20
+        assert "x" * 2400 in prompt
+        assert "x" * 2401 not in prompt
+        assert "Long-term Memory" not in prompt
+        mm.write_team_memory("alpha", "changed.json", {"fact": "new"})
+        assert "Memory Overview" not in mm.build_system_prompt("alpha", "lead")

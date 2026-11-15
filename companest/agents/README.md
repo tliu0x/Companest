@@ -16,6 +16,9 @@
 | [__init__.py](__init__.py) | 包入口。 |
 
 记忆通过 [memory](../memory/README.md) 落盘；代码修改写入持久 workspace。
+Pi 保留 actor 注入的 job_id，并为记忆版本记录当前 pi_id；并发调用的来源上下文彼此隔离。
+工具先查询 overview/metadata，再分页读取原文或历史版本；写入/恢复使用 expected_version 防止覆盖新内容。
+分类、分页响应和工具预设见 [记忆工具契约](../memory/README.md#按需读取与工具)。
 workspace 单写锁由 [ActorWorkload](../runtime/actor.py) 在任务开始时持有，锁文件在独立共享锁目录，不能放进可能被 Git 清理的工作区。
 工具可见性还要经过 Pi 的 allow/deny 与公司共享团队检查。CEO 工具只能在当前任务的公司、用户和工作区中委派。
 新增工具时同时检查默认权限、外部 MCP 的公司作用域和路径逃逸；相关契约在 `test_pi_runtime.py`、`test_coding.py`、`test_sessions_security.py`。
