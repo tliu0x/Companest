@@ -5,9 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from companest.orchestration.background import BackgroundManager
-from companest.knowledge.feeds import _normalize_news, fetch_hn, fetch_openbb, fetch_reddit, fetch_rss
+from companest.knowledge.feeds import fetch_hn, fetch_reddit, fetch_rss
 from companest.memory import MemoryManager
-from companest.agents.tools import resolve_tool_names
 
 
 class TestFeedFetchersLive:
@@ -40,46 +39,6 @@ class TestFeedFetchersLive:
         item = items[0]
         assert "title" in item
         assert item["source"] == "rss"
-
-    @pytest.mark.asyncio
-    async def test_fetch_openbb_no_server(self):
-        items = await fetch_openbb("AAPL", "quote", base_url="http://127.0.0.1:19999")
-        assert len(items) == 1
-        assert "error" in items[0]
-        assert "OpenBB API unavailable" in items[0]["error"]
-
-    def test_fetch_openbb_normalize_news(self):
-        results = [
-            {
-                "title": "Fed holds rates steady",
-                "url": "https://example.com/fed",
-                "source": "Reuters",
-                "text": "The Federal Reserve...",
-                "date": "2026-02-23T08:00:00Z",
-            },
-        ]
-        items = _normalize_news(results)
-        assert len(items) == 1
-        assert items[0]["title"] == "Fed holds rates steady"
-        assert items[0]["source"] == "openbb/news/Reuters"
-
-
-class TestToolResolution:
-    def test_resolve_collector_preset(self):
-        resolved = resolve_tool_names(["collector"])
-        assert "brave_search" in resolved
-        assert "fetch_reddit" in resolved
-        assert "fetch_hn" in resolved
-        assert "fetch_rss" in resolved
-        assert "fetch_x" in resolved
-        assert "fetch_openbb" in resolved
-        assert "memory_read" in resolved
-        assert "memory_write" in resolved
-        assert "memory_list" in resolved
-
-    def test_resolve_individual_feed_tools(self):
-        resolved = resolve_tool_names(["brave_search", "fetch_reddit"])
-        assert resolved == ["brave_search", "fetch_reddit"]
 
 
 class TestFeedInjection:

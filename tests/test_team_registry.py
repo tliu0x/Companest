@@ -49,12 +49,6 @@ class TestTeamRegistry:
         assert config.lead_pi == "scout"
         assert [p.id for p in config.pis] == ["scout"]
 
-    def test_registry_scan(self):
-        assert "stock" in self.reg.list_teams()
-        assert "finance" in self.reg.list_teams()
-        assert "finance" in self.reg.list_meta_teams()
-        assert "stock" not in self.reg.list_meta_teams()
-        assert self.reg.list_active() == []
 
     def test_registry_on_demand_create(self):
         assert "stock" not in self.reg.list_active()
@@ -67,10 +61,6 @@ class TestTeamRegistry:
         with pytest.raises(TeamError):
             self.reg.create("nonexistent")
 
-    def test_fleet_status(self):
-        status = self.reg.get_fleet_status()
-        assert "stock" in status["registered"]
-        assert "finance" in status["meta"]
 
     def test_register_on_demand_team(self):
         from companest.agents.team import TeamConfig

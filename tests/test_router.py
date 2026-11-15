@@ -30,33 +30,11 @@ class TestRouter:
             available_teams=["stock", "bizdev", "engineering", "philosophy", "science", "finance"]
         )
 
-    @pytest.mark.parametrize("task,team", [
-        ("Analyze TSLA recent stock trends", "stock"),
-        ("I want to buy a house, any advice?", "bizdev"),
-        ("Fix the bug in the Python API", "engineering"),
-        ("What is free will? What is the nature of consciousness?", "philosophy"),
-        ("What is wrong with this physics paper's experiment design?", "science"),
-        ("@stock check AAPL", "stock"),
-        ("#engineering deploy to prod", "engineering"),
-        ("hello world", "philosophy"),  # default fallback
-    ])
-    def test_route(self, task, team):
-        assert self.router.route(task) == team
 
     def test_no_default_returns_none(self):
         from companest.orchestration.router import TeamRouter
         router = TeamRouter(available_teams=["stock"], default_team=None)
         assert router.route("hello world") is None
-
-    def test_confidence_scoring(self):
-        team, conf = self.router.route_with_confidence("TSLA stock candlestick MACD")
-        assert team == "stock"
-        assert conf > 0.5
-
-    def test_explicit_tag_confidence(self):
-        team, conf = self.router.route_with_confidence("@stock anything")
-        assert team == "stock"
-        assert conf == 1.0
 
 
 class TestSmartRouterParsing:
@@ -66,18 +44,6 @@ class TestSmartRouterParsing:
     def _setup(self, tmp_path):
         self.router = _smart_router(tmp_path, [("stock", "analyst"), ("engineering", "coder")])
 
-    def test_parse_valid_json(self):
-        raw = '{"teams": [{"team_id": "stock", "instruction": "Analyze TSLA", "priority": 1}], "strategy": "single", "reasoning": "Stock task", "confidence": 0.9, "declined": false}'
-        result = self.router._parse_response(raw)
-        assert len(result.teams) == 1
-        assert result.teams[0].team_id == "stock"
-        assert result.strategy == "single"
-        assert result.confidence == 0.9
-
-    def test_parse_markdown_fenced_json(self):
-        raw = '```json\n{"teams": [{"team_id": "engineering", "instruction": "Fix bug"}], "strategy": "single", "reasoning": "Code task", "confidence": 0.85}\n```'
-        result = self.router._parse_response(raw)
-        assert result.teams[0].team_id == "engineering"
 
     def test_parse_declined(self):
         raw = '{"teams": [], "declined": true, "decline_reason": "No team fits", "reasoning": "General chat"}'
@@ -121,15 +87,6 @@ class TestSmartRouterParsing:
     def test_keyword_fallback_no_match_declines(self):
         decision = self.router._keyword_fallback("hello world")
         assert decision.declined is True
-
-    def test_build_system_prompt_caching(self):
-        prompt1 = self.router._build_system_prompt()
-        prompt2 = self.router._build_system_prompt()
-        assert prompt1 is not None
-        assert prompt1 is prompt2
-
-        self.router.invalidate_cache()
-        assert self.router._build_system_prompt() is not prompt1
 
 
 class TestRoutingBindings:

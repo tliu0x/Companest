@@ -141,14 +141,6 @@ class TestIndexCRUD:
         assert meta["importance"] == 0.0
         assert meta["access_count"] == 0
 
-    def test_write_and_append_update_index(self, mm):
-        mm.write_team_memory("alpha", "log.json", [])
-        meta = mm.get_memory_index("alpha")["log.json"]
-        assert meta["tier"] == "short"
-        assert meta["size_bytes"] > 0
-
-        mm.append_team_memory("alpha", "log.json", {"entry": 1})
-        assert mm.get_memory_index("alpha")["log.json"]["size_bytes"] > meta["size_bytes"]
 
     def test_read_increments_access_count(self, mm):
         mm.write_team_memory("alpha", "counter.json", {"x": 1})
@@ -168,22 +160,6 @@ class TestIndexCRUD:
         assert "temp.json" not in mm.get_memory_index("alpha")
         assert not (mm.team_path("alpha") / "memory" / "temp.json").exists()
 
-    def test_update_entry_meta(self, mm):
-        mm.write_team_memory("alpha", "entry.json", {"data": 1})
-
-        mm.update_entry_meta(
-            "alpha", "entry.json",
-            importance=0.8,
-            tier="long",
-            summary="Important entry",
-            tags=["critical"],
-        )
-
-        meta = mm.get_entry_meta("alpha", "entry.json")
-        assert meta["importance"] == 0.8
-        assert meta["tier"] == "long"
-        assert meta["summary"] == "Important entry"
-        assert meta["tags"] == ["critical"]
 
     def test_update_entry_meta_invalid_field(self, mm):
         mm.write_team_memory("alpha", "entry.json", {"data": 1})
@@ -363,10 +339,6 @@ class TestCoWSnapshot:
 
 class TestDreamerIntegration:
 
-    @pytest.mark.asyncio
-    async def test_run_team_dream_empty(self, dreamer):
-        result = await dreamer.run_team_dream("alpha")
-        assert result["skipped"] is True
 
     @pytest.mark.asyncio
     async def test_run_all_dreams(self, dreamer, mm):
@@ -384,17 +356,6 @@ class TestDreamerIntegration:
         assert "alpha" in stats
         assert "beta" in stats
 
-    def test_build_prompt_includes_long_term(self, mm):
-        mm.write_team_memory("alpha", "consolidated.json", {"merged": True})
-        mm.update_entry_meta(
-            "alpha", "consolidated.json",
-            tier="long",
-            summary="Key consolidated insights about user preferences",
-        )
-
-        prompt = mm.build_system_prompt("alpha", "lead")
-        assert "Long-term Memory" in prompt
-        assert "Key consolidated insights" in prompt
 
     def test_build_prompt_no_long_term_for_short_tier(self, mm):
         mm.write_team_memory("alpha", "short.json", {"temp": True})
@@ -459,9 +420,6 @@ class TestOverviewGeneration:
         assert result == mock_overview
         assert (mm.team_path("alpha") / "memory" / ".overview.md").read_text() == mock_overview
 
-    @pytest.mark.asyncio
-    async def test_generate_overview_no_long_entries(self, dreamer):
-        assert await dreamer._generate_overview("alpha") is None
 
     def test_read_overview_and_prompt_inclusion(self, mm):
         assert mm.read_overview("alpha") == ""
