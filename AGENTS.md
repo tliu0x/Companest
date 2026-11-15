@@ -20,7 +20,7 @@
 - Jobs, background work, and scheduling: `companest/jobs.py`, `companest/background.py`, `companest/scheduler.py`, `companest/user_scheduler.py`
 - Memory: `companest/memory/`
 - Feeds, public knowledge, and digests: `companest/knowledge/`
-- Company onboarding and public examples: `examples/`, `deploy/config.prod.md`, `docs/`
+- Company onboarding and public examples: `examples/`, `deploy/config.prod.md`
 
 ## Source Of Truth
 

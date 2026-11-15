@@ -82,8 +82,7 @@ case "${1:-help}" in
     cd /home/ubuntu/Companest
 
     # Install Python deps
-    python3 -m pip install --break-system-packages -q -r requirements.txt
-    python3 -m pip install --break-system-packages -q python-telegram-bot -e .
+    python3 -m pip install --break-system-packages -q python-telegram-bot -e ".[agents,server,gateway,scheduler,s3]"
 
     # Fallback: create .env from example if neither local nor remote exists
     [ -f deploy/.env ] || cp deploy/.env.example deploy/.env

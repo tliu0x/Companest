@@ -4,8 +4,6 @@ Multi-Agent Company Incubator
 
 Companest is a control plane for agent-native companies. It runs shared teams and company-private teams in the same runtime, routes work across teams, manages background execution, and exposes an API for multi-company operation.
 
-This repository is the first public alpha release of a system that has already gone through a longer private incubation phase.
-
 ## Status
 
 Alpha, but usable today as a shared runtime for multiple companies. Interfaces may still change while packaging, docs, and operational defaults continue to harden.
@@ -114,7 +112,6 @@ See [`examples/company-onboarding.md`](./examples/company-onboarding.md) for the
 - Company onboarding: [`examples/company-onboarding.md`](./examples/company-onboarding.md)
 - Generic company template: [`examples/company-template/README.md`](./examples/company-template/README.md)
 - Prediction market example: [`examples/prediction-market/README.md`](./examples/prediction-market/README.md)
-- Release notes draft: [`docs/release-notes-platform-readiness.md`](./docs/release-notes-platform-readiness.md)
 - Production config baseline: [`deploy/config.prod.md`](./deploy/config.prod.md)
 
 ## CLI
