@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from ..utils import run_sync
 from ..events import EventType
-from ..modes import VALID_MODES
+from ..modes import VALID_MODES, LEGACY_MODES, normalize_execution
 
 if TYPE_CHECKING:
     from ..agents.team import TeamRegistry
@@ -86,6 +86,11 @@ class RoutingDecision:
     decline_reason: Optional[str] = None
     mode: str = "default"         # "default" | "cascade" | "loop" | "council"
     task_priority: str = "normal" # "critical" | "high" | "normal" | "low"
+    cascade: bool = False
+    workflow: Optional[str] = None
+
+    def __post_init__(self):
+        self.mode, self.cascade, self.workflow = normalize_execution(self.mode, self.cascade, self.workflow)
 
 
 class TeamRouter:
@@ -181,9 +186,9 @@ If Logos identifies clearly multi-step analysis, prefer "loop" mode.
 
 ## Execution Mode
 Choose the best execution mode:
-- "cascade": Cost-optimized. Tries a cheap model first, escalates on failure. USE THIS FOR 90% OF TASKS.
+- "default" with "cascade": true: Cost-optimized. Tries a cheap model first, escalates on failure. USE THIS FOR 90% OF TASKS.
 - "default": Simple single-turn task. One Pi answers directly. Only for trivial greetings like "hi".
-- "loop": Complex multi-step task requiring decomposition. Only when task has 3+ distinct steps.
+- Optional "workflow": "decompose": Complex multi-step task requiring decomposition. Only when task has 3+ distinct steps.
 - "council": EXPENSIVE  runs ALL Pis in parallel then synthesizes. ONLY use when the user EXPLICITLY requests multiple perspectives, or for life-changing decisions (career, ethics dilemmas). NEVER for casual questions or general conversation.
 - "collaborative": Pipeline  Pis run sequentially, each building on the previous output. Use when the team has specialized Pis for distinct stages (e.g. research  analyze  write).
 
@@ -199,7 +204,7 @@ The user message may include a `[Keyword signal: team=X, confidence=Y]` line. Th
 
 ## Response Format
 Return ONLY valid JSON, no markdown fencing:
-{{"teams": [{{"team_id": "...", "instruction": "...", "priority": 1}}], "strategy": "single", "mode": "cascade", "task_priority": "normal", "reasoning": "Logos: ... Pathos: ... Ethos: ...", "confidence": 0.85, "declined": false}}
+{{"teams": [{{"team_id": "...", "instruction": "...", "priority": 1}}], "strategy": "single", "mode": "default", "cascade": true, "task_priority": "normal", "reasoning": "Logos: ... Pathos: ... Ethos: ...", "confidence": 0.85, "declined": false}}
 """
 
 
@@ -475,7 +480,7 @@ class SmartRouter:
         confidence = max(0.0, min(1.0, confidence))
 
         mode = data.get("mode", "default")
-        if mode not in VALID_MODES:
+        if mode not in (*VALID_MODES, *LEGACY_MODES):
             mode = "default"
 
         task_priority = data.get("task_priority", "normal")
@@ -489,6 +494,8 @@ class SmartRouter:
             confidence=confidence,
             mode=mode,
             task_priority=task_priority,
+            cascade=bool(data.get("cascade", False)),
+            workflow=data.get("workflow") if data.get("workflow") in ("decompose", "delegate") else None,
         )
 
     async def _emit_routing_audit(

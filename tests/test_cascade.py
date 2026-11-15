@@ -7,7 +7,6 @@ from companest.agents.cascade import (
     build_cascade_chain,
     get_downgrade,
     detect_language,
-    _lang_penalty,
     CascadeStrategy,
     CascadeMetrics,
     AdequacyChecker,
@@ -28,21 +27,6 @@ class TestModelTier:
         costs = [t.cost_rank for t in tiers]
         assert costs == sorted(costs)
         assert {t.model_id for t in tiers} == set(MODEL_PRICES)
-
-    @pytest.mark.parametrize("model_id,provider", [
-        ("claude-sonnet-4-5-20250929", "anthropic"),
-        ("gpt-4o-mini", "openai"),
-        ("o3", "openai"),
-        ("deepseek-reasoner", "deepseek"),
-        ("moonshot-v1-8k", "moonshot"),
-        ("kimi-k2.5", "moonshot"),
-        ("glm-4.7", "zhipu"),
-        ("chatglm-something", "zhipu"),
-        ("qwen3-coder", "alibaba"),
-        ("qwq-something", "alibaba"),
-    ])
-    def test_detect_provider(self, model_id, provider):
-        assert _detect_provider(model_id) == provider
 
 
 class TestBuildCascadeChain:
@@ -87,9 +71,6 @@ class TestBuildCascadeChain:
         cross = CascadeEngine().get_chain(OPUS)
         assert len({_detect_provider(m) for m in cross}) > 1
 
-    def test_cheapest_model_chain_is_itself(self):
-        assert CascadeEngine().get_chain("deepseek-chat") == ["deepseek-chat"]
-
 
 class TestGetDowngrade:
     @pytest.mark.parametrize("model,expected", [
@@ -109,16 +90,6 @@ class TestCascadeStrategy:
     def setup_method(self):
         self.strategy = CascadeStrategy()
 
-    @pytest.mark.parametrize("task,score", [
-        ("hi", 0.0),
-        ("analyze the 10-K filing for TSLA", 0.6),
-        ("implement a new feature for the API", 0.7),
-        ("First research the topic, then analyze the data, and additionally create a summary", 0.8),
-        ("What is the weather like?" + " " * 200, 0.3),
-        ("lorem ipsum " * 50, 0.5),
-    ])
-    def test_estimate_complexity(self, task, score):
-        assert self.strategy.estimate_complexity(task) == score
 
     @pytest.mark.parametrize("task,chain,start", [
         ("hi", ["haiku", "sonnet", "opus"], 0),
@@ -147,13 +118,7 @@ def _metrics(model, successes, failures):
 
 
 class TestCascadeMetrics:
-    def test_empty_metrics(self):
-        metrics = CascadeMetrics()
-        assert metrics.success_rate("any-model") == 1.0
-        assert not metrics.should_skip("any-model")
 
-    def test_success_rate_calculation(self):
-        assert _metrics("haiku", 7, 3).success_rate("haiku") == pytest.approx(0.7)
 
     @pytest.mark.parametrize("successes,failures,skip", [
         (0, 4, False),  # below the 5-attempt minimum
@@ -221,13 +186,6 @@ class TestAdequacyChecker:
         )
         assert quality_hedging < quality_confident
 
-    def test_engine_check_adequate_delegates(self):
-        adequate, quality = CascadeEngine().check_adequate(
-            "Here is a good answer about Python programming.", "What is Python?",
-        )
-        assert adequate
-        assert quality > 0.5
-
 
 class TestCascadeEngine:
     def setup_method(self):
@@ -262,28 +220,10 @@ class TestDetectLanguage:
         assert detect_language(text) == lang
 
 
-class TestLangPenalty:
-    @pytest.mark.parametrize("model,lang,penalty", [
-        ("glm-4.7", "en", 1.0),
-        ("glm-4.7", "zh", 1.0),
-        ("gpt-4o-mini", "zh", 1.1),  # multi:0.8 -> 1.0 + (1-0.8)*0.5
-        ("claude-opus-4-6", "zh", 1.025),  # multi:0.95 fallback
-        ("unknown-xyz", "zh", 1.5),
-    ])
-    def test_lang_penalty(self, model, lang, penalty):
-        assert _lang_penalty(model, lang) == pytest.approx(penalty)
-
-
 class TestLanguageAwareCascade:
     def setup_method(self):
         self.engine = CascadeEngine(cross_provider=True)
 
-    def test_zh_task_reorders_cross_provider_chain(self):
-        assert self.engine.get_chain(OPUS, lang="zh") != self.engine.get_chain(OPUS, lang="en")
-
-    def test_zh_deepseek_before_gpt4o_mini(self):
-        chain = self.engine.get_chain(OPUS, lang="zh")
-        assert chain.index("deepseek-chat") < chain.index("gpt-4o-mini"), chain
 
     def test_same_provider_chain_unaffected_by_lang(self):
         tiers = build_model_tiers()

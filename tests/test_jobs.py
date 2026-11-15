@@ -8,7 +8,7 @@ from companest.jobs.jobs import JobManager, JobStatus
 
 
 @pytest.mark.asyncio
-async def test_start_recovers_legacy_running_job_and_processes_each_job_once(tmp_path):
+async def test_start_marks_legacy_running_job_unknown_without_replaying(tmp_path, api_runtime):
     with sqlite3.connect(tmp_path / "jobs.db") as db:
         db.execute("""
             CREATE TABLE jobs (
@@ -23,25 +23,13 @@ async def test_start_recovers_legacy_running_job_and_processes_each_job_once(tmp
             ("legacy", "recover", "running", "null", now, now),
         )
 
-    calls = []
-
-    class Orchestrator:
-        async def run_auto(self, task, user_context):
-            calls.append(task)
-            await asyncio.sleep(0)
-            return "done", None
-
-    manager = JobManager(Orchestrator(), data_dir=tmp_path)
-    queued_id = await manager.submit("queued before startup", company_id="acme")
-    await manager.start(num_workers=2)
+    _, _, server = api_runtime()
+    manager = server.job_manager
+    await manager.start()
     try:
-        async with asyncio.timeout(5):
-            while any(
-                job.status != JobStatus.COMPLETED
-                for job in [await manager.get_job("legacy"), await manager.get_job(queued_id)]
-            ):
-                await asyncio.sleep(0.01)
-        assert sorted(calls) == ["queued before startup", "recover"]
-        assert manager.get_company_activity_snapshot()["acme"]["total_jobs"] == 1
+        job = await manager.get_job("legacy")
+        assert job.status == JobStatus.FAILED
+        assert "not replayed" in job.error
+        manager.client.create_actor.assert_not_awaited()
     finally:
         await manager.stop()

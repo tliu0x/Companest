@@ -15,6 +15,14 @@ class Workspace:
     repo: str = ""      # git remote URL (informational)
     branch: str = "main"
     description: str = ""
+    company_id: Optional[str] = None
+    storage_id: str = ""
+
+    def validate_storage(self, company_id: Optional[str]) -> None:
+        from ..runtime.storage import check_identity
+        if self.company_id != company_id:
+            raise ValueError(f"Workspace '{self.id}' belongs to another company scope")
+        check_identity(Path(self.path), self.storage_id)
 
     def exists(self) -> bool:
         return Path(self.path).is_dir()
@@ -98,6 +106,8 @@ class WorkspaceRegistry:
                 repo=ws_config.get("repo", ""),
                 branch=ws_config.get("branch", "main"),
                 description=ws_config.get("description", ""),
+                company_id=ws_config.get("company_id"),
+                storage_id=ws_config.get("storage_id", ""),
             )
 
             if not ws.exists():

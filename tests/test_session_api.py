@@ -11,19 +11,28 @@ from companest.server.server import CompanestAPIServer
 
 
 @pytest.mark.asyncio
-async def test_session_job_survives_client_disconnect_and_preserves_context(tmp_path, monkeypatch):
+async def test_session_job_survives_client_disconnect_and_preserves_context(tmp_path, monkeypatch, api_runtime):
     monkeypatch.setenv("COMPANEST_API_TOKEN", "test-token")
     monkeypatch.delenv("COMPANEST_DEBUG", raising=False)
     release = asyncio.Event()
     full_result = "完整结果" * 1000
 
-    async def execute(**kwargs):
-        await release.wait()
-        return full_result
-
-    orchestrator = SimpleNamespace(run_team=AsyncMock(side_effect=execute))
-    manager = JobManager(orchestrator=orchestrator, data_dir=tmp_path)
-    server = CompanestAPIServer(CompanestConfig(), manager)
+    from companest.companies.company import CompanyConfig
+    from companest.agents.workspace import Workspace
+    config, orchestrator, server = api_runtime(auth_token="test-token")
+    orchestrator.company_registry.save(CompanyConfig(id="acme", name="Acme", shared_teams=["general"]))
+    orchestrator.workspace_registry._workspaces["project"] = Workspace(
+        "project", str(tmp_path), company_id="acme", storage_id="test-storage")
+    manager = server.job_manager
+    request = manager.client.request.side_effect
+    async def response(ref, method, path, **kwargs):
+        result = await request(ref, method, path, **kwargs)
+        if release.is_set():
+            data = result.json()
+            data.update(status="completed", result=full_result, completed_at=data["started_at"])
+            return httpx.Response(200, json=data)
+        return result
+    manager.client.request.side_effect = response
     app = server.create_app()
     transport = httpx.ASGITransport(app=app)
     headers = {"Authorization": "Bearer test-token"}
@@ -33,7 +42,7 @@ async def test_session_job_survives_client_disconnect_and_preserves_context(tmp_
             assert (await client.post("/api/jobs", json={"task": "research"})).status_code == 401
             response = await client.post("/api/jobs", headers=headers, json={
                 "task": "research", "company_id": "acme", "submitted_by": "claude-code",
-                "context": {"team_id": "acme/research", "workspace_id": "project"},
+                "context": {"team_id": "general", "workspace_id": "project"},
             })
             assert response.status_code == 200
             job_id = response.json()["job_id"]
@@ -52,10 +61,9 @@ async def test_session_job_survives_client_disconnect_and_preserves_context(tmp_
             assert data["company_id"] == "acme"
             assert data["submitted_by"] == "claude-code"
             assert (await client.get("/api/jobs", params={"company_id": "other"})).json()["jobs"] == []
-        orchestrator.run_team.assert_awaited_once_with(
-            task="research", team_id="acme/research",
-            user_context={"company_id": "acme", "team_id": "acme/research", "workspace_id": "project"},
-        )
+        manager.client.create_actor.assert_awaited_once()
+        submitted = next(call.kwargs["payload"] for call in manager.client.request.await_args_list if call.kwargs.get("payload"))
+        assert submitted["context"] == {"company_id": "acme", "team_id": "general", "workspace_id": "project"}
     finally:
         release.set()
         await manager.stop()

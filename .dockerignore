@@ -30,7 +30,6 @@ dist
 **/*.sqlite3
 **/*.log
 logs
-qdrant_data
 storage
 models
 infra/.terraform

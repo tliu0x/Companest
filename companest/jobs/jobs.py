@@ -1,4 +1,9 @@
 import uuid
+import secrets
+import hmac
+import os
+import sqlite3
+from dataclasses import asdict
 import asyncio
 import logging
 import json
@@ -9,6 +14,9 @@ from enum import Enum
 from pathlib import Path
 
 from ..exceptions import JobError
+from ..runtime.substrate import ActorRef, SubstrateClient, SubstrateError, ActorNotFound
+from ..runtime.storage import LocalFileLock, check_identity, release_job_locks, LOCK_PROTOCOL
+from ..utils import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +32,9 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-VALID_TRANSITIONS: Dict[JobStatus, frozenset] = {
-    JobStatus.PENDING: frozenset({JobStatus.QUEUED, JobStatus.CANCELLED}),
-    JobStatus.QUEUED: frozenset({JobStatus.DISPATCHED, JobStatus.CANCELLED}),
-    JobStatus.DISPATCHED: frozenset({JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELLED}),
-    JobStatus.RUNNING: frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.WAITING_APPROVAL}),
-    JobStatus.WAITING_APPROVAL: frozenset({JobStatus.RUNNING, JobStatus.CANCELLED}),
-    JobStatus.COMPLETED: frozenset(),
-    JobStatus.FAILED: frozenset(),
-    JobStatus.CANCELLED: frozenset(),
-}
-
-
 @dataclass
 class Job:
-    id: str
+    job_id: str
     task: str
     status: JobStatus = JobStatus.PENDING
     context: Dict[str, Any] = field(default_factory=dict)
@@ -52,6 +48,9 @@ class Job:
     submitted_by: str = "api"
     company_id: Optional[str] = None
 
+    execution: Dict[str, Any] = field(default_factory=dict)
+    capability: str = field(default="", repr=False)
+
     @property
     def duration_ms(self) -> Optional[int]:
         if self.started_at and self.completed_at:
@@ -60,7 +59,7 @@ class Job:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id,
+            "job_id": self.job_id,
             "task": self.task,
             "status": self.status.value,
             "context": self.context,
@@ -74,144 +73,396 @@ class Job:
             "submitted_by": self.submitted_by,
             "company_id": self.company_id,
             "duration_ms": self.duration_ms,
+            "execution": {key: value for key, value in self.execution.items() if key != "egress_rules"},
         }
 
 
 class JobManager:
-    MAX_IN_MEMORY_JOBS = 500
+    """Durable business records referencing Substrate actors; no local workers.
 
-    def __init__(self, orchestrator=None, data_dir: Optional[Path] = None):
-        self.orchestrator = orchestrator
-        self._data_dir = data_dir or Path(".companest")
-        self._jobs: Dict[str, Job] = {}
-        self._queue: asyncio.Queue = asyncio.Queue()
-        self._workers: List[asyncio.Task] = []
-        self._running = False
-        self._db = None
+    One manager owns a database. Restart reconnects to saved references and never
+    replays legacy jobs or creates replacements for missing execution instances.
+    """
 
-    def _transition(self, job: Job, new_status: JobStatus) -> None:
-        old = job.status
-        allowed = VALID_TRANSITIONS[old]
-        if new_status not in allowed:
-            logger.error(
-                f"[JobManager] Invalid transition for job {job.id}: "
-                f"{old.value}  {new_status.value} (allowed: {[s.value for s in allowed]})"
-            )
-            raise JobError(
-                f"Invalid job state transition: {old.value}  {new_status.value}"
-            )
-        job.status = new_status
-        logger.info(f"[JobManager] Job {job.id}: {old.value}  {new_status.value}")
+    TERMINAL = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
 
-    async def start(self, num_workers: int = 2) -> None:
-        if self._running:
+    @staticmethod
+    async def recover_retired_actor_locks(config) -> None:
+        """Before memory initialization, recover only Substrate-confirmed deaths.
+
+        Holding the local database owner lock excludes another API process.
+        Neither elapsed time nor a saved terminal status proves actor death.
+        """
+        if not config.substrate or not config.storage_lock_dir:
             return
+        directory = Path(config.storage_lock_dir)
+        await run_sync(check_identity, directory, config.substrate.storage_id)
+        control = Path(config.control_state_dir or config.data_dir)
 
-        self._running = True
+        def records():
+            ids = set()
+            for claim in directory.glob("*.claim"):
+                try:
+                    owner = json.loads(claim.read_text())
+                except FileNotFoundError:
+                    continue
+                if owner.get("job_id"):
+                    ids.add(owner["job_id"])
+            if not ids or not (control / "jobs.db").exists():
+                return []
+            with sqlite3.connect(control / "jobs.db") as db:
+                return [(jid, json.loads(execution)) for jid, execution in
+                        db.execute("SELECT job_id, execution FROM jobs") if jid in ids and execution]
 
-        await self._init_db()
-        await self._load_jobs()
+        with LocalFileLock(control / ".jobs-owner.lock", blocking=False):
+            settings = config.substrate
+            client = SubstrateClient(settings.executable, kubeconfig=settings.kubeconfig,
+                                     context=settings.context, token_file=settings.token_file,
+                                     timeout=settings.timeout)
+            for job_id, execution in await run_sync(records):
+                if not execution.get("uid"):
+                    continue
+                ref = ActorRef(execution["atespace"], execution["name"])
+                try:
+                    await client.get_actor(ref)
+                except ActorNotFound:
+                    await run_sync(release_job_locks, directory, job_id)
 
-        for job in self._jobs.values():
-            if job.status in (JobStatus.RUNNING, JobStatus.DISPATCHED):
-                logger.warning(
-                    f"Recovering interrupted job {job.id} "
-                    f"({job.status.value} -> queued)"
-                )
-                job.status = JobStatus.QUEUED  # bypass _transition (not a normal flow)
-                job.started_at = None
-                await self._persist_job(job)
+    def __init__(self, orchestrator=None, data_dir: Optional[Path] = None, *, client=None):
+        self.orchestrator = orchestrator
+        config = getattr(orchestrator, "config", None)
+        default_dir = (config.control_state_dir or config.data_dir) if config else ".companest"
+        self._data_dir = Path(data_dir or default_dir)
+        self._jobs: Dict[str, Job] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
+        self._db = None
+        self._authorization_lock = asyncio.Lock()
+        self._submission_lock = asyncio.Lock()
+        self._owner = None
+        self.settings = getattr(getattr(orchestrator, "config", None), "substrate", None)
+        if client is None and self.settings:
+            client = SubstrateClient(
+                executable=self.settings.executable, kubeconfig=self.settings.kubeconfig,
+                context=self.settings.context, token_file=self.settings.token_file,
+                timeout=self.settings.timeout,
+            )
+        self.client = client
+        if orchestrator is not None:
+            orchestrator.job_manager = self
 
-        self._queue = asyncio.Queue()
-        for job in self._jobs.values():
-            if job.status == JobStatus.PENDING:
-                self._transition(job, JobStatus.QUEUED)
-            if job.status == JobStatus.QUEUED:
-                self._queue.put_nowait(job.id)
-
-        for i in range(num_workers):
-            self._workers.append(asyncio.create_task(self._worker(f"worker-{i}")))
-        logger.info(f"JobManager started with {num_workers} workers")
+    async def start(self) -> None:
+        if self._db:
+            return
+        if not self.settings or not self.client:
+            raise JobError("Substrate is required: configure substrate.scopes and persistent storage")
+        lock_dir = self.orchestrator.config.storage_lock_dir
+        if not lock_dir:
+            raise JobError("storage_lock_dir must identify the shared persistent lock mount")
+        await run_sync(check_identity, Path(lock_dir), self.settings.storage_id)
+        self._owner = LocalFileLock(self._data_dir / ".jobs-owner.lock", blocking=False)
+        try:
+            self._owner.__enter__()
+        except BlockingIOError as exc:
+            self._owner = None
+            raise JobError("Another control plane owns this job database") from exc
+        try:
+            await self._init_db()
+            await self._load_jobs()
+            for job in self._jobs.values():
+                if job.status not in self.TERMINAL and not job.execution:
+                    job.status = JobStatus.FAILED
+                    job.error = "Legacy execution has no actor reference; outcome unknown, not replayed"
+                    job.completed_at = datetime.now(timezone.utc)
+                    await self._persist_job(job)
+        except BaseException:
+            await self.stop()
+            raise
 
     async def stop(self) -> None:
-        self._running = False
-
-        for worker in self._workers:
-            worker.cancel()
-
-        for worker in self._workers:
-            try:
-                await worker
-            except asyncio.CancelledError:
-                pass
-
-        self._workers.clear()
-
+        # Closing the API never terminates work in Substrate.
         if self._db:
             await self._db.close()
             self._db = None
+        if self._owner:
+            self._owner.__exit__(None, None, None)
+            self._owner = None
 
-        logger.info("JobManager stopped")
-
-    async def submit(
-        self,
-        task: str,
-        context: Optional[Dict[str, Any]] = None,
-        submitted_by: str = "api",
-        company_id: Optional[str] = None,
-    ) -> str:
+    async def submit(self, task: str, context=None, submitted_by="api", company_id=None, idempotency_key=None) -> str:
+        if not self._db:
+            raise JobError("JobManager has not started")
         ctx = dict(context or {})
-        effective_company_id = company_id or ctx.get("company_id")
-        if company_id and ctx.get("company_id") and company_id != ctx.get("company_id"):
-            raise JobError(
-                f"company_id mismatch: param={company_id}, context={ctx.get('company_id')}"
-            )
-        if effective_company_id and "company_id" not in ctx:
-            ctx["company_id"] = effective_company_id
-        job = Job(
-            id=str(uuid.uuid4()),
-            task=task,
-            context=ctx,
-            submitted_by=submitted_by,
-            company_id=effective_company_id,
-        )
+        if company_id and ctx.get("company_id") and company_id != ctx["company_id"]:
+            raise JobError("company_id mismatch between request and context")
+        if company_id:
+            ctx["company_id"] = company_id
+        ctx = await self.orchestrator.prepare_submission(ctx)
+        company_id = ctx.get("company_id")
+        binding = self.settings.scopes.get(company_id or "@shared")
+        if binding is None:
+            raise JobError("No Substrate actor template configured for this company scope")
+        if idempotency_key is not None and (not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 128):
+            raise JobError("idempotency_key must contain 1 to 128 characters")
+        job_id = (str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([company_id, submitted_by, idempotency_key])))
+                  if idempotency_key else str(uuid.uuid4()))
+        async with self._submission_lock:
+            existing = self._jobs.get(job_id)
+            if existing:
+                if existing.task != task or existing.context != ctx:
+                    raise JobError("Idempotency key already used with a different task/context")
+                return job_id
+            job = Job(job_id=job_id, task=task, context=ctx,
+                      company_id=company_id, submitted_by=submitted_by, status=JobStatus.DISPATCHED,
+                      capability=secrets.token_urlsafe(32))
+            workspace = self.orchestrator.workspace_registry.get(ctx["workspace_id"]) if ctx.get("workspace_id") else None
+            job.execution = {
+                "atespace": binding.atespace, "name": job.job_id,
+                "template": binding.template, "phase": "creating",
+                "storage_id": self.settings.storage_id,
+                "workspace_storage_id": workspace.storage_id if workspace else None,
+                "egress_rules": binding.egress_rules,
+            }
+            # Record intent before creating an actor or issuing any task request.
+            await self._persist_job(job)
+            self._jobs[job.job_id] = job
+        async with self._locks.setdefault(job.job_id, asyncio.Lock()):
+            try:
+                resource = await self.client.create_actor(self._ref(job), binding.template)
+                self._bind(job, resource)
+                await self._persist_job(job)
+                await self._send(job)
+            except (SubstrateError, ValueError) as exc:
+                job.execution["error"] = str(exc)
+                await self._persist_job(job)
+        return job.job_id
 
-        self._jobs[job.id] = job
+    @staticmethod
+    def _ref(job):
+        return ActorRef(job.execution["atespace"], job.execution["name"])
+
+    @staticmethod
+    def _bind(job, resource):
+        meta = resource.get("metadata", {})
+        template = resource.get("actorTemplate", {})
+        if (meta.get("name") != job.execution["name"] or
+                meta.get("atespace") != job.execution["atespace"] or
+                template.get("name") != job.execution["template"] or not meta.get("uid")):
+            raise SubstrateError("Actor identity/template mismatch")
+        if job.execution.get("uid") and job.execution["uid"] != meta["uid"]:
+            raise SubstrateError("Actor was replaced; refusing to attach or replay")
+        job.execution["uid"] = meta["uid"]
+        if job.execution["phase"] == "creating":
+            job.execution["phase"] = "created"
+
+    async def _send(self, job):
+        if "egress_rules" in job.execution:
+            await self.client.configure_egress(self._ref(job), job.execution["egress_rules"])
+        ready = await self.client.request(self._ref(job), "GET", "/readyz", port=8080)
+        if ready.status_code != 200:
+            raise SubstrateError("Actor is not ready; task has not been submitted")
+        readiness = ready.json()
+        if not isinstance(readiness, dict) or readiness.get("ready") is not True:
+            raise SubstrateError("Actor returned invalid readiness; task has not been submitted")
+        if readiness.get("lock_protocol") != LOCK_PROTOCOL:
+            raise SubstrateError("Actor storage lock protocol mismatch; deploy control and actor images together")
+        job.execution["phase"] = "submitting"
+        await self._persist_job(job)
+        response = await self.client.request(self._ref(job), "POST", "/task", port=8080, payload={
+            "job_id": job.job_id, "task": job.task, "company_id": job.company_id,
+            "context": job.context, "storage_id": job.execution["storage_id"],
+            "workspace_storage_id": job.execution.get("workspace_storage_id"),
+            "capability": job.capability,
+            "lock_protocol": LOCK_PROTOCOL,
+        })
+        await self._accept(job, response)
+
+    async def _accept(self, job, response):
+        if response.status_code != 200 and response.status_code != 202:
+            raise SubstrateError(f"Actor task request returned HTTP {response.status_code}; execution not retried")
+        record = response.json()
+        if not isinstance(record, dict):
+            raise SubstrateError("Actor returned an invalid job record")
+        if record.get("job_id") != job.job_id or record.get("company_id") != job.company_id:
+            raise SubstrateError("Actor returned a different job/company")
+        if record.get("status") not in ("running", "completed", "failed"):
+            raise SubstrateError("Actor returned an invalid job status")
+        if record["status"] != "running" and not record.get("completed_at"):
+            raise SubstrateError("Actor terminal record is missing its completion time")
+        if record["status"] == "completed" and not isinstance(record.get("result"), str):
+            raise SubstrateError("Actor completed without a full result")
+        started_at = datetime.fromisoformat(record["started_at"])
+        completed_at = datetime.fromisoformat(record["completed_at"]) if record.get("completed_at") else None
+        job.status = JobStatus(record["status"])
+        job.started_at, job.completed_at = started_at, completed_at
+        job.result, job.error = record.get("result"), record.get("error")
+        job.execution["phase"] = "accepted"
+        job.execution.pop("error", None)
+        if "routing" in record:
+            job.execution["routing"] = record["routing"]
         await self._persist_job(job)
 
-        self._transition(job, JobStatus.QUEUED)
-        await self._queue.put(job.id)
-
-        logger.info(f"Job {job.id} submitted by {submitted_by}: {task[:80]}...")
-        return job.id
-
     async def get_job(self, job_id: str) -> Optional[Job]:
-        return self._jobs.get(job_id)
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        async with self._locks.setdefault(job.job_id, asyncio.Lock()):
+            if not job.execution or job.execution.get("deleted"):
+                if job.execution.get("deleted"):
+                    await self._release_storage_locks(job)
+                return job
+            try:
+                # A live reference must still identify the same instance.
+                resource = await self.client.get_actor(self._ref(job))
+                self._bind(job, resource)
+                if job.execution.get("cancel_requested"):
+                    await self._cancel(job)
+                elif job.status not in self.TERMINAL:
+                    if job.execution["phase"] == "created":
+                        await self._send(job)
+                    else:
+                        response = await self.client.request(self._ref(job), "GET", "/task", port=8080)
+                        await self._accept(job, response)
+                if job.status in self.TERMINAL and not job.execution.get("deleted"):
+                    # Also covers a previous failed persistence attempt: never
+                    # trust only the in-memory terminal projection for cleanup.
+                    await self._persist_job(job)
+                    await self.client.delete_actor(self._ref(job))
+                    job.execution["deleted"] = True
+                    await self._release_storage_locks(job)
+                    job.execution.pop("error", None)
+            except ActorNotFound:
+                if job.execution.get("phase") == "creating" and not job.execution.get("cancel_requested"):
+                    job.execution["error"] = "Actor creation is unconfirmed; query again, do not recreate"
+                    await self._persist_job(job)
+                    return job
+                elif job.execution.get("cancel_requested"):
+                    job.status = JobStatus.CANCELLED
+                    job.completed_at = datetime.now(timezone.utc)
+                elif job.status not in self.TERMINAL:
+                    job.status = JobStatus.FAILED
+                    job.error = "Actor disappeared; outcome unknown, task not replayed"
+                    job.completed_at = datetime.now(timezone.utc)
+                job.execution["deleted"] = True
+                await self._release_storage_locks(job)
+                job.execution.pop("error", None)
+            except (SubstrateError, ValueError, KeyError, TypeError) as exc:
+                # Transport failure is not evidence that a running task failed.
+                job.execution["error"] = str(exc)
+            await self._persist_job(job)
+        return job
 
-    def _matching(self, status: Optional[JobStatus], company_id: Optional[str]) -> List[Job]:
-        return [
-            j for j in self._jobs.values()
-            if (not status or j.status == status)
-            and (not company_id or j.company_id == company_id)
-        ]
+    def authenticate_actor(self, job_id, token):
+        job = self._jobs.get(job_id)
+        if (not job or not job.capability or not isinstance(token, str)
+                or not hmac.compare_digest(job.capability.encode(), token.encode())):
+            raise JobError("Invalid or inactive actor capability")
+        self.check_actor_scope(job)
+        return job
 
-    async def list_jobs(
-        self,
-        status: Optional[JobStatus] = None,
-        limit: int = 50,
-        offset: int = 0,
-        company_id: Optional[str] = None,
-    ) -> List[Job]:
-        jobs = self._matching(status, company_id)
-        jobs.sort(key=lambda j: j.created_at, reverse=True)
+    def check_actor_scope(self, job, team_id=None):
+        if job.status in self.TERMINAL or job.execution.get("cancel_requested"):
+            raise JobError("Invalid or inactive actor capability")
+        company = self.orchestrator.company_registry.get(job.company_id) if job.company_id else None
+        if job.company_id and (company is None or not company.enabled):
+            raise JobError("Company is no longer enabled")
+        if team_id and (not self.orchestrator.can_access_team(job.company_id, team_id)
+                        or not self.orchestrator.team_registry.get_config(team_id)):
+            raise JobError("Team is outside this job's current company scope")
+        return company
+
+    async def authorize(self, job, payload):
+        """Authorize and charge an estimate before execution, including failures.
+
+        Serializing the check and reservation prevents two actors from spending
+        the same remaining budget. The durable spend log is authoritative.
+        """
+        team_id = payload["team_id"]
+        async with self._authorization_lock:
+            company = self.check_actor_scope(job, team_id)
+            config = self.orchestrator.team_registry.get_config(team_id)
+            lead = next((p for p in config.pis if p.id == config.lead_pi), next(iter(config.pis), None))
+            model = lead.model if lead else "deepseek-chat"
+            # A task capability cannot grant itself the critical budget bypass.
+            priorities = ("low", "normal", "high", "critical")
+            requested = payload.get("priority", "normal")
+            ceiling = job.context.get("priority", "normal")
+            if requested not in priorities or ceiling not in priorities:
+                raise JobError("Invalid task priority")
+            priority = priorities[min(priorities.index(requested), priorities.index(ceiling))]
+            gate = self.orchestrator.cost_gate
+            decision = await gate.evaluate(
+                payload["task"], team_id, model, priority=priority,
+                company_id=job.company_id,
+                company_budget_hourly=company.preferences.budget_hourly_usd if company else None,
+            )
+            # Approval can wait for a human. Recheck revocation after that wait.
+            self.check_actor_scope(job, team_id)
+            if decision.action != "rejected":
+                estimate = decision.estimate
+                await run_sync(gate.record_spending, team_id, payload["task"],
+                    {"input": estimate.estimated_input_tokens, "output": estimate.estimated_output_tokens},
+                    estimate.estimated_cost_usd, company_id=job.company_id)
+            return asdict(decision)
+
+    async def _cancel(self, job):
+        try:
+            await self.client.delete_actor(self._ref(job))
+        except ActorNotFound:
+            pass
+        await self._release_storage_locks(job)
+        job.status = JobStatus.CANCELLED
+        job.completed_at = datetime.now(timezone.utc)
+        job.execution["deleted"] = True
+        job.execution.pop("error", None)
+        await self._persist_job(job)
+
+    async def _release_storage_locks(self, job):
+        await run_sync(release_job_locks, Path(self.orchestrator.config.storage_lock_dir), job.job_id)
+
+    async def cancel_job(self, job_id: str) -> bool:
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise JobError(f"Job not found: {job_id}")
+        async with self._locks.setdefault(job.job_id, asyncio.Lock()):
+            if job.status in self.TERMINAL:
+                return False
+            job.execution["cancel_requested"] = True
+            await self._persist_job(job)
+            # Never report cancellation until Substrate confirms deletion.
+            try:
+                resource = await self.client.get_actor(self._ref(job))
+                self._bind(job, resource)
+            except ActorNotFound:
+                pass
+            await self._cancel(job)
+        return True
+
+    async def wait(self, job_id):
+        while True:
+            job = await self.get_job(job_id)
+            if job.status == JobStatus.COMPLETED:
+                return job
+            if job.status in self.TERMINAL:
+                raise JobError(job.error or f"Job {job_id} {job.status.value}")
+            if job.execution.get("error"):
+                raise JobError(f"Job {job_id} is reconnectable: {job.execution['error']}")
+            await asyncio.sleep(self.settings.poll_interval)
+
+    def _matching(self, status, company_id):
+        return [j for j in self._jobs.values()
+                if (not status or j.status == status) and (not company_id or j.company_id == company_id)]
+
+    async def list_jobs(self, status=None, limit=50, offset=0, company_id=None):
+        # Lists are the durable last-observed projection. Never fan out dozens
+        # of network requests while an operator is diagnosing an outage.
+        jobs = sorted(self._matching(status, company_id), key=lambda j: j.created_at, reverse=True)
         return jobs[offset:offset + limit]
 
-    async def count_jobs(
-        self,
-        status: Optional[JobStatus] = None,
-        company_id: Optional[str] = None,
-    ) -> int:
+    async def count_jobs(self, status=None, company_id=None):
         return len(self._matching(status, company_id))
+
+    def get_stats(self):
+        counts = {status.value: sum(j.status == status for j in self._jobs.values()) for status in JobStatus}
+        return {"total": len(self._jobs), **counts, "queue_size": 0, "execution_backend": "substrate"}
 
     def get_company_activity_snapshot(
         self,
@@ -240,119 +491,18 @@ class JobManager:
                 entry["last_activity_timestamp"] = activity.isoformat()
         return snapshot
 
-    async def cancel_job(self, job_id: str) -> bool:
-        job = self._jobs.get(job_id)
-        if not job:
-            raise JobError(f"Job not found: {job_id}")
-
-        if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
-            return False
-
-        self._transition(job, JobStatus.CANCELLED)
-        job.completed_at = datetime.now(timezone.utc)
-        await self._persist_job(job)
-
-        logger.info(f"Job {job_id} cancelled")
-        return True
-
-    async def _worker(self, name: str) -> None:
-        try:
-            while self._running:
-                try:
-                    job_id = await asyncio.wait_for(
-                        self._queue.get(), timeout=1.0
-                    )
-                except asyncio.TimeoutError:
-                    continue
-
-                job = self._jobs.get(job_id)
-                if not job or job.status != JobStatus.QUEUED:
-                    continue
-
-                logger.info(f"[{name}] Processing job {job_id}")
-                try:
-                    await self._execute_job(job)
-                except asyncio.CancelledError:
-                    if job.status == JobStatus.RUNNING:
-                        job.status = JobStatus.FAILED
-                        job.error = "Interrupted by shutdown"
-                        job.completed_at = datetime.now(timezone.utc)
-                        await self._persist_job(job)
-                        logger.warning(f"[{name}] Job {job_id} interrupted by shutdown")
-                    raise
-
-        except asyncio.CancelledError:
-            return
-
-    async def _execute_job(self, job: Job) -> None:
-        self._transition(job, JobStatus.DISPATCHED)
-        job.started_at = datetime.now(timezone.utc)
-        await self._persist_job(job)
-        if job.status == JobStatus.CANCELLED:
-            return
-
-        if not self.orchestrator:
-            self._transition(job, JobStatus.FAILED)
-            job.error = "No orchestrator configured"
-            job.completed_at = datetime.now(timezone.utc)
-            await self._persist_job(job)
-            return
-
-        try:
-            self._transition(job, JobStatus.RUNNING)
-            await self._persist_job(job)
-            if job.status == JobStatus.CANCELLED:
-                return
-
-            exec_context = dict(job.context or {})
-            if job.company_id and "company_id" not in exec_context:
-                exec_context["company_id"] = job.company_id
-
-            team_id = exec_context.get("team_id")
-            if team_id:
-                result_text = await self.orchestrator.run_team(
-                    task=job.task,
-                    team_id=team_id,
-                    user_context=exec_context,
-                )
-            else:
-                result_text, _ = await self.orchestrator.run_auto(
-                    task=job.task,
-                    user_context=exec_context,
-                )
-
-            if job.status == JobStatus.CANCELLED:
-                return
-            self._transition(job, JobStatus.COMPLETED)
-            job.result = result_text
-            job.completed_at = datetime.now(timezone.utc)
-
-        except Exception as e:
-            if job.status == JobStatus.CANCELLED:
-                return
-            self._transition(job, JobStatus.FAILED)
-            job.error = str(e)
-            job.completed_at = datetime.now(timezone.utc)
-            logger.error(f"Job {job.id} failed: {e}")
-
-        await self._persist_job(job)
-        self._evict_completed_jobs()
-
     async def _init_db(self) -> None:
         try:
             import aiosqlite
         except ImportError:
-            logger.warning(
-                "aiosqlite not installed, job persistence disabled. "
-                "Install with: pip install aiosqlite"
-            )
-            return
+            raise JobError("Install Companest with the server extra; job persistence is required")
 
-        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._db = await aiosqlite.connect(str(self._data_dir / "jobs.db"))
+        os.chmod(self._data_dir / "jobs.db", 0o600)
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
+                job_id TEXT PRIMARY KEY,
                 task TEXT NOT NULL,
                 status TEXT NOT NULL,
                 context TEXT,
@@ -369,8 +519,14 @@ class JobManager:
         """)
         await self._db.commit()
 
+        # One-time schema migration; runtime reads/writes only job_id.
+        columns = await (await self._db.execute("PRAGMA table_info(jobs)")).fetchall()
+        if "id" in {row[1] for row in columns}:
+            await self._db.execute("ALTER TABLE jobs RENAME COLUMN id TO job_id")
+            await self._db.commit()
+
         # Databases created before these columns existed still need them added.
-        for column in ("approval_reason", "company_id"):
+        for column in ("approval_reason", "company_id", "execution", "capability"):
             try:
                 await self._db.execute(f"SELECT {column} FROM jobs LIMIT 1")
             except Exception:
@@ -385,13 +541,13 @@ class JobManager:
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO jobs
-                (id, task, status, context, subtasks, result, error,
+                (job_id, task, status, context, subtasks, result, error,
                  approval_reason, created_at, started_at, completed_at, submitted_by,
-                 company_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 company_id, execution, capability)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    job.id,
+                    job.job_id,
                     job.task,
                     job.status.value,
                     json.dumps(job.context),
@@ -404,11 +560,13 @@ class JobManager:
                     job.completed_at.isoformat() if job.completed_at else None,
                     job.submitted_by,
                     job.company_id,
+                    json.dumps(job.execution),
+                    job.capability,
                 ),
             )
             await self._db.commit()
         except Exception as e:
-            logger.error(f"Failed to persist job {job.id}: {e}")
+            raise JobError(f"Failed to persist job {job.job_id}") from e
 
     async def _load_jobs(self) -> None:
         if not self._db:
@@ -416,16 +574,16 @@ class JobManager:
 
         try:
             async with self._db.execute(
-                "SELECT id, task, status, context, subtasks, result, error, "
+                "SELECT job_id, task, status, context, subtasks, result, error, "
                 "approval_reason, created_at, started_at, completed_at, submitted_by, "
-                "company_id "
-                "FROM jobs ORDER BY created_at DESC LIMIT 1000"
+                "company_id, execution, capability "
+                "FROM jobs ORDER BY created_at DESC"
             ) as cursor:
                 rows = await cursor.fetchall()
 
             for row in rows:
                 job = Job(
-                    id=row[0],
+                    job_id=row[0],
                     task=row[1],
                     status=JobStatus(row[2]),
                     context=json.loads(row[3]) if row[3] else {},
@@ -438,36 +596,11 @@ class JobManager:
                     completed_at=datetime.fromisoformat(row[10]) if row[10] else None,
                     submitted_by=row[11] or "api",
                     company_id=row[12],
+                    execution=json.loads(row[13]) if row[13] else {},
+                    capability=row[14] or "",
                 )
-                self._jobs[job.id] = job
+                self._jobs[job.job_id] = job
 
             logger.info(f"Loaded {len(rows)} jobs from database")
         except Exception as e:
-            logger.error(f"Failed to load jobs: {e}")
-
-    def _evict_completed_jobs(self) -> None:
-        if len(self._jobs) <= self.MAX_IN_MEMORY_JOBS:
-            return
-        terminal = sorted(
-            (j for j in self._jobs.values()
-             if j.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)),
-            key=lambda j: j.completed_at or j.created_at,
-        )
-        to_evict = len(self._jobs) - self.MAX_IN_MEMORY_JOBS
-        for job in terminal[:to_evict]:
-            self._jobs.pop(job.id, None)
-        logger.info(f"Evicted {min(to_evict, len(terminal))} completed jobs from memory")
-
-    def get_stats(self) -> Dict[str, Any]:
-        jobs = list(self._jobs.values())
-        return {
-            "total": len(jobs),
-            "pending": sum(1 for j in jobs if j.status == JobStatus.PENDING),
-            "queued": sum(1 for j in jobs if j.status == JobStatus.QUEUED),
-            "running": sum(1 for j in jobs if j.status == JobStatus.RUNNING),
-            "waiting_approval": sum(1 for j in jobs if j.status == JobStatus.WAITING_APPROVAL),
-            "completed": sum(1 for j in jobs if j.status == JobStatus.COMPLETED),
-            "failed": sum(1 for j in jobs if j.status == JobStatus.FAILED),
-            "cancelled": sum(1 for j in jobs if j.status == JobStatus.CANCELLED),
-            "queue_size": self._queue.qsize(),
-        }
+            raise JobError("Failed to load jobs") from e

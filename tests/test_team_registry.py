@@ -1,5 +1,3 @@
-import time
-
 import pytest
 
 from companest.memory import MemoryManager
@@ -8,7 +6,7 @@ from design_helpers import _make_team
 
 
 class TestTeamRegistry:
-    """TeamConfig parsing and TeamRegistry lifecycle."""
+    """Team declarations and per-invocation harness construction."""
 
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
@@ -51,42 +49,18 @@ class TestTeamRegistry:
         assert config.lead_pi == "scout"
         assert [p.id for p in config.pis] == ["scout"]
 
-    def test_registry_scan(self):
-        assert "stock" in self.reg.list_teams()
-        assert "finance" in self.reg.list_teams()
-        assert "finance" in self.reg.list_meta_teams()
-        assert "stock" not in self.reg.list_meta_teams()
-        assert "finance" in self.reg.list_active()
 
     def test_registry_on_demand_create(self):
         assert "stock" not in self.reg.list_active()
-        team = self.reg.get_or_create("stock")
+        team = self.reg.create("stock")
         assert team.id == "stock"
-        assert "stock" in self.reg.list_active()
-
-    def test_registry_evict_idle(self):
-        from companest.agents.team import TeamRegistry
-        reg = TeamRegistry(str(self.base / "teams"), self.mm, idle_timeout=0)
-        reg.scan_configs()
-
-        reg.get_or_create("stock")
-        assert "stock" in reg.list_active()
-
-        time.sleep(0.01)
-        evicted = reg.evict_idle()
-        assert "stock" in evicted
-        assert "finance" not in evicted
-        assert "finance" in reg.list_active()
+        assert team is not self.reg.create("stock")
 
     def test_registry_get_nonexistent_raises(self):
         from companest.exceptions import TeamError
         with pytest.raises(TeamError):
-            self.reg.get_or_create("nonexistent")
+            self.reg.create("nonexistent")
 
-    def test_fleet_status(self):
-        status = self.reg.get_fleet_status()
-        assert "stock" in status["registered"]
-        assert "finance" in status["meta"]
 
     def test_register_on_demand_team(self):
         from companest.agents.team import TeamConfig
@@ -100,7 +74,7 @@ class TestTeamRegistry:
         ))
 
         assert "kalshi" in self.reg.list_teams()
-        assert self.reg.get_or_create("kalshi").id == "kalshi"
+        assert self.reg.create("kalshi").id == "kalshi"
 
     def test_register_always_on_team(self):
         from companest.agents.team import TeamConfig
@@ -114,7 +88,7 @@ class TestTeamRegistry:
         ), always_on=True)
 
         assert "monitor" in self.reg.list_meta_teams()
-        assert "monitor" in self.reg.list_active()
+        assert self.reg.list_active() == []
 
     def test_register_disabled_team_skipped(self):
         from companest.agents.team import TeamConfig

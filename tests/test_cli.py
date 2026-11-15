@@ -80,7 +80,7 @@ def test_job_list_prefers_top_level_total(monkeypatch, capsys):
             {
                 "jobs": [
                     {
-                        "id": "job-1",
+                        "job_id": "job-1",
                         "task": "test task",
                         "status": "completed",
                     }
@@ -130,7 +130,7 @@ def test_session_submit_parses_scope_and_json_flags(monkeypatch, capsys):
 
 
 def test_session_status_returns_full_result(monkeypatch, capsys):
-    payload = {"id": "job-1", "status": "completed", "result": "完整结果" * 1000}
+    payload = {"job_id": "job-1", "status": "completed", "result": "完整结果" * 1000}
     monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(get=lambda *a, **kw: _Response(payload)))
     monkeypatch.setenv("COMPANEST_API_TOKEN", "test-token")
     monkeypatch.setattr(sys, "argv", ["companest", "job", "status", "job-1", "--json"])

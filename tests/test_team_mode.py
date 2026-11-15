@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from companest.config import CompanestConfig
-from companest.orchestration.orchestrator import CompanestOrchestrator
+from companest.runtime.harness import ActorOrchestrator as CompanestOrchestrator
 from companest.agents.team import TeamConfig
 
 
@@ -26,7 +26,7 @@ def test_team_config_parses_mode(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_team_uses_team_default_mode_when_not_overridden():
-    orchestrator = CompanestOrchestrator(CompanestConfig(debug=True))
+    orchestrator = CompanestOrchestrator(CompanestConfig(debug=True), job_context={})
     execution_mode = SimpleNamespace(execute=AsyncMock(return_value="ok"))
     team = SimpleNamespace(
         mode="council",
@@ -35,10 +35,13 @@ async def test_run_team_uses_team_default_mode_when_not_overridden():
     )
 
     orchestrator.team_registry = MagicMock()
-    orchestrator.team_registry.get_or_create.return_value = team
+    orchestrator.team_registry.create.return_value = team
     orchestrator.mode_registry = MagicMock()
     orchestrator.mode_registry.get.return_value = execution_mode
     orchestrator.mode_registry.list_modes.return_value = ["default", "council"]
+    orchestrator.cost_gate = SimpleNamespace(evaluate=AsyncMock(return_value=SimpleNamespace(
+        action="auto_approve", estimate=SimpleNamespace(estimated_cost_usd=0),
+    )))
     orchestrator.events = MagicMock()
     orchestrator.events.emit = AsyncMock()
 
@@ -55,5 +58,5 @@ async def test_run_team_uses_team_default_mode_when_not_overridden():
         team,
         "Analyze this topic",
         on_progress=None,
-        user_context={},
+        user_context={"company_id": None},
     )

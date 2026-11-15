@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 
-from . import ExecutionMode, ProgressCallback, _lead_pi, _with_memory_task_hint
+from ..modes import ProgressCallback, _lead_pi, _with_memory_task_hint
 from ..exceptions import PiError, TeamError
 from ..utils import extract_json_object
 
@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 RunTeamFn = Callable[..., Coroutine[Any, Any, str]]
 
 
-class ConditionalMode(ExecutionMode):
+class Delegation:
     """Conditional branching: lead Pi evaluates task -picks branch team -executes."""
 
-    def __init__(self, run_team_fn: RunTeamFn, max_steps: int = 5):
+    def __init__(self, run_team_fn: RunTeamFn, max_steps: int = 5, allowed_teams=None):
         self._run_team_fn = run_team_fn
         self._max_steps = max_steps
+        self._allowed_teams = allowed_teams
 
     @property
     def name(self) -> str:
@@ -44,13 +45,14 @@ class ConditionalMode(ExecutionMode):
             decision_prompt = (
                 "You are a routing coordinator. Analyze the task and decide the next action.\n\n"
                 f"## Task\n{task}\n"
+                f"## Allowed teams\n{self._allowed_teams or []}\n"
                 f"{progress}\n\n"
                 "## Instructions\n"
                 "Return ONLY valid JSON (no markdown fencing):\n"
                 '{"team": "<team_id>", "mode": "default", "sub_task": "<refined task for that team>", "done": false}\n\n'
                 'Set "done": true when the task is fully handled (include a "summary" field with the final answer).\n'
                 'Set "done": false to route to a team for the next step.\n'
-                "Available modes: default, cascade, loop, council"
+                "Available modes: default, collaborative, council"
             )
 
             if on_progress:
@@ -105,7 +107,11 @@ class ConditionalMode(ExecutionMode):
                 return raw
 
             branch_team = decision["team"]
+            if self._allowed_teams is not None and branch_team not in self._allowed_teams:
+                raise TeamError("Delegation target is outside the allowed teams")
             branch_mode = decision.get("mode", "default")
+            if branch_mode not in ("default", "collaborative", "council", "cascade"):
+                raise TeamError("Delegation cannot start a nested workflow")
             sub_task = decision.get("sub_task", task)
 
             if on_progress:
@@ -124,7 +130,8 @@ class ConditionalMode(ExecutionMode):
                     team_id=branch_team,
                     mode=branch_mode,
                     on_progress=on_progress,
-                    user_context=_with_memory_task_hint(user_context, sub_task),
+                    user_context=_with_memory_task_hint(
+                        {k: v for k, v in (user_context or {}).items() if k != "workflow"}, sub_task),
                     priority=decision.get("priority", "normal"),
                 )
                 accumulated_results.append(result)
@@ -140,11 +147,11 @@ class ConditionalMode(ExecutionMode):
                 )
 
         logger.warning(
-            f"[Team:{team.id}] Conditional mode hit max_steps={self._max_steps}"
+            f"[Team:{team.id}] Delegation hit max_steps={self._max_steps}"
         )
         if accumulated_results:
             return accumulated_results[-1]
-        raise TeamError(f"Conditional mode produced no results after {self._max_steps} steps")
+        raise TeamError(f"Delegation produced no results after {self._max_steps} steps")
 
 
 _parse_decision = extract_json_object

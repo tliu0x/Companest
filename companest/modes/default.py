@@ -14,7 +14,7 @@ class DefaultMode(ExecutionMode):
 
     @property
     def name(self) -> str:
-        return "cascade" if self._cascade else "default"
+        return "default"
 
     async def execute(
         self,

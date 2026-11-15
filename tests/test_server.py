@@ -28,14 +28,14 @@ class TestServerEndpoints:
         routes = [r.path for r in app.routes]
         for path in (
             "/api/teams",
-            "/api/teams/{team_id}",
-            "/api/teams/{team_id}/run",
+            "/api/teams/{team_id:path}",
+            "/api/teams/{team_id:path}/run",
             "/api/finance/summary",
             "/api/finance/approve/{approval_id}",
             "/api/finance/report",
             "/api/finance/circuit-breaker/reset",
             "/api/scheduler/status",
-            "/api/scheduler/{task_name}/trigger",
+            "/api/scheduler/{task_name:path}/trigger",
             "/api/v2/status",
         ):
             assert path in routes

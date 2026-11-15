@@ -6,9 +6,6 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-TASK_TIMEOUT_SECONDS = 300
-
-
 @dataclass
 class ScheduledTask:
     name: str
@@ -52,6 +49,12 @@ class Scheduler:
             scope_type=scope_type,
             scope_id=scope_id,
         )
+        if self._started:
+            previous = self._running_tasks.pop(name, None)
+            if previous:
+                previous.cancel()
+            if enabled:
+                self._running_tasks[name] = asyncio.create_task(self._run_loop(self._tasks[name]))
         logger.info(
             f"[Scheduler] Registered '{name}' "
             f"(every {interval}s, {'enabled' if enabled else 'disabled'})"
@@ -120,15 +123,12 @@ class Scheduler:
         task._executing = True
         try:
             logger.debug(f"[Scheduler] Running '{task.name}'")
-            await asyncio.wait_for(task.func(), timeout=TASK_TIMEOUT_SECONDS)
+            # Actor execution owns its deadline. Cancelling only the local
+            # waiter would leave remote work running and allow an overlapping
+            # occurrence on the next tick.
+            await task.func()
             task.last_run = datetime.now(timezone.utc)
             task.run_count += 1
-        except asyncio.TimeoutError:
-            task.error_count += 1
-            task.last_error = f"Timed out after {TASK_TIMEOUT_SECONDS}s"
-            logger.error(
-                f"[Scheduler] Task '{task.name}' timed out after {TASK_TIMEOUT_SECONDS}s"
-            )
         except Exception as e:
             task.error_count += 1
             task.last_error = str(e)
@@ -145,6 +145,8 @@ class Scheduler:
             "tasks": {
                 name: {
                     "enabled": t.enabled,
+                    "scope_type": t.scope_type,
+                    "scope_id": t.scope_id,
                     "interval_seconds": t.interval_seconds,
                     "last_run": t.last_run.isoformat() if t.last_run else None,
                     "run_count": t.run_count,

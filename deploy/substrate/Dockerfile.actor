@@ -1,0 +1,12 @@
+FROM python:3.12-slim
+
+WORKDIR /opt/companest
+COPY pyproject.toml README.md ./
+COPY companest ./companest
+RUN pip install --no-cache-dir ".[agents,server,scheduler]" \
+    && useradd --uid 10001 --create-home actor \
+    && mkdir /data /state /locks /workspaces && chown actor:actor /data /state /locks /workspaces
+USER actor
+WORKDIR /state
+ENTRYPOINT ["python", "-m", "companest.runtime.actor"]
+CMD ["--help"]

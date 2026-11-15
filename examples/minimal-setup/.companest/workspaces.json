@@ -1,6 +1,7 @@
 {
-  "companest": {
-    "path": ".",
+  "code": {
+    "path": "/mnt/companest/workspaces/code",
+    "storage_id": "code-v1",
     "repo": "https://github.com/tliu0x/Companest",
     "branch": "main",
     "description": "Companest sample workspace"

@@ -1,0 +1,49 @@
+"""Job-scoped access to business services owned by the control plane."""
+
+import uuid
+import os
+import ssl
+import httpx
+
+from ..orchestration.cost_gate import CostDecision, CostEstimate
+from ..jobs.user_scheduler import Schedule
+
+
+class ActorServices:
+    def __init__(self, url: str, job_id: str, capability: str):
+        if not url or httpx.URL(url).scheme not in ("http", "https"):
+            raise ValueError("Actor requires a valid control_plane_url")
+        self.url = url.rstrip("/") + f"/internal/jobs/{job_id}"
+        self.capability = capability
+
+    async def call(self, operation, payload):
+        trust = ssl.create_default_context(cafile=os.environ.get("SSL_CERT_FILE"))
+        async with httpx.AsyncClient(timeout=120, trust_env=False, verify=trust) as client:
+            response = await client.post(
+                self.url + "/" + operation, json=payload,
+                headers={"Authorization": "Bearer " + self.capability},
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"Control-plane {operation} refused (HTTP {response.status_code})")
+            return response.json()
+
+    async def evaluate(self, task, team_id, model, priority="normal", **_):
+        value = await self.call("authorize", {
+            "request_id": str(uuid.uuid4()), "task": task, "team_id": team_id,
+            "model": model, "priority": priority,
+        })
+        value["estimate"] = CostEstimate(**value["estimate"])
+        return CostDecision(**value)
+
+    async def emit(self, event):
+        if event.type.value in {"task_started", "task_completed", "task_failed", "task_routed"}:
+            await self.call("events", {"type": event.type.value, "data": event.data})
+
+    async def add_schedule(self, **kwargs):
+        return Schedule(**await self.call("schedule", {"action": "add", **kwargs}))
+
+    async def list_schedules(self, **kwargs):
+        return [Schedule(**item) for item in await self.call("schedule", {"action": "list", **kwargs})]
+
+    async def cancel_schedule(self, schedule_id, **kwargs):
+        return await self.call("schedule", {"action": "cancel", "schedule_id": schedule_id, **kwargs})

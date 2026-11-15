@@ -50,8 +50,8 @@ class CostEstimate:
     estimated_input_tokens: int
     estimated_output_tokens: int
     estimated_cost_usd: float
-    target_team: str
-    target_model: str
+    team_id: str
+    model: str
     suggested_downgrade: Optional[str] = None
 
 
@@ -238,14 +238,14 @@ class CostGate:
                 overflow_used += team_spent - team_daily
         return overflow_used
 
-    def estimate_cost(self, task: str, target_model: str, target_team: str) -> CostEstimate:
+    def estimate_cost(self, task: str, model: str, team_id: str) -> CostEstimate:
         from ..agents.cascade import get_downgrade
 
         # Deliberately overestimates: ~2 chars per token, ~2000 tokens of system prompt
         task_tokens = max(len(task) // 2, 10)
-        prices = MODEL_PRICES.get(target_model)
+        prices = MODEL_PRICES.get(model)
         if not prices:
-            logger.warning(f"Unknown model '{target_model}', using conservative pricing")
+            logger.warning(f"Unknown model '{model}', using conservative pricing")
             prices = {"input": 15.0, "output": 75.0}
 
         est_input = task_tokens + 2000
@@ -255,28 +255,28 @@ class CostGate:
             estimated_input_tokens=est_input,
             estimated_output_tokens=est_output,
             estimated_cost_usd=round(cost, 4),
-            target_team=target_team,
-            target_model=target_model,
-            suggested_downgrade=get_downgrade(target_model),
+            team_id=team_id,
+            model=model,
+            suggested_downgrade=get_downgrade(model),
         )
 
     async def evaluate(
-        self, task: str, target_team_id: str, target_model: str,
+        self, task: str, team_id: str, model: str,
         priority: str = "normal",
         company_id: Optional[str] = None,
         company_budget_hourly: Optional[float] = None,
     ) -> CostDecision:
         async with self._budget_lock:
             return await self._evaluate_locked(
-                task, target_team_id, target_model, priority, company_id, company_budget_hourly,
+                task, team_id, model, priority, company_id, company_budget_hourly,
             )
 
     async def _evaluate_locked(
-        self, task: str, target_team_id: str, target_model: str, priority: str,
+        self, task: str, team_id: str, model: str, priority: str,
         company_id: Optional[str], company_budget_hourly: Optional[float],
     ) -> CostDecision:
         budget = await run_sync(self._load_budget)
-        estimate = self.estimate_cost(task, target_model, target_team_id)
+        estimate = self.estimate_cost(task, model, team_id)
         cost = estimate.estimated_cost_usd
         daily_limit = budget.get("daily_limit", 10.0)
         hours = budget["rolling_window_hours"]
@@ -315,9 +315,9 @@ class CostGate:
                 )
             return rejected(reason)
 
-        team_daily = budget["team_budgets"].get(target_team_id, {}).get("daily", 0)
+        team_daily = budget["team_budgets"].get(team_id, {}).get("daily", 0)
         if team_daily > 0:
-            team_spent = await run_sync(self._get_team_window_spending, target_team_id, hours)
+            team_spent = await run_sync(self._get_team_window_spending, team_id, hours)
             if team_spent + cost > team_daily:
                 overflow_remaining = max(
                     0.0, budget["overflow_pool"] - await run_sync(self._get_overflow_usage, budget, hours),
@@ -325,12 +325,12 @@ class CostGate:
                 overage = (team_spent + cost) - team_daily
                 if overage <= overflow_remaining:
                     logger.info(
-                        f"[CostGate] Team {target_team_id} over budget, "
+                        f"[CostGate] Team {team_id} over budget, "
                         f"using ${overage:.4f} from overflow pool"
                     )
                 else:
                     reason = (
-                        f"Team '{target_team_id}' budget exceeded "
+                        f"Team '{team_id}' budget exceeded "
                         f"(${team_spent:.2f}+${cost:.2f} > ${team_daily:.2f})"
                     )
                     if self.notifier:
@@ -403,8 +403,8 @@ class CostGate:
                 "estimated_cost_usd": round(estimate.estimated_cost_usd, 4),
                 "estimated_input_tokens": estimate.estimated_input_tokens,
                 "estimated_output_tokens": estimate.estimated_output_tokens,
-                "target_team": estimate.target_team,
-                "target_model": estimate.target_model,
+                "team_id": estimate.team_id,
+                "model": estimate.model,
                 "suggested_downgrade": estimate.suggested_downgrade,
                 "today_spent": round(today_spent, 4),
                 "daily_limit": daily_limit,
@@ -438,7 +438,7 @@ class CostGate:
                 priority=priority,
             )
         if user_choice == "downgrade" and estimate.suggested_downgrade:
-            estimate.target_model = estimate.suggested_downgrade
+            estimate.model = estimate.suggested_downgrade
             return CostDecision(
                 action="auto_approve", estimate=estimate,
                 reason="User approved (downgraded)", approval_id=approval_id,
@@ -483,7 +483,7 @@ class CostGate:
         }
         if company_id:
             entry["company"] = company_id
-        self.memory.append_team_memory("finance", "spending-log.json", entry)
+        self.memory.append_team_memory("finance", "spending-log.json", entry, category="task", pinned=True)
 
         if self._circuit_breaker:
             self._circuit_breaker.record(effective_cost, team_id)
@@ -605,7 +605,7 @@ class UserNotifier:
             f"*Companest Finance Approval Request*\n"
             f"\n"
             f"Task: {task[:80]}...\n"
-            f"Team: {estimate.target_team} -> {estimate.target_model}\n"
+            f"Team: {estimate.team_id} -> {estimate.model}\n"
             f"Estimate: ~{total_tokens:,} tokens = ${estimate.estimated_cost_usd:.2f}\n"
             f"Today's spending: ${today_spent:.2f} / ${daily_limit:.2f}\n"
             f"\n"
@@ -616,7 +616,7 @@ class UserNotifier:
         await self._send(msg)
 
     async def notify_cost(self, estimate: CostEstimate, task: str) -> None:
-        msg = f"Companest: {estimate.target_team} spent ${estimate.estimated_cost_usd:.2f} -- {task[:50]}..."
+        msg = f"Companest: {estimate.team_id} spent ${estimate.estimated_cost_usd:.2f} -- {task[:50]}..."
         logger.info(f"[CostGate] {msg}")
         await self._send(msg)
 

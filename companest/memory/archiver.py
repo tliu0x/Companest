@@ -58,8 +58,20 @@ class MemoryArchiver:
             tmp_path = tmp.name
 
         try:
+            lock_dir = self.memory._append_lock.path.parent.resolve()
+
+            def without_live_locks(member):
+                relative = PurePosixPath(member.name).relative_to(".companest")
+                path = base / str(relative)
+                if path.parent.resolve() == lock_dir and (
+                    path.name.endswith(".lock.claim")
+                    or (path.name.startswith(".") and ".lock-" in path.name and path.name.endswith(".owner"))
+                ):
+                    return None
+                return member
+
             with self.memory._append_lock, tarfile.open(tmp_path, "w:gz") as tar:
-                tar.add(str(base), arcname=".companest")
+                tar.add(str(base), arcname=".companest", filter=without_live_locks)
 
             file_size = os.path.getsize(tmp_path)
 
@@ -73,7 +85,7 @@ class MemoryArchiver:
                 "teams": self.memory.list_teams(),
             }
 
-            self.memory.append_team_memory("memory", "backup-log.json", metadata)
+            self.memory.append_team_memory("memory", "backup-log.json", metadata, category="task", pinned=True)
 
             logger.info(
                 f"[Archiver] Snapshot uploaded: s3://{self.bucket}/{key} "

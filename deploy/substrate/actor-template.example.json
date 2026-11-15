@@ -1,0 +1,140 @@
+{
+  "metadata": {
+    "atespace": "ate-demo-counter",
+    "name": "companest-sample"
+  },
+  "workerSelector": {
+    "matchLabels": {
+      "workload": "counter"
+    }
+  },
+  "containers": [
+    {
+      "name": "harness",
+      "image": "<ACTOR_IMAGE_DIGEST>",
+      "command": [
+        "python",
+        "-m",
+        "companest.runtime.actor",
+        "--config",
+        "/state/config.json",
+        "--company",
+        "@shared",
+        "--storage-id",
+        "example-storage-v1"
+      ],
+      "wakeupProbe": {
+        "httpGet": {
+          "path": "/readyz",
+          "port": 8080
+        }
+      },
+      "volumeMounts": [
+        {
+          "name": "state",
+          "mountPath": "/state"
+        },
+        {
+          "name": "locks",
+          "mountPath": "/locks"
+        },
+        {
+          "name": "workspace",
+          "mountPath": "/workspaces/code"
+        },
+        {
+          "name": "journal",
+          "mountPath": "/data"
+        },
+        {
+          "name": "trust",
+          "mountPath": "/run/ate/trust"
+        }
+      ],
+      "env": [
+        {
+          "name": "DEEPSEEK_API_KEY",
+          "value": "substrate-egress-placeholder"
+        },
+        {
+          "name": "MOONSHOT_API_KEY",
+          "value": "substrate-egress-placeholder"
+        },
+        {
+          "name": "SSL_CERT_FILE",
+          "value": "/run/ate/trust/trust-bundle.pem"
+        },
+        {
+          "name": "REQUESTS_CA_BUNDLE",
+          "value": "/run/ate/trust/trust-bundle.pem"
+        }
+      ]
+    }
+  ],
+  "resources": {
+    "limits": {
+      "cpuMillicores": 1000,
+      "memoryBytes": 536870912
+    }
+  },
+  "snapshotConfig": {
+    "preferredFidelity": "SNAPSHOT_FIDELITY_MEMORY",
+    "goldenSnapshotConfig": {
+      "mode": "GOLDEN_SNAPSHOT_MODE_DISABLED"
+    }
+  },
+  "volumes": [
+    {
+      "name": "state",
+      "external": {
+        "template": {
+          "capacityBytes": "1073741824",
+          "storageClassName": "companest-shared"
+        }
+      }
+    },
+    {
+      "name": "locks",
+      "external": {
+        "template": {
+          "capacityBytes": "1073741824",
+          "storageClassName": "companest-locks"
+        }
+      }
+    },
+    {
+      "name": "workspace",
+      "external": {
+        "template": {
+          "capacityBytes": "1073741824",
+          "storageClassName": "companest-workspace"
+        }
+      }
+    },
+    {
+      "name": "journal",
+      "external": {
+        "template": {
+          "capacityBytes": "1073741824",
+          "storageClassName": "companest-journals"
+        }
+      }
+    },
+    {
+      "name": "trust",
+      "systemInfo": {
+        "dataSources": [
+          {
+            "trustBundle": {
+              "names": [
+                "egress-mitm.ate.dev",
+                "system-roots.ate.dev"
+              ],
+              "path": "trust-bundle.pem"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

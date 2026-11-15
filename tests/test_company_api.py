@@ -46,7 +46,7 @@ def test_company_registration_flow_smoke(api_runtime):
             "prediction-market/collector-team",
         ]
         assert "ceo_prediction-market" in company_data["schedule_status"]
-        assert "company_prediction-market_market-collection" in company_data["schedule_status"]
+        assert "company/prediction-market/market-collection" in company_data["schedule_status"]
         assert company_data["finance"]["hourly_budget_usd"] == 1.0
 
         submit = client.post(
@@ -81,7 +81,7 @@ def test_company_registration_flow_smoke(api_runtime):
 
     assert orchestrator.team_registry.get_configs_by_company("prediction-market") == {}
     assert "ceo_prediction-market" not in orchestrator.scheduler.get_status()["tasks"]
-    assert "company_prediction-market_market-collection" not in orchestrator.scheduler.get_status()["tasks"]
+    assert "company/prediction-market/market-collection" not in orchestrator.scheduler.get_status()["tasks"]
 
 
 def test_company_status_with_registry_only(tmp_path):
@@ -111,7 +111,7 @@ def test_seeded_team_keeps_ceo_memory_namespace(api_runtime):
     with TestClient(server.create_app()) as client:
         response = client.post("/api/companies", json=manifest)
         assert response.status_code == 200, response.text
-        assert orchestrator._ceo_pis["seeded"].team_id == "company-seeded"
+        assert orchestrator.team_registry.get_config("company-seeded").lead_pi == "ceo"
 
 
 def test_create_company_rejects_invalid_team_id_without_persisting(api_runtime):

@@ -9,7 +9,6 @@ from companest.knowledge import feeds
 from companest.knowledge.feeds import (
     _cache,
     _cache_get,
-    _cache_key,
     _last_request_time,
     _rate_limit,
     brave_search,
@@ -32,9 +31,6 @@ def clear_caches():
 
 
 class TestCache:
-    def test_cache_key_depends_on_arguments(self):
-        assert _cache_key("f", "a", "b", x=1) == _cache_key("f", "a", "b", x=1)
-        assert _cache_key("f", "a") != _cache_key("f", "b")
 
     def test_cache_expiry(self):
         _cache["expired"] = (time.monotonic() - 600, [{"old": True}])
@@ -100,7 +96,6 @@ class TestBraveSearch:
         assert mock_client.get.call_count == 1
 
 
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fetch", [
     lambda: brave_search("fail", api_key="key"),
@@ -154,7 +149,6 @@ class TestFetchReddit:
         assert items[0]["score"] == 42
 
 
-
 class TestFetchHN:
     @pytest.mark.asyncio
     async def test_successful_fetch(self):
@@ -185,7 +179,6 @@ class TestFetchHN:
         assert items[0]["title"] == "Story 1"
         assert items[0]["source"] == "hn"
         assert items[1]["score"] == 50
-
 
 
 class TestFetchRSS:
@@ -247,7 +240,6 @@ class TestFetchRSS:
         assert len(items) == 1
         assert items[0]["title"] == "Atom Entry"
         assert items[0]["url"] == "https://example.com/atom"
-
 
 
 class TestFetchX:
@@ -346,7 +338,6 @@ class TestFetchPolymarket:
         assert "Turing" in items[0]["title"]
 
 
-
 class TestFetchKalshi:
     @pytest.mark.asyncio
     async def test_successful_fetch(self):
@@ -373,7 +364,6 @@ class TestFetchKalshi:
         assert len(items) == 1
         assert items[0]["source"] == "kalshi"
         assert "Fed" in items[0]["title"]
-
 
 
 class TestFetchMetaculus:

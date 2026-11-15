@@ -7,7 +7,7 @@ from ..utils import run_sync
 from ..events import EventBus, EventType
 
 if TYPE_CHECKING:
-    from ..jobs.user_scheduler import ScheduledJob
+    from ..jobs.user_scheduler import Schedule
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,6 @@ class BackgroundManager:
 
     def setup_schedules(self) -> None:
         self._scheduler.add(
-            "team_eviction",
-            self.evict_idle_teams,
-            interval=300,
-        )
-
-        self._scheduler.add(
             "daily_spend_report",
             self.send_daily_report,
             interval=86400,
@@ -54,20 +48,12 @@ class BackgroundManager:
         all_teams = set(self._team_registry.list_teams())
         for team_id, cycle in self._enrichment_cycles.items():
             if team_id in all_teams:
-                safe_name = team_id.replace("-", "_") + "_cycle"
                 self._scheduler.add(
-                    safe_name,
+                    f"enrichment/{team_id}",
                     lambda tid=team_id, p=cycle["prompt"]: self.run_enrichment_cycle(tid, p),
                     interval=cycle["interval"],
                     run_on_start=False,
                 )
-
-    async def evict_idle_teams(self) -> None:
-        evicted = self._team_registry.evict_idle()
-        if evicted:
-            logger.info(f"Evicted idle teams: {evicted}")
-            for tid in evicted:
-                await self._events.emit(EventType.TEAM_EVICTED, {"team_id": tid})
 
     async def send_daily_report(self) -> None:
         try:
@@ -85,14 +71,13 @@ class BackgroundManager:
             await self._run_team(
                 prompt,
                 team_id,
-                skip_cost_check=True,
                 mode="cascade",
             )
             logger.info(f"[{team_id}] Enrichment cycle completed successfully")
         except Exception as e:
             logger.error(f"[{team_id}] Enrichment cycle failed: {e}")
 
-    async def refresh_info_for_task(self, task: str) -> None:
+    async def refresh_info_for_task(self, task: str, user_context=None) -> None:
         team_id = self._info_refresh_team
         if team_id not in self._team_registry.list_teams():
             return
@@ -109,19 +94,21 @@ class BackgroundManager:
             await self._run_team(
                 prompt,
                 team_id,
-                skip_cost_check=True,
                 mode="cascade",
+                user_context=user_context,
             )
             logger.info(f"[{team_id}] On-demand refresh completed")
         except Exception as e:
             logger.warning(f"[{team_id}] On-demand refresh failed: {e}")
 
-    async def execute_scheduled_job(self, job: ScheduledJob) -> str:
+    async def execute_scheduled_job(self, job: Schedule) -> str:
         """Execution callback for UserScheduler."""
         user_context = {
             "user_id": job.user_id,
             "chat_id": job.chat_id,
             "channel": job.channel,
+            "company_id": job.company_id,
+            "workspace_id": job.workspace_id,
         }
 
         if job.team_id:
@@ -129,12 +116,12 @@ class BackgroundManager:
                 task=job.task,
                 team_id=job.team_id,
                 mode=job.mode,
-                skip_cost_check=True,
                 user_context=user_context,
             )
         else:
             result, _ = await self._run_auto(
                 task=job.task,
+                mode=job.mode,
                 user_context=user_context,
             )
             return result

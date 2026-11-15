@@ -267,3 +267,18 @@ For a generic starting point, use:
 - `POST /api/jobs` with `company_id` succeeds.
 - Background schedules appear in `/api/fleet/status`.
 - `DELETE /api/companies/{id}` removes all company-scoped runtime resources.
+
+## Substrate execution scope
+
+Registering a company creates business declarations, not infrastructure grants.
+Before submitting tasks, configure that company's Substrate atespace/template in
+`substrate.scopes`, mount only its private directory, approved shared teams and
+owned workspaces, and inject model/tool credentials through scoped egress policy.
+See [deployment and persistence](../deploy/substrate/README.md). Workspace entries
+require `company_id` and a matching persistent `storage_id`. Company/user/workspace
+identity is retained in scheduled jobs.
+
+Runtime calls use the complete team ID shown by the team API (for example,
+`acme/research`). Inline manifest team IDs describe company-local directories
+and are resolved when declarations are created. CompanyMemoryNamespace methods
+require the complete runtime ID and do not add a company prefix for callers.

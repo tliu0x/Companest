@@ -7,7 +7,7 @@ from .manager import (
 from .dreamer import Dreamer, DreamerError
 from .backend import MemoryBackend, FileBackend
 from .search import MemorySearchService
-from .qdrant_backend import QdrantBackend
+from .history import MemoryConflict, memory_provenance
 
 __all__ = [
     "MemoryManager",
@@ -18,6 +18,7 @@ __all__ = [
     "DreamerError",
     "MemoryBackend",
     "FileBackend",
-    "QdrantBackend",
     "MemorySearchService",
+    "MemoryConflict",
+    "memory_provenance",
 ]

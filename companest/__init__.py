@@ -15,7 +15,7 @@ from .parser import (
 )
 from .memory import (
     MemoryManager, EnrichmentSource, Dreamer, DreamerError,
-    MemoryBackend, FileBackend, QdrantBackend, MemorySearchService,
+    MemoryBackend, FileBackend, MemorySearchService,
 )
 from .agents.pi import Pi, PiConfig
 from .agents.team import AgentTeam, TeamConfig, TeamRegistry
@@ -35,7 +35,6 @@ from .modes import (
     build_default_registry,
     VALID_MODES,
     DefaultMode,
-    LoopMode,
     CouncilMode,
     CollaborativeMode,
 )
@@ -117,7 +116,7 @@ _all_names = [
     "TeamRouter", "SmartRouter", "RoutingDecision", "TeamAssignment", "RoutingBinding",
     "DEFAULT_TOOLS_DENY", "SESSIONS_TOOL_NAMES",
     "ExecutionMode", "ModeRegistry", "build_default_registry", "VALID_MODES",
-    "DefaultMode", "LoopMode", "CouncilMode", "CollaborativeMode",
+    "DefaultMode", "CouncilMode", "CollaborativeMode",
     "CompanestError", "ConfigurationError", "OrchestratorError",
     "GatewayError", "GatewayConnectionError", "GatewayAuthError",
     "MasterError", "JobError", "PiError", "TeamError",

@@ -70,8 +70,7 @@ logs/
 *_analysis.yaml
 analyses/
 
-# Qdrant data
-qdrant_data/
+# Local storage
 storage/
 
 # Model cache

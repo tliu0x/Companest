@@ -1,11 +1,11 @@
-"""Tests for ConditionalMode -lead Pi evaluates and branches."""
+"""Tests for Delegation -lead Pi evaluates and branches."""
 
 import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 
-from companest.modes.conditional import ConditionalMode
+from companest.orchestration.delegation import Delegation
 from companest.agents.team import AgentTeam, TeamConfig
 from companest.agents.pi import PiConfig
 from companest.memory import MemoryManager
@@ -33,7 +33,7 @@ def test_single_step_done(team):
     )
     run_team_fn = AsyncMock()
 
-    result = _execute(ConditionalMode(run_team_fn=run_team_fn), team, "What is 6*7-")
+    result = _execute(Delegation(run_team_fn=run_team_fn), team, "What is 6*7-")
     assert "42" in result
     run_team_fn.assert_not_called()
 
@@ -46,7 +46,7 @@ def test_single_step_route_passes_memory_task_hints(team):
     run_team_fn = AsyncMock(return_value="research result")
 
     result = _execute(
-        ConditionalMode(run_team_fn=run_team_fn), team, "Assess launch readiness",
+        Delegation(run_team_fn=run_team_fn), team, "Assess launch readiness",
         user_context={"company_id": "acme"},
     )
     assert result == "all set"
@@ -63,7 +63,7 @@ def test_max_steps_returns_last_result(team):
     )
     run_team_fn = AsyncMock(return_value="partial result")
 
-    result = _execute(ConditionalMode(run_team_fn=run_team_fn, max_steps=2), team, "complex task")
+    result = _execute(Delegation(run_team_fn=run_team_fn, max_steps=2), team, "complex task")
     assert result == "partial result"
     assert run_team_fn.call_count == 2
 
@@ -72,7 +72,7 @@ def test_no_lead_pi_raises(team):
     team.lead_pi_id = None
 
     with pytest.raises(TeamError, match="no valid lead_pi"):
-        _execute(ConditionalMode(run_team_fn=AsyncMock()), team, "task")
+        _execute(Delegation(run_team_fn=AsyncMock()), team, "task")
 
 
 def test_retry_on_bad_json(team):
@@ -81,7 +81,7 @@ def test_retry_on_bad_json(team):
         '{"done": true, "summary": "fixed"}',
     ])
 
-    assert _execute(ConditionalMode(run_team_fn=AsyncMock()), team, "task") == "fixed"
+    assert _execute(Delegation(run_team_fn=AsyncMock()), team, "task") == "fixed"
     assert team.pis["lead"].run.call_count == 2
 
 
@@ -93,5 +93,5 @@ def test_branch_team_failure_with_accumulated(team):
     ])
     run_team_fn = AsyncMock(side_effect=["step1 result", Exception("team b crashed")])
 
-    result = _execute(ConditionalMode(run_team_fn=run_team_fn, max_steps=5), team, "multi-step")
+    result = _execute(Delegation(run_team_fn=run_team_fn, max_steps=5), team, "multi-step")
     assert result == "step1 result"

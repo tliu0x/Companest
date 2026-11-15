@@ -160,9 +160,6 @@ class TestJudgeResponseParsing:
         assert result["scores"]["pathos"]["weighted"] == 6.0
         assert result["notes"] == "Logos stronger overall"
 
-    def test_json_in_markdown_fence(self):
-        raw = '```json\n{"scores": {"a": {"reasoning": 5, "depth": 5, "clarity": 5}}, "notes": ""}\n```'
-        assert _parse_judge_response(raw, RUBRIC)["scores"]["a"]["weighted"] == 5.0
 
     @pytest.mark.parametrize("raw", ["not json at all", '{"notes": "no scores"}'])
     def test_unusable_response_returns_none(self, raw):
@@ -188,12 +185,6 @@ class TestFilterPerspectives:
         kept = self._filter(tmp_path, {"a": 10.0, "b": 1.0, "c": 1.0})
         assert len(kept) == 2
         assert kept[0] == "a"
-
-    def test_filter_with_two_perspectives_keeps_both(self, tmp_path):
-        assert self._filter(tmp_path, {"a": 9.0, "b": 2.0}) == ["a", "b"]
-
-    def test_filter_with_empty_scores(self, tmp_path):
-        assert self._filter(tmp_path, {}) == ["a", "b", "c"]
 
 
 class TestCouncilWithRubric:

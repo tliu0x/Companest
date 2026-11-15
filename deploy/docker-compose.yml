@@ -1,40 +1,26 @@
 services:
-  master-gateway:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    command: python -m companest.gateway.server --port 19000
-    network_mode: host
-    restart: unless-stopped
-    env_file: .env
-    mem_limit: 256m
-    healthcheck:
-      test: python -c "import socket; s=socket.socket(); s.connect(('127.0.0.1',19000)); s.close()"
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
   companest:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    command: python -m companest serve -c /app/deploy/config.prod.md
-    network_mode: host
     restart: unless-stopped
     env_file: .env
-    mem_limit: 512m
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
-      - companest-data:/app/.companest
+      - companest-control:/var/lib/companest
+      - ${COMPANEST_STATE_MOUNT:?Mount persistent business state}:/mnt/companest/state
+      - ${COMPANEST_WORKSPACE_MOUNT:?Mount persistent workspaces}:/mnt/companest/workspaces
+      - ${COMPANEST_LOCK_MOUNT:?Mount shared locks}:/mnt/companest/locks
+      - ${COMPANEST_CONFIG:?Set control config path}:/etc/companest/config.md:ro
+      - ${SUBSTRATE_KUBECONFIG:?Set scoped kubeconfig path}:/etc/companest/substrate-kubeconfig:ro
     environment:
-      - LITELLM_MASTER_KEY
-      - LITELLM_DEFAULT_KEY
+      - COMPANEST_API_TOKEN
+      - COMPANEST_MASTER_TOKEN
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
       - AWS_DEFAULT_REGION
       - COMPANEST_S3_BUCKET
-    depends_on:
-      master-gateway:
-        condition: service_healthy
     healthcheck:
       test: python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
       interval: 30s
@@ -42,4 +28,4 @@ services:
       retries: 3
 
 volumes:
-  companest-data:
+  companest-control:

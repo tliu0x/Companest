@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from companest.modes import ModeRegistry, build_default_registry, DefaultMode
+from companest.modes import build_default_registry, DefaultMode
 from companest.agents.team import AgentTeam, TeamConfig
 from companest.agents.pi import PiConfig
 from companest.memory import MemoryManager
@@ -30,25 +30,11 @@ class TestModeRegistry:
     def test_build_default_registry(self):
         registry = build_default_registry()
         modes = registry.list_modes()
-        for name in ("default", "cascade", "loop", "council", "collaborative"):
+        for name in ("default", "council", "collaborative"):
             assert name in modes
         assert isinstance(registry.get("default"), DefaultMode)
         assert registry.get("default")._cascade is False
-        assert isinstance(registry.get("cascade"), DefaultMode)
-        assert registry.get("cascade")._cascade is True
-
-    def test_get_unknown_raises(self):
-        with pytest.raises(KeyError, match="Unknown execution mode"):
-            build_default_registry().get("nonexistent")
-
-    def test_register_with_name_override(self):
-        registry = ModeRegistry()
-        mode = DefaultMode(cascade=True)
-        assert mode.name == "cascade"
-        assert DefaultMode().name == "default"
-        registry.register(mode, name="my_cascade")
-        assert registry.list_modes() == ["my_cascade"]
-        assert registry.get("my_cascade") is mode
+        assert registry.list_modes() == ["collaborative", "council", "default"]
 
 
 class TestDefaultModeExecution:

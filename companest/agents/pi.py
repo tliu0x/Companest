@@ -11,6 +11,7 @@ ProgressCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 
 from ..utils import run_sync
 from ..memory import FileBackend, MemoryManager, MemorySearchService
+from ..memory.history import PROVENANCE
 from .tools import ToolRegistry, ToolContext, DEFAULT_TOOLS_DENY
 from .cascade import CascadeEngine, CascadeMetrics
 from ..exceptions import PiError
@@ -76,6 +77,7 @@ class Pi:
         user_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         context_token = self._user_context.set(user_context)
+        provenance_token = PROVENANCE.set({**PROVENANCE.get(), "kind": "agent", "pi_id": self.id})
         try:
             system = await run_sync(self.memory.build_system_prompt,
                 self.team_id, self.id,
@@ -141,6 +143,7 @@ class Pi:
             raise last_error
         finally:
             self._user_context.reset(context_token)
+            PROVENANCE.reset(provenance_token)
 
     @staticmethod
     def _resolve_memory_task_hint(
@@ -175,7 +178,7 @@ class Pi:
 
     @staticmethod
     def _format_relevant_memory_entry(entry: Dict[str, Any]) -> str:
-        prefix = f"- {entry.get('key', '')}"
+        prefix = f"- {entry.get('key', '')} (v{entry.get('version', 1)}, {entry.get('category', 'unclassified')})"
         source = str(entry.get("source", "") or "")
         if source and source != "active":
             prefix += " [archive]"
