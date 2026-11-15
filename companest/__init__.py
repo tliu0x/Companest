@@ -31,7 +31,6 @@ from .parser import (
     validate_config_file,
     generate_config_template,
 )
-from .watcher import ConfigWatcher, ConfigChangeEvent, HotReloadOrchestrator
 from .memory import (
     MemoryManager, EnrichmentSource, Dreamer, DreamerError,
     MemoryBackend, FileBackend, QdrantBackend, MemorySearchService,
@@ -61,23 +60,6 @@ from .modes import (
 )
 from .company import CompanyConfig, CompanyRegistry, CompanyError, GlobalBinding, ResolveResult
 from .component import CompanyComponent, CompanyContext, CompanyMemoryNamespace
-from .evolution import (
-    EvolutionEngine,
-    EvolutionProposal,
-    ObservationSource,
-    Observation,
-    SourceType,
-    SourceTier,
-    ProposalStatus,
-)
-from .canary import CanaryManager, CanaryDeployment, CanaryStage
-from .app import Companest, CompanyBuilder
-from .templates import (
-    BUILTIN_TEMPLATES,
-    get_template,
-    list_templates,
-    TemplateNotFoundError,
-)
 from .output import OutputSink, MemorySink, WebhookSink, CallbackSink, TelegramReportSink
 from .ceo_engine import build_cycle_prompt, generate_ceo_soul
 from .exceptions import (
@@ -94,8 +76,6 @@ from .exceptions import (
     CostGateError,
     ArchiverError,
     SchedulerError,
-    EvolutionError,
-    CanaryError,
 )
 
 #  Optional imports (may fail if extra deps not installed) 
@@ -142,15 +122,6 @@ _all_names = [
     "CompanyConfig", "CompanyRegistry", "CompanyError", "GlobalBinding", "ResolveResult",
     # Component
     "CompanyComponent", "CompanyContext", "CompanyMemoryNamespace",
-    # Evolution
-    "EvolutionEngine", "EvolutionProposal", "ObservationSource", "Observation",
-    "SourceType", "SourceTier", "ProposalStatus",
-    # Canary
-    "CanaryManager", "CanaryDeployment", "CanaryStage",
-    # SDK entry point
-    "Companest", "CompanyBuilder",
-    # Templates
-    "BUILTIN_TEMPLATES", "get_template", "list_templates", "TemplateNotFoundError",
     # Output sinks
     "OutputSink", "MemorySink", "WebhookSink", "CallbackSink", "TelegramReportSink",
     # CEO engine
@@ -172,8 +143,6 @@ _all_names = [
     # Parser
     "MarkdownConfigParser", "ParseResult", "CodeBlock",
     "parse_markdown_config", "validate_config_file", "generate_config_template",
-    # Watcher
-    "ConfigWatcher", "ConfigChangeEvent", "HotReloadOrchestrator",
     # Pi Agent Teams
     "MemoryManager", "EnrichmentSource", "Dreamer", "DreamerError",
     "Pi", "PiConfig",
@@ -194,7 +163,6 @@ _all_names = [
     "GatewayError", "GatewayConnectionError", "GatewayAuthError",
     "MasterError", "JobError", "PiError", "TeamError",
     "CostGateError", "ArchiverError", "SchedulerError", "CompanyError",
-    "EvolutionError", "CanaryError",
 ]
 
 __all__ = [name for name in _all_names if globals().get(name) is not None]

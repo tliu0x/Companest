@@ -228,8 +228,7 @@ class CompanestConfig(BaseModel):
         default="file",
         description=(
             "Memory backend type: 'file' (default), "
-            "'qdrant' (file + vector search via Qdrant). "
-            "'viking' is deprecated and falls back to 'file'."
+            "'qdrant' (file + vector search via Qdrant)."
         ),
     )
     memory_config: Dict[str, Any] = Field(

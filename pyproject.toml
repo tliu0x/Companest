@@ -49,16 +49,13 @@ qdrant = [
     "qdrant-client>=1.9.0",
     "fastembed>=0.3.0",
 ]
-ui = [
-    "nicegui>=2.0.0",
-]
 scheduler = [
     "APScheduler>=3.10.0,<4.0.0",
     "SQLAlchemy>=2.0.0",
     "aiosqlite>=0.19.0",
 ]
 all = [
-    "companest-orchestrator[claude,openai,server,gateway,s3,qdrant,scheduler,ui]",
+    "companest-orchestrator[claude,openai,server,gateway,s3,qdrant,scheduler]",
 ]
 dev = [
     "companest-orchestrator[all]",

@@ -256,7 +256,7 @@ class CompanestAPIServer:
             if self.orchestrator and hasattr(self.orchestrator, "scheduler"):
                 await self.orchestrator.scheduler.stop()
                 logger.info("Scheduler stopped via lifespan")
-            from .feeds import close_client as close_feed_client
+            from .knowledge.feeds import close_client as close_feed_client
             await close_feed_client()
             if self._event_store:
                 await self._event_store.close()
@@ -292,8 +292,8 @@ class CompanestAPIServer:
                     # Skip CORS preflight requests
                     if request.method == "OPTIONS":
                         return await call_next(request)
-                    # Skip auth for health check, admin UI, console frontend, and WebSocket paths
-                    if request.url.path == "/health" or request.url.path.startswith(("/admin", "/_nicegui", "/ws/", "/console")):
+                    # Skip auth for health check and WebSocket paths
+                    if request.url.path == "/health" or request.url.path.startswith("/ws/"):
                         return await call_next(request)
                     # Check bearer token
                     auth_header = request.headers.get("Authorization", "")
@@ -1079,56 +1079,20 @@ class CompanestAPIServer:
             self.orchestrator.company_registry.save_global_bindings(parsed)
             return {"status": "saved", "count": len(parsed)}
 
-        # Mount NiceGUI admin UI (optional  requires nicegui package)
-        if api_token:
-            try:
-                from .admin import init_admin
-                init_admin(app, self.orchestrator, api_token)
-                logger.info("Admin UI mounted at /admin")
-            except ImportError:
-                logger.info("NiceGUI not installed, admin UI disabled")
-
-        # Mount console frontend (static files from Vite build)
-        console_dist = Path(__file__).parent.parent / "console" / "dist"
-        if console_dist.is_dir():
-            from starlette.responses import FileResponse
-
-            @app.get("/console/{rest_of_path:path}")
-            async def console_spa(rest_of_path: str):
-                # Serve static assets if they exist, otherwise serve index.html (SPA fallback)
-                file_path = (console_dist / rest_of_path).resolve()
-                # Prevent path traversal — resolved path must stay within dist directory
-                if rest_of_path and file_path.is_relative_to(console_dist.resolve()) and file_path.is_file():
-                    return FileResponse(file_path)
-                return FileResponse(console_dist / "index.html")
-
-            # Serve /console root
-            @app.get("/console")
-            async def console_root():
-                return FileResponse(console_dist / "index.html")
-
-            logger.info(f"Console frontend mounted at /console (serving from {console_dist})")
-        else:
-            logger.info("Console frontend not built (console/dist not found), skipping mount")
-
         # --- Public Knowledge & Digest Routers (v1) ---
         import os
         if os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true"):
-            from .public_knowledge.router import create_public_knowledge_router
+            from .knowledge.public import create_public_knowledge_router
             app.include_router(create_public_knowledge_router())
             logger.info("Public Knowledge API enabled")
 
-            from .digests.router import router as digest_router
-            from .digests.router import configure as configure_digests
-            from .digests.s3_store import DigestS3Store
-            digest_s3 = DigestS3Store(
+            from .knowledge.digests import DigestS3Store, create_digest_router
+            app.include_router(create_digest_router(DigestS3Store(
                 bucket=os.environ.get("DIGEST_S3_BUCKET", ""),
                 prefix=os.environ.get("DIGEST_S3_PREFIX", "companest-digests/"),
                 region=os.environ.get("DIGEST_S3_REGION", "us-east-1"),
                 endpoint_url=os.environ.get("DIGEST_S3_ENDPOINT_URL") or None,
-            )
-            configure_digests(digest_s3)
-            app.include_router(digest_router)
+            )))
             logger.info("Digest API enabled")
 
         self._app = app

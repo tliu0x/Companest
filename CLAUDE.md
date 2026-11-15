@@ -9,16 +9,17 @@
 
 - Companest is a multi-company control plane for agent-native teams, jobs, schedules, memory, and company-scoped execution.
 - The codebase mixes CLI orchestration, API serving, background execution, company registration, team routing, memory backends, and public knowledge tooling.
-- Optional extras in `pyproject.toml` gate major capabilities such as server mode, scheduler support, gateway mode, Qdrant, UI, and provider integrations.
+- Optional extras in `pyproject.toml` gate major capabilities such as server mode, scheduler support, gateway mode, Qdrant, and provider integrations.
 
 ## Start Here
 
 - CLI entry and operator workflows: `companest/cli.py`
-- App and API serving: `companest/app.py`, `companest/server.py`, `companest/admin.py`
+- API serving: `companest/server.py`
 - Configuration and discovery: `companest/config.py`, `README.md`, `examples/minimal-setup/.companest/config.md`
 - Teams, Pis, routing, and execution modes: `companest/team.py`, `companest/pi.py`, `companest/router.py`, `companest/modes/`, `companest/orchestrator.py`, `companest/multi_team.py`
-- Jobs, background work, and scheduling: `companest/jobs.py`, `companest/background.py`, `companest/scheduler.py`, `companest/user_scheduler.py`, `companest/watcher.py`
-- Memory, digests, and public knowledge: `companest/memory/`, `companest/digests/`, `companest/public_knowledge/`
+- Jobs, background work, and scheduling: `companest/jobs.py`, `companest/background.py`, `companest/scheduler.py`, `companest/user_scheduler.py`
+- Memory: `companest/memory/`
+- Feeds, public knowledge, and digests: `companest/knowledge/`
 - Company onboarding and public examples: `examples/`, `deploy/config.prod.md`, `docs/`
 
 ## Source Of Truth
@@ -41,9 +42,9 @@ python -m compileall companest tests -q
 ## Working Rules
 
 - Keep examples runnable. If you change config shape, manifests, or onboarding flow, update `README.md`, `examples/`, and `deploy/config.prod.md` in the same change.
-- For CLI or API behavior changes, read `companest/cli.py`, `companest/app.py`, `companest/server.py`, and the relevant tests before editing.
+- For CLI or API behavior changes, read `companest/cli.py`, `companest/server.py`, and the relevant tests before editing.
 - For team-mode behavior changes, inspect the matching file in `companest/modes/` and the paired tests in `tests/test_modes.py`, `tests/test_team_mode.py`, and nearby mode-specific tests.
-- For memory, digest, or public-knowledge changes, run the focused tests such as `tests/test_memory_*`, `tests/test_digests.py`, and `tests/test_public_knowledge.py`.
+- For memory or knowledge (feeds, digests, public knowledge) changes, run the focused tests such as `tests/test_memory_*`, `tests/test_feeds.py`, `tests/test_digests.py`, and `tests/test_public_knowledge.py`.
 - Keep changes scoped. Do not mix provider, scheduler, and API refactors unless the task truly spans them.
 
 ## Code Conventions

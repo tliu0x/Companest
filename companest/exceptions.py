@@ -158,12 +158,3 @@ class CompanyError(CompanestError):
     """Raised for company registry failures."""
     pass
 
-
-class EvolutionError(CompanestError):
-    """Raised for evolution engine failures."""
-    pass
-
-
-class CanaryError(CompanestError):
-    """Raised for canary workflow failures."""
-    pass

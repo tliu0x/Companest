@@ -237,12 +237,6 @@ class CompanestOrchestrator:
                     "falling back to file backend.", e,
                 )
                 self.memory_backend = FileBackend(self.memory)
-        elif requested_backend == "viking":
-            logger.warning(
-                "Memory backend 'viking' is deprecated; use 'qdrant' instead. "
-                "Falling back to file backend."
-            )
-            self.memory_backend = FileBackend(self.memory)
         else:
             logger.warning(
                 "Unknown memory backend %r; falling back to file backend.",
@@ -384,28 +378,6 @@ class CompanestOrchestrator:
         #  Workspace Registry (for coding teams) 
         self.workspace_registry = WorkspaceRegistry(base_path)
         self.workspace_registry.load()
-
-        #  Evolution Engine + Canary Manager 
-        from .evolution import EvolutionEngine
-        from .canary import CanaryManager
-
-        self.evolution = EvolutionEngine(
-            memory=self.memory,
-            event_bus=self.events,
-        )
-        self.canary = CanaryManager(
-            memory=self.memory,
-            memory_backend=self.memory_backend,
-            event_bus=self.events,
-        )
-
-        # Schedule evolution checks (every 6 hours)
-        self.scheduler.add(
-            "evolution_cycle",
-            self.evolution.run_cycle,
-            interval=21600,
-            run_on_start=False,
-        )
 
         #  Company Registry + CEO Agents 
         self.company_registry = CompanyRegistry(base_path)

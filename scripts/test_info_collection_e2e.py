@@ -22,7 +22,7 @@ load_dotenv()
 
 import anthropic
 
-from companest.feeds import brave_search, fetch_rss, fetch_reddit, fetch_hn, fetch_x
+from companest.knowledge.feeds import brave_search, fetch_rss, fetch_reddit, fetch_hn, fetch_x
 from companest.memory import MemoryManager
 
 logging.basicConfig(
