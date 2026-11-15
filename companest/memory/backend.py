@@ -58,22 +58,6 @@ class MemoryBackend(ABC):
     def get_all_stats(self) -> Dict[str, Any]:
         ...
 
-    @property
-    def supports_semantic_search(self) -> bool:
-        return False
-
-    def semantic_search(
-        self,
-        team_id: str,
-        query: str,
-        *,
-        limit: int = 20,
-        include_archive: bool = True,
-    ) -> List[Dict[str, Any]]:
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support semantic search"
-        )
-
 
 class FileBackend(MemoryBackend):
     """Thin adapter that delegates to MemoryManager."""

@@ -1,9 +1,7 @@
-import logging
-
 import pytest
 
 from companest.config import CompanestConfig
-from companest.memory import FileBackend, MemoryManager, MemorySearchService, QdrantBackend
+from companest.memory import FileBackend, MemoryManager, MemorySearchService
 from companest.orchestration.orchestrator import CompanestOrchestrator
 from companest.agents.pi import Pi, PiConfig
 
@@ -13,27 +11,13 @@ def _make_memory(tmp_path):
     return MemoryManager(str(tmp_path))
 
 
-def test_orchestrator_falls_back_to_file_backend_for_unknown_backend(tmp_path, caplog):
+def test_orchestrator_initializes_file_backend(tmp_path):
     (tmp_path / "teams").mkdir()
-    orchestrator = CompanestOrchestrator(CompanestConfig(memory_backend="viking"))
-
-    with caplog.at_level(logging.WARNING):
-        orchestrator.init_teams(str(tmp_path))
+    orchestrator = CompanestOrchestrator(CompanestConfig())
+    orchestrator.init_teams(str(tmp_path))
 
     assert isinstance(orchestrator.memory_backend, FileBackend)
-    assert "Unknown memory backend" in caplog.text
-
-
-@pytest.mark.parametrize("mode", ["semantic", "hybrid"])
-def test_semantic_modes_downgrade_to_exact_for_file_backend(tmp_path, mode):
-    memory = _make_memory(tmp_path)
-    memory.write_team_memory("alpha", "roadmap.json", {"milestone": "launch"})
-
-    service = MemorySearchService(FileBackend(memory))
-    results = service.search("alpha", "roadmap", mode=mode, explain=True)
-
-    assert [result["key"] for result in results] == ["roadmap.json"]
-    assert all(result["_mode"] == "exact" for result in results)
+    assert orchestrator.tool_registry.memory_backend is orchestrator.memory_backend
 
 
 def test_retrieve_for_task_uses_keywords_and_content_fallback(tmp_path):
@@ -152,33 +136,3 @@ async def test_pi_run_prefers_memory_task_hint(tmp_path, monkeypatch):
 
     assert "launch-roadmap.json" in captured["system"]
     assert "Launch roadmap for the release." in captured["system"]
-
-
-def test_qdrant_backend_file_delegation(tmp_path, monkeypatch):
-    backend = QdrantBackend(manager=_make_memory(tmp_path), in_memory=True)
-    # File delegation does not need a vector server or downloaded embeddings.
-    monkeypatch.setattr(backend, "_upsert_entry", lambda *_: None)
-
-    backend.write("alpha", "notes.json", {"topic": "memory research"})
-    assert backend.read("alpha", "notes.json") == {"topic": "memory research"}
-    assert "notes.json" in backend.list_keys("alpha")
-
-
-def test_qdrant_backend_search_service_resolves_auto_mode(tmp_path):
-    service = MemorySearchService(QdrantBackend(manager=_make_memory(tmp_path), in_memory=True))
-
-    assert service._choose_mode("auto", "roadmap") == "semantic"
-    assert service._choose_mode("auto", "what is the project roadmap status") == "hybrid"
-
-
-def test_orchestrator_initializes_qdrant_backend(tmp_path):
-    (tmp_path / "teams").mkdir()
-    config = CompanestConfig(
-        memory_backend="qdrant",
-        memory_config={"in_memory": True},
-    )
-    orchestrator = CompanestOrchestrator(config)
-    orchestrator.init_teams(str(tmp_path))
-
-    assert isinstance(orchestrator.memory_backend, QdrantBackend)
-    assert orchestrator.memory_backend.supports_semantic_search is True

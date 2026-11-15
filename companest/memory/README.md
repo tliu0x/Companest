@@ -7,23 +7,25 @@
 | --- | --- |
 | [manager.py](manager.py) | 团队/公司记忆读写、索引、归档、缓存失效、system prompt 和信息补全；使用共享文件锁协调进程间更新。 |
 | [backend.py](backend.py) | MemoryBackend 接口与 FileBackend 委派，保持文件业务操作一致。 |
-| [qdrant_backend.py](qdrant_backend.py) | 文件存储加派生向量检索；沿用原始 team_id 做过滤，可从文件重建团队索引。 |
-| [search.py](search.py) | exact/semantic/hybrid 检索、结果去重和排序；为任务选取有限预算的记忆片段。 |
+| [search.py](search.py) | 按 key、摘要和标签做关键词检索，包含可选归档查询、去重和排序；为任务选取有限预算的记忆片段。 |
 | [dreamer.py](dreamer.py) | 评分、压缩、GC、概要、长期合并；失败时保留/恢复原数据，记录 dream log。 |
 | [archiver.py](archiver.py) | S3 记忆快照上传与恢复，约束归档路径，避免恢复越界。 |
 | [__init__.py](__init__.py) | 导出统一的记忆接口。 |
 
-## 一个 team_id 贯穿所有后端
+## FileBackend 与原始 team_id
 
-Qdrant 使用一个 `companest_memory_v2` 集合，payload 中直接保存原始 team_id。
-例如 `acme/research` 和 `acme_research` 保持不同值，不再替换分隔符，也不生成第二个团队 ID。
-所有语义查询带精确 team_id 过滤，返回值再校验归属。
-每条记忆的 Qdrant 原生 UUID 由 `(team_id, memory_key)` 确定；这是记录主键，确保不同团队的同名文件互不覆盖或删除。
+配置默认为 `memory_backend: file`，只支持现有 FileBackend。它把原始 `team_id` 直接传给 MemoryManager，
+继续使用已经注册的团队目录。例如 `acme/research` 和 `acme_research` 保持不同值，
+不替换分隔符，也不生成第二个团队 ID。已有记忆文件、路径和元数据保持原样。
 
-旧的按团队拼接集合名可能发生碰撞，因此新实现不回退读取旧集合。
-已有 Qdrant 部署需要使用配置一致的 `backend.reindex_team(team_id)` 从文件重建派生索引；错误会向调用者报告。
-升级步骤见 [部署说明](../../deploy/substrate/README.md#existing-qdrant-indexes)。
-actor 仅应获得所在公司允许的数据服务权限；共享 Qdrant 的管理员凭据不能作为公司的隔离凭据。
+`memory/.index.json` 记录文件的重要性、摘要、标签等元数据；检索按 key、摘要和标签做关键词匹配。
+`memory_search` 不再接受 mode 参数；解释结果中的 `_mode` 保持为 `exact`。
+任务检索仍可读取命中文件生成有字符预算的上下文。没有向量服务、embedding 下载或 FTS5。
+旧的 `memory_config` 必须从配置中删除，其他后端名称会在配置校验时被拒绝。
+升级步骤见 [部署说明](../../deploy/substrate/README.md#file-memory)。
+
+公司访问权限由调用边界和公司命名空间校验；actor 只挂载所属公司及获准共享团队的数据。
+FileBackend 是存储适配器，不能替代这些权限检查和挂载隔离。
 
 ## 后台工作
 

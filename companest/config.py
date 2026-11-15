@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Literal
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
@@ -169,17 +169,19 @@ class CompanestConfig(BaseModel):
         description="External MCP servers shared across all teams",
     )
 
-    memory_backend: str = Field(
-        default="file",
-        description=(
-            "Memory backend type: 'file' (default), "
-            "'qdrant' (file + vector search via Qdrant)."
-        ),
+    memory_backend: Literal["file"] = Field(
+        default="file", description="Persistent file memory with keyword retrieval",
     )
-    memory_config: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Backend-specific memory configuration",
-    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_memory_config(cls, value):
+        if isinstance(value, dict) and "memory_config" in value:
+            raise ValueError(
+                "memory_config was removed; use memory_backend: file "
+                "without backend-specific options"
+            )
+        return value
 
     name: str = Field(default="companest-config", description="Configuration name")
     version: str = Field(default="1.0", description="Configuration version")

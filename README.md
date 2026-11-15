@@ -174,6 +174,19 @@ For jobs, supply `context.mode`, `context.cascade`, `context.workflow`, or the
 corresponding CLI flags. Budget checks remain mandatory even when old callers
 pass `skip_cost_check` / `--skip-cost`.
 
+## Memory
+
+Memory uses the existing FileBackend with `memory_backend: file` (the default
+and only supported value). Team files and their `.index.json` metadata stay in
+the persistent data mount. Retrieval matches keys, summaries and tags by keyword;
+task context still includes relevant snippets within a character budget.
+No vector database, embedding model or FTS5 is required.
+
+Existing IDs, file paths and memory data are unchanged. Remove the retired
+`memory_config` block from older configs; unsupported backend names fail
+validation. See [memory details](companest/memory/README.md) and
+[upgrade notes](deploy/substrate/README.md#file-memory).
+
 ## Deployment
 
 ### Docker

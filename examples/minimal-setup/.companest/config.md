@@ -20,6 +20,7 @@ A minimal local development configuration for the public sample.
   "debug": true,
   "global_timeout": 300,
   "data_dir": "/mnt/companest/state",
+  "memory_backend": "file",
   "storage_lock_dir": "/mnt/companest/locks",
   "substrate": {
     "executable": "kubectl-ate",

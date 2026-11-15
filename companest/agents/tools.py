@@ -191,7 +191,6 @@ def create_memory_tool_defs(
         results = _search_service.search(
             team_id,
             args["query"],
-            mode=args.get("mode", "auto"),
             limit=int(args.get("limit", 20)),
             include_archive=include_archive,
             explain=explain,
@@ -230,22 +229,12 @@ def create_memory_tool_defs(
             name="memory_search",
             description=(
                 "Search team memory and archive by keyword. Returns matching entries "
-                "ranked by relevance. Semantic and hybrid requests currently "
-                "fall back to exact search unless a semantic backend is available."
+                "ranked by relevance."
             ),
             parameters={
                 "query": {
                     "type": "string",
                     "description": "Search term (matches against key names, summary, and tags)",
-                },
-                "mode": {
-                    "type": "string",
-                    "description": (
-                        "Search mode: auto (default), exact, semantic, hybrid. "
-                        "Semantic and hybrid currently downgrade to exact "
-                        "unless the configured backend really supports them."
-                    ),
-                    "default": "auto",
                 },
                 "limit": {
                     "type": "integer",

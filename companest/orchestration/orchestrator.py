@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional, Tuple, Union
 
 from ..utils import run_sync, finish_on_cancel
 from ..config import CompanestConfig
-from ..memory import MemoryManager, Dreamer, EnrichmentSource, FileBackend, QdrantBackend
+from ..memory import MemoryManager, Dreamer, EnrichmentSource, FileBackend
 from ..agents.team import TeamConfig, TeamRegistry
 from .router import SmartRouter, RoutingDecision, TeamAssignment
 from .cost_gate import CostGate, UserNotifier
@@ -158,33 +158,7 @@ class CompanestOrchestrator:
         proxy = self.config.proxy if self.config.proxy.enabled else None
         self.memory = MemoryManager(base_path, lock_dir=self.config.storage_lock_dir)
 
-        requested_backend = (self.config.memory_backend or "file").strip().lower()
-        if requested_backend == "file":
-            self.memory_backend = FileBackend(self.memory)
-        elif requested_backend == "qdrant":
-            mc = self.config.memory_config
-            try:
-                self.memory_backend = QdrantBackend(
-                    manager=self.memory,
-                    qdrant_url=mc.get("qdrant_url", "http://localhost:6333"),
-                    qdrant_api_key=mc.get("qdrant_api_key"),
-                    embedding_model=mc.get("embedding_model", "BAAI/bge-small-en-v1.5"),
-                    prefer_grpc=mc.get("prefer_grpc", False),
-                    in_memory=mc.get("in_memory", False),
-                )
-                logger.info("Qdrant memory backend initialized")
-            except Exception as e:
-                logger.warning(
-                    "Failed to initialize Qdrant backend (%s); "
-                    "falling back to file backend.", e,
-                )
-                self.memory_backend = FileBackend(self.memory)
-        else:
-            logger.warning(
-                "Unknown memory backend %r; falling back to file backend.",
-                self.config.memory_backend,
-            )
-            self.memory_backend = FileBackend(self.memory)
+        self.memory_backend = FileBackend(self.memory)
         self.tool_registry.memory_backend = self.memory_backend
 
         self.cascade_engine = CascadeEngine()

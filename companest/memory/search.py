@@ -2,14 +2,12 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List
 
 from .backend import MemoryBackend
 
 logger = logging.getLogger(__name__)
 
-SearchMode = Literal["auto", "exact", "semantic", "hybrid"]
-_VALID_MODES = {"auto", "exact", "semantic", "hybrid"}
 _COMMON_QUERY_TERMS = {
     "a",
     "an",
@@ -65,28 +63,12 @@ class MemorySearchService:
         team_id: str,
         query: str,
         *,
-        mode: SearchMode = "auto",
         limit: int = 20,
         include_archive: bool = True,
         explain: bool = False,
     ) -> List[dict]:
-        resolved_mode = self._choose_mode(mode, query)
-        logger.debug(
-            "memory_search team=%s query=%r mode=%s->%s limit=%d",
-            team_id, query, mode, resolved_mode, limit,
-        )
-
-        results: List[SearchResult] = []
-
-        if resolved_mode in ("exact", "hybrid"):
-            results.extend(self._exact_search(
-                team_id, query, include_archive=include_archive,
-            ))
-
-        if resolved_mode in ("semantic", "hybrid"):
-            results.extend(self._semantic_search(
-                team_id, query, include_archive=include_archive,
-            ))
+        logger.debug("memory_search team=%s query=%r limit=%d", team_id, query, limit)
+        results = self._exact_search(team_id, query, include_archive=include_archive)
 
         seen: Dict[tuple, SearchResult] = {}
         for result in results:
@@ -103,7 +85,6 @@ class MemorySearchService:
         team_id: str,
         task: str,
         *,
-        mode: SearchMode = "auto",
         limit: int = 6,
         budget_chars: int = 2400,
         include_archive: bool = False,
@@ -119,7 +100,6 @@ class MemorySearchService:
         for result in self.search(
             team_id,
             task,
-            mode=mode,
             limit=search_limit,
             include_archive=include_archive,
             explain=True,
@@ -131,7 +111,6 @@ class MemorySearchService:
             for result in self.search(
                 team_id,
                 term,
-                mode="exact",
                 limit=term_limit,
                 include_archive=include_archive,
                 explain=True,
@@ -164,7 +143,7 @@ class MemorySearchService:
                 if isinstance(result.get("tags"), list) else [],
                 "importance": float(result.get("importance", 0.0) or 0.0),
                 "score": float(result.get("_score", 0.0) or 0.0),
-                "mode": result.get("_mode", mode),
+                "mode": result.get("_mode", "exact"),
                 "matched_terms": list(result.get("_matched_terms", [])),
             }
 
@@ -187,35 +166,6 @@ class MemorySearchService:
                 break
 
         return selected
-
-    def _choose_mode(self, requested: str, query: str) -> str:
-        if requested not in _VALID_MODES:
-            logger.warning(
-                "Unknown memory search mode %r, falling back to exact",
-                requested,
-            )
-            return "exact"
-
-        has_semantic = self._backend.supports_semantic_search
-        if requested in ("semantic", "hybrid") and not has_semantic:
-            logger.info(
-                "Backend %s does not support semantic search; "
-                "downgrading requested mode %s to exact",
-                type(self._backend).__name__,
-                requested,
-            )
-            return "exact"
-
-        if requested != "auto":
-            return requested
-
-        if not has_semantic:
-            return "exact"
-
-        word_count = len(query.strip().split())
-        if word_count >= 3:
-            return "hybrid"
-        return "semantic"
 
     def _exact_search(
         self,
@@ -341,9 +291,7 @@ class MemorySearchService:
         term_hits = len(result.get("_matched_terms", []))
         score = float(result.get("_score", 0.0) or 0.0)
         importance = float(result.get("importance", 0.0) or 0.0)
-        mode = str(result.get("_mode", "") or "")
-        semantic_bonus = 0.05 if mode in {"semantic", "hybrid"} else 0.0
-        return (score + semantic_bonus + (0.08 * min(term_hits, 5)), term_hits, importance)
+        return (score + (0.08 * min(term_hits, 5)), term_hits, importance)
 
     def _result_snippet(self, team_id: str, result: dict, *, max_chars: int = 420) -> str:
         """Return a prompt-friendly snippet for a search result."""
@@ -394,35 +342,3 @@ class MemorySearchService:
         """Rough char estimate for a formatted retrieval entry."""
         tags_len = sum(len(str(tag)) for tag in entry["tags"])
         return len(entry["key"]) + len(entry["text"]) + tags_len + 48
-
-    def _semantic_search(
-        self,
-        team_id: str,
-        query: str,
-        *,
-        include_archive: bool = True,
-    ) -> List[SearchResult]:
-        try:
-            hits = self._backend.semantic_search(
-                team_id, query,
-                include_archive=include_archive,
-            )
-        except Exception as e:
-            logger.warning(
-                "Semantic search failed for team %s: %s", team_id, e,
-            )
-            return []
-
-        results: List[SearchResult] = []
-        for hit in hits:
-            results.append(SearchResult(
-                key=hit.get("key", ""),
-                source=hit.get("source", "active"),
-                score=float(hit.get("score", 0.0)),
-                mode="semantic",
-                meta={
-                    key: value for key, value in hit.items()
-                    if key not in ("key", "source", "score")
-                },
-            ))
-        return results

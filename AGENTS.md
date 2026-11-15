@@ -9,7 +9,7 @@
 
 - Companest is a multi-company control plane for agent-native teams, jobs, schedules, memory, and company-scoped execution.
 - The codebase mixes CLI orchestration, API serving, background execution, company registration, team routing, memory backends, and public knowledge tooling.
-- Optional extras in `pyproject.toml` gate major capabilities such as server mode, scheduler support, gateway mode, Qdrant, and provider integrations.
+- Optional extras in `pyproject.toml` gate major capabilities such as server mode, scheduler support, gateway mode, and provider integrations. Memory uses FileBackend and keyword retrieval without an external index service.
 
 ## Start Here
 
@@ -59,7 +59,7 @@ python -m compileall companest tests -q
 - Keep changes scoped. Do not mix provider, scheduler, and API refactors unless the task truly spans them.
 - Update the affected unit README when responsibilities, data boundaries, or modules change; update `companest/jobs/README.md` when adding or changing a job.
 - Keep execution fields in snake_case end to end: `job_id`, `schedule_id`, `company_id`, `team_id`, `workspace_id`, and `model`. Do not translate them into `id`/`target_team`/`target_team_id`/`target_model` at API or actor boundaries.
-- Create each ID once and pass its value unchanged. Reuse the canonical `team_id` across routing, tools, files and vector filters; do not rewrite it into a second tenant identifier. Migrate old persisted schemas once instead of maintaining runtime aliases.
+- Create each ID once and pass its value unchanged. Reuse the canonical `team_id` across routing, tools, files and retrieval; do not rewrite it into a second tenant identifier. Migrate old persisted schemas once instead of maintaining runtime aliases.
 
 ## Code Conventions
 

@@ -15,7 +15,7 @@ from .parser import (
 )
 from .memory import (
     MemoryManager, EnrichmentSource, Dreamer, DreamerError,
-    MemoryBackend, FileBackend, QdrantBackend, MemorySearchService,
+    MemoryBackend, FileBackend, MemorySearchService,
 )
 from .agents.pi import Pi, PiConfig
 from .agents.team import AgentTeam, TeamConfig, TeamRegistry

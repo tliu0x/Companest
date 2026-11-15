@@ -33,6 +33,7 @@ mount paths with your deployment values. There is no local execution fallback.
   "debug": false,
   "global_timeout": 300,
   "data_dir": "/mnt/companest/state",
+  "memory_backend": "file",
   "storage_lock_dir": "/mnt/companest/locks",
   "substrate": {
     "executable": "kubectl-ate",

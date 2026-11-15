@@ -123,7 +123,7 @@ tool/model effects.
 | API/CLI/gateway | Existing admin auth, jobs/results, company operations and optional channel protocol retained; execution submits to Substrate. |
 | Events | Business task/routing events return through job capabilities and retain event-history/WebSocket contracts; actor lifecycle is not duplicated. |
 | CostGate | Control-plane authorization and estimated-spend reservation before team work, including failed/cancelled work. Actor never reads the cross-company finance ledger. |
-| Memory/knowledge | Shared mounted files, Qdrant retrieval, Dreamer, public knowledge and S3 backups retained; snapshots are not domain backups. |
+| Memory/knowledge | FileBackend on shared mounts, keyword retrieval, Dreamer, public knowledge and S3 backups retained; snapshots are not domain backups. |
 | Modes/workflows | Three modes; independent cascade strategy. Decomposition/delegation moved to bounded business workflows, without a new workflow runtime. |
 | Deployment | Pinned upstream CLI in the control image; code-only harness image, explicit persistent mounts and scope templates. |
 
@@ -154,21 +154,20 @@ use `enrichment/<team_id>` without character replacement. Update operator
 run-now references accordingly; company status uses exact scope metadata, not
 ambiguous name prefixes.
 
-### Existing Qdrant indexes
+### File memory
 
-All teams now use one `companest_memory_v2` collection and the original `team_id`
-as their scope identifier. No team ID is rewritten or mapped to a second team
-identifier. Queries filter by exact `team_id`; record UUIDs include both that ID
-and the memory key, so one team's write/delete cannot overwrite another's same
-key. Old per-team collection names could alias private and shared teams, so
-there is deliberately no fallback. File memory remains authoritative and unchanged.
-For deployments using Qdrant, instantiate the configured `QdrantBackend` with
-the authoritative memory mount and call `backend.reindex_team(team_id)` for
-each registered team, using the fully qualified `company/team` ID for private
-teams. This rebuild needs the configured embedding provider and Qdrant service;
-the review only simulated it. Validate the new indexes before retiring legacy
-collections. Deploy actors with company-scoped vector-service credentials where
-available; application query filters are not a substitute for service ACLs.
+Memory uses the existing FileBackend. Set `memory_backend: file` or omit the
+field to use the default. Remove the old `memory_config` block; other backend
+names and backend-specific options fail configuration validation. The Qdrant
+backend, extra and embedding dependencies have been removed. FTS5 is not added.
+
+Keep the existing persistent memory mount: team IDs, registered paths, files,
+archives and `.index.json` metadata remain unchanged. There is no vector index
+to rebuild or import. Retrieval matches keys, summaries and tags by keyword;
+task snippets still respect their context budget. Remove the `mode` argument
+from direct memory-search calls; semantic/hybrid search is no longer exposed.
+This change does not delete data from an old external service or its volumes.
+Company permissions, scoped mounts and shared storage locks still apply.
 
 ## Verification scope
 
@@ -187,18 +186,20 @@ Existing contract tests were adapted; no new simulation script is shipped.
 Real model/tool execution and final CSI/cluster deployment acceptance were not
 performed. Run that acceptance separately before using this in production.
 
-The migration initially passed 521 default tests. PR review then removed 39
-duplicate/wrapper test functions (68 cases); the retained suite passed with
-**453 tests and 3 live-network tests deselected**. Public API, isolation and
-data-integrity contracts remain covered; see [test scope](../../tests/README.md).
+The migration initially passed 521 default tests. PR review removed 39
+duplicate/wrapper test functions (68 cases), then 5 cases for the removed backend
+and semantic fallback. The retained suite passed with **448 tests and 3
+live-network tests deselected**. Public API, isolation and data-integrity
+contracts remain covered; see [test scope](../../tests/README.md).
 Compilation and targeted static checks passed. Temporary boundary simulations
 also checked company/capability denial, company/workspace schedule persistence,
 actor UID replacement, malformed records and durable-result-before-deletion.
 
 The PR review additionally simulated priority ceilings, revocation during
 approval, cancellation-safe actor acceptance, nested scope inheritance,
-one-shot schedule claims, hot schedule registration, and Qdrant read/write/delete
-isolation using the canonical team ID with fake embeddings.
+one-shot schedule claims and hot schedule registration. File memory simulations
+check read/write/search/archive/delete isolation, persistence after restart and
+unchanged team IDs with vector dependencies unavailable.
 
 ## Execution field contract
 
