@@ -1,12 +1,14 @@
-"""Companest Team Auto-Router"""
-
 import asyncio
 import hashlib
 import json
+import os
 import re
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+
+from .events import EventType
+from .modes import VALID_MODES
 
 if TYPE_CHECKING:
     from .team import TeamRegistry
@@ -16,8 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Keyword  team_id mapping (checked in order)
-# Each entry: (team_id, [keyword_patterns], priority)
+# (team_id, keyword patterns, priority)
 DEFAULT_ROUTES: List[Tuple[str, List[str], int]] = [
     ("stock", [
         r"stock|ticker|etf|spy|qqq|tsla|nvda|aapl",
@@ -56,12 +57,6 @@ DEFAULT_ROUTES: List[Tuple[str, List[str], int]] = [
     ], 4),
 ]
 
-# Meta-teams that should never be routing targets
-META_TEAM_ROLES = {"cost_gate", "memory", "scheduler", "research"}
-
-# Valid execution modes the router can select (canonical source: companest.modes)
-from .modes import VALID_MODES
-
 
 @dataclass
 class RoutingBinding:
@@ -75,7 +70,6 @@ class RoutingBinding:
 
 @dataclass
 class TeamAssignment:
-    """A single team assignment within a routing decision."""
     team_id: str          # e.g. "stock"
     instruction: str      # refined task for this specific team
     priority: int = 1     # 1=primary, 2+=supporting
@@ -83,7 +77,6 @@ class TeamAssignment:
 
 @dataclass
 class RoutingDecision:
-    """Result of SmartRouter.route()  which team(s) and how."""
     teams: List[TeamAssignment] = field(default_factory=list)
     strategy: str = "single"      # "single" | "sequential" | "parallel"
     reasoning: str = ""           # one-line explanation
@@ -106,7 +99,6 @@ class TeamRouter:
         self.default_team = default_team
         self.available_teams = set(available_teams) if available_teams else None
 
-        # Build compiled patterns
         routes = custom_routes or DEFAULT_ROUTES
         self._routes: List[Tuple[str, re.Pattern, int]] = []
         for team_id, patterns, priority in routes:
@@ -114,38 +106,10 @@ class TeamRouter:
             compiled = re.compile(combined, re.IGNORECASE)
             self._routes.append((team_id, compiled, priority))
 
-        # Sort by priority descending
         self._routes.sort(key=lambda x: x[2], reverse=True)
 
     def route(self, task: str) -> Optional[str]:
-        """Determine the best team for a task."""
-        # 1. Check explicit team tag: @team_name or #team_name
-        explicit = self._check_explicit_tag(task)
-        if explicit:
-            return explicit
-
-        # 2. Keyword pattern matching
-        best_team = None
-        best_score = 0
-
-        for team_id, pattern, priority in self._routes:
-            if self.available_teams and team_id not in self.available_teams:
-                continue
-            matches = pattern.findall(task)
-            if matches:
-                score = len(matches) * priority
-                if score > best_score:
-                    best_score = score
-                    best_team = team_id
-
-        if best_team:
-            logger.debug(f"[Router] '{task[:50]}...'  {best_team} (score={best_score})")
-            return best_team
-
-        # 3. Default fallback (may be None)
-        if self.default_team:
-            logger.debug(f"[Router] '{task[:50]}...'  {self.default_team} (default)")
-        return self.default_team
+        return self.route_with_confidence(task)[0]
 
     def _check_explicit_tag(self, task: str) -> Optional[str]:
         """Check for @team or #team prefix. Supports hyphenated and namespaced IDs."""
@@ -177,16 +141,12 @@ class TeamRouter:
         best_team = max(scores, key=scores.get)
         best_score = scores[best_team]
 
-        # Confidence = combination of two signals:
-        # 1. Dominance: how much better the winner is vs. runner-up
-        # 2. Strength: absolute match count (more matches = more confident)
         sorted_scores = sorted(scores.values(), reverse=True)
         if len(sorted_scores) >= 2:
             dominance = 1.0 - (sorted_scores[1] / sorted_scores[0])
         else:
-            dominance = 0.5  # Single match  moderate, not certain
+            dominance = 0.5
 
-        # Strength: diminishing returns  1 match=0.4, 2=0.6, 3+=0.8
         match_count = best_score / max(p for _, _, p in self._routes)
         strength = min(0.4 + match_count * 0.2, 1.0)
 
@@ -245,10 +205,9 @@ Return ONLY valid JSON, no markdown fencing:
 class SmartRouter:
     """LLM-powered team router."""
 
-    # Routing LLM config
     ROUTING_MODEL = "kimi-k2.5"
     ROUTING_MAX_TOKENS = 512
-    ROUTING_TIMEOUT = 15  # seconds (slightly longer for non-Anthropic models)
+    ROUTING_TIMEOUT = 15  # seconds
 
     def __init__(
         self,
@@ -261,29 +220,13 @@ class SmartRouter:
         self._memory = memory
         self._proxy_config = proxy_config
         self._event_bus = event_bus
-
-        # Keyword router as fallback (no default  decline if no match)
-        available = [
-            t for t in team_registry.list_teams()
-            if t not in team_registry.list_meta_teams()
-        ]
-        self._keyword_router = TeamRouter(
-            available_teams=available,
-            default_team=None,
-        )
-
-        # Binding rules (fast path before LLM)
         self._bindings: List[RoutingBinding] = []
-
-        # System prompt cache
-        self._cached_prompt: Optional[str] = None
-        self._cached_prompt_hash: Optional[str] = None
+        self.invalidate_cache()
 
     def add_binding(
         self, pattern: str, team_id: str, mode: str = "cascade", priority: int = 1,
         owner_company_id: Optional[str] = None,
     ) -> None:
-        """Add a deterministic regex binding rule for fast routing."""
         compiled = re.compile(pattern, re.IGNORECASE)
         self._bindings.append(RoutingBinding(
             pattern=compiled, team_id=team_id, mode=mode, priority=priority,
@@ -292,7 +235,6 @@ class SmartRouter:
         logger.info(f"[SmartRouter] Added binding: /{pattern}/  {team_id} ({mode})")
 
     def remove_bindings_by_owner(self, company_id: str) -> int:
-        """Remove all bindings owned by a company."""
         before = len(self._bindings)
         self._bindings = [b for b in self._bindings if b.owner_company_id != company_id]
         removed = before - len(self._bindings)
@@ -304,21 +246,15 @@ class SmartRouter:
         self, company_id: Optional[str] = None,
         shared_teams: Optional[List[str]] = None,
     ) -> List[str]:
-        """Return teams accessible by a company."""
-        all_teams = self._registry.list_teams()
+        """Return non-meta teams a company may use; shared_teams=None means all global teams."""
         meta = set(self._registry.list_meta_teams())
         result = []
-        for t in all_teams:
+        for t in self._registry.list_teams():
             if t in meta:
                 continue
             if "/" not in t:
-                # Global team
-                if company_id is None:
+                if company_id is None or shared_teams is None or t in shared_teams:
                     result.append(t)
-                elif shared_teams is not None and t in shared_teams:
-                    result.append(t)
-                elif shared_teams is None:
-                    result.append(t)  # backward compat: no whitelist = all global teams
             elif company_id and t.startswith(f"{company_id}/"):
                 result.append(t)
         return result
@@ -328,12 +264,8 @@ class SmartRouter:
         company_id: Optional[str] = None,
         shared_teams: Optional[List[str]] = None,
     ) -> RoutingDecision:
-        """Route a task to the best team(s)."""
-        # Build the set of teams this caller is allowed to use.
-        # When company_id is None, restrict to global teams only (no private teams).
         allowed_teams = set(self.get_available_teams(company_id, shared_teams=shared_teams))
 
-        # 1. Check explicit tag
         explicit = self._keyword_router._check_explicit_tag(task)
         if explicit:
             if explicit not in allowed_teams:
@@ -353,32 +285,25 @@ class SmartRouter:
             await self._emit_routing_audit(task, decision, source="explicit_tag")
             return decision
 
-        # 1.5. Check binding rules (fast path before LLM)
+        # allowed_teams only holds registered teams, so unknown or inaccessible bindings are skipped
         for binding in self._bindings:
-            if binding.pattern.search(task):
-                # Validate team exists and is allowed
-                registered = set(self._registry.list_teams())
-                if binding.team_id in registered:
-                    if binding.team_id not in allowed_teams:
-                        continue  # skip binding for teams the caller cannot access
-                    logger.info(f"[SmartRouter] Binding match  {binding.team_id}")
-                    decision = RoutingDecision(
-                        teams=[TeamAssignment(
-                            team_id=binding.team_id, instruction=task, priority=binding.priority,
-                        )],
-                        strategy="single",
-                        reasoning=f"Binding match: /{binding.pattern.pattern}/",
-                        confidence=0.95,
-                        mode=binding.mode,
-                    )
-                    await self._emit_routing_audit(task, decision, source="binding")
-                    return decision
+            if binding.pattern.search(task) and binding.team_id in allowed_teams:
+                logger.info(f"[SmartRouter] Binding match  {binding.team_id}")
+                decision = RoutingDecision(
+                    teams=[TeamAssignment(
+                        team_id=binding.team_id, instruction=task, priority=binding.priority,
+                    )],
+                    strategy="single",
+                    reasoning=f"Binding match: /{binding.pattern.pattern}/",
+                    confidence=0.95,
+                    mode=binding.mode,
+                )
+                await self._emit_routing_audit(task, decision, source="binding")
+                return decision
 
-        # 2. Try LLM routing
         try:
             decision = await self._llm_route(task, preferred_teams=preferred_teams, company_id=company_id)
             if decision:
-                # Filter out teams the caller cannot access
                 decision.teams = [t for t in decision.teams if t.team_id in allowed_teams]
                 if decision.teams:
                     logger.info(
@@ -391,7 +316,6 @@ class SmartRouter:
         except Exception as e:
             logger.warning(f"[SmartRouter] LLM routing failed: {e}, falling back to keywords")
 
-        # 3. Keyword fallback
         decision = self._keyword_fallback(task)
         if decision.teams:
             decision.teams = [t for t in decision.teams if t.team_id in allowed_teams]
@@ -405,14 +329,12 @@ class SmartRouter:
         self, task: str, preferred_teams: Optional[List[str]] = None,
         company_id: Optional[str] = None,
     ) -> Optional[RoutingDecision]:
-        """Single-turn Kimi K2.5 call to determine routing."""
         from openai import AsyncOpenAI
 
         system_prompt = self._build_system_prompt(company_id=company_id)
         if not system_prompt:
             return None
 
-        # Run keyword router as a reference signal for the LLM
         keyword_team, keyword_conf = self._keyword_router.route_with_confidence(task)
         user_message = task
         if keyword_team and keyword_conf > 0:
@@ -423,7 +345,6 @@ class SmartRouter:
         if preferred_teams:
             user_message += f"\n[Company preferred teams: {', '.join(preferred_teams)}]"
 
-        # Build client  Kimi uses OpenAI-compatible API
         client_kwargs: Dict[str, Any] = {}
         if self._proxy_config and self._proxy_config.enabled:
             client_kwargs["base_url"] = self._proxy_config.base_url.rstrip("/") + "/v1"
@@ -431,8 +352,6 @@ class SmartRouter:
             if api_key:
                 client_kwargs["api_key"] = api_key
         else:
-            # Direct Moonshot API (no proxy)
-            import os
             client_kwargs["base_url"] = "https://api.moonshot.cn/v1"
             client_kwargs["api_key"] = os.getenv("MOONSHOT_API_KEY", "")
 
@@ -461,40 +380,18 @@ class SmartRouter:
 
     def _build_system_prompt(self, company_id: Optional[str] = None) -> Optional[str]:
         """Build routing system prompt from team soul.md files. Cached by team list + company hash."""
-        teams = self._registry.list_teams()
-        meta = set(self._registry.list_meta_teams())
-        # Filter out meta-teams, and restrict to teams accessible to this company
-        business_teams = []
-        for t in teams:
-            if t in meta:
-                continue
-            if "/" not in t:
-                # Global team  always visible
-                business_teams.append(t)
-            elif company_id and t.startswith(f"{company_id}/"):
-                # This company's private team
-                business_teams.append(t)
-            # else: another company's private team  hide from prompt
-
+        business_teams = self.get_available_teams(company_id)
         if not business_teams:
             return None
 
-        # Check cache (keyed by team list + company_id)
         hash_input = ",".join(sorted(business_teams)) + f"|{company_id or ''}"
         team_hash = hashlib.sha256(hash_input.encode()).hexdigest()
         if self._cached_prompt and self._cached_prompt_hash == team_hash:
             return self._cached_prompt
 
-        # Build team descriptions
         descriptions = []
         for team_id in sorted(business_teams):
-            soul = self._memory.read_team_soul(team_id)
-            # Extract a concise description (first ~200 chars of soul.md)
-            if soul:
-                # Try to find a duties/responsibilities section
-                summary = _extract_soul_summary(soul, team_id)
-            else:
-                summary = f"Team: {team_id}"
+            summary = _extract_soul_summary(self._memory.read_team_soul(team_id) or "", team_id)
             descriptions.append(f"### {team_id}\n{summary}")
 
         team_block = "\n\n".join(descriptions)
@@ -505,16 +402,12 @@ class SmartRouter:
         return self._cached_prompt
 
     def _parse_response(self, raw: str) -> Optional[RoutingDecision]:
-        """Parse LLM JSON response into RoutingDecision."""
-        # Try to extract JSON
         json_str = raw.strip()
 
-        # Strip markdown code fences
         fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", json_str)
         if fence_match:
             json_str = fence_match.group(1).strip()
 
-        # Try to find JSON object boundaries
         if not json_str.startswith("{"):
             brace_match = re.search(r"\{[\s\S]*\}", json_str)
             if brace_match:
@@ -529,7 +422,6 @@ class SmartRouter:
             logger.warning(f"[SmartRouter] JSON parse error: {e}, raw={raw[:200]}")
             return None
 
-        # Handle declined
         if data.get("declined", False):
             return RoutingDecision(
                 declined=True,
@@ -538,13 +430,11 @@ class SmartRouter:
                 confidence=0.0,
             )
 
-        # Parse team assignments
         raw_teams = data.get("teams", [])
         if not isinstance(raw_teams, list) or not raw_teams:
             logger.warning(f"[SmartRouter] No teams in response: {data}")
             return None
 
-        # Validate team_ids against registry
         registered = set(self._registry.list_teams())
         meta = set(self._registry.list_meta_teams())
         valid_teams: List[TeamAssignment] = []
@@ -570,7 +460,6 @@ class SmartRouter:
         if strategy not in ("single", "sequential", "parallel"):
             strategy = "single"
 
-        # Single team  force strategy to "single"
         if len(valid_teams) == 1:
             strategy = "single"
 
@@ -597,31 +486,25 @@ class SmartRouter:
     async def _emit_routing_audit(
         self, task: str, decision: RoutingDecision, source: str,
     ) -> None:
-        """Emit a TASK_ROUTED event for audit/debugging. Best-effort."""
         if not self._event_bus:
             return
-        try:
-            from .events import EventType
-            available = [
-                t for t in self._registry.list_teams()
-                if t not in self._registry.list_meta_teams()
-            ]
-            await self._event_bus.emit(EventType.TASK_ROUTED, {
-                "input_summary": task[:200],
-                "source": source,
-                "candidate_teams": available,
-                "selected_teams": [t.team_id for t in decision.teams],
-                "strategy": decision.strategy,
-                "mode": decision.mode,
-                "confidence": decision.confidence,
-                "reasoning": decision.reasoning,
-                "declined": decision.declined,
-            })
-        except Exception as e:
-            logger.debug(f"[SmartRouter] Routing audit emit failed: {e}")
+        available = [
+            t for t in self._registry.list_teams()
+            if t not in self._registry.list_meta_teams()
+        ]
+        await self._event_bus.emit(EventType.TASK_ROUTED, {
+            "input_summary": task[:200],
+            "source": source,
+            "candidate_teams": available,
+            "selected_teams": [t.team_id for t in decision.teams],
+            "strategy": decision.strategy,
+            "mode": decision.mode,
+            "confidence": decision.confidence,
+            "reasoning": decision.reasoning,
+            "declined": decision.declined,
+        })
 
     def _keyword_fallback(self, task: str) -> RoutingDecision:
-        """Use keyword router as fallback when LLM is unavailable."""
         team_id, confidence = self._keyword_router.route_with_confidence(task)
 
         if team_id is None:
@@ -636,14 +519,13 @@ class SmartRouter:
             strategy="single",
             reasoning=f"Keyword match (fallback)",
             confidence=confidence,
-            mode="cascade",  # fallback uses cascade  try cheap model first, escalate
+            mode="cascade",
         )
 
     def invalidate_cache(self) -> None:
         """Force rebuild of system prompt and keyword router on next route() call."""
         self._cached_prompt = None
         self._cached_prompt_hash = None
-        # Rebuild keyword router with current team list
         available = [
             t for t in self._registry.list_teams()
             if t not in self._registry.list_meta_teams()
@@ -662,20 +544,17 @@ def _extract_soul_summary(soul_text: str, team_id: str) -> str:
 
     for line in lines:
         stripped = line.strip()
-        # Look for duties/responsibilities section
         if re.match(r"^#{1,4}\s*(duties|responsibilities|capabilities)", stripped, re.I):
             in_duties = True
             continue
-        # Stop at next heading
         if in_duties and re.match(r"^#{1,4}\s", stripped):
             break
         if in_duties and stripped:
             summary_lines.append(stripped)
 
     if summary_lines:
-        return "\n".join(summary_lines[:8])  # Max 8 lines
+        return "\n".join(summary_lines[:8])
 
-    # Fallback: first meaningful lines (skip title)
     content_lines = []
     for line in lines:
         stripped = line.strip()

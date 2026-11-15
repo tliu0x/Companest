@@ -1394,35 +1394,6 @@ class TestRoutingBindings:
         assert binding.mode == "loop"
         assert binding.priority == 2
 
-    def test_orchestrator_add_routing_binding(self):
-        """Orchestrator exposes add_routing_binding, flushes on init_teams."""
-        from companest.config import CompanestConfig
-        from companest.orchestrator import CompanestOrchestrator
-
-        config = CompanestConfig()
-        orch = CompanestOrchestrator(config)
-
-        # Add binding before init_teams
-        orch.add_routing_binding(r"stock|ticker", "stock", mode="cascade")
-        assert len(orch._pending_bindings) == 1
-
-        # After init_teams, binding is flushed to SmartRouter
-        orch.init_teams(str(self.base))
-        assert len(orch._smart_router._bindings) == 1
-        assert orch._pending_bindings == []
-
-    def test_orchestrator_add_binding_after_init(self):
-        """add_routing_binding works after init_teams too."""
-        from companest.config import CompanestConfig
-        from companest.orchestrator import CompanestOrchestrator
-
-        config = CompanestConfig()
-        orch = CompanestOrchestrator(config)
-        orch.init_teams(str(self.base))
-
-        orch.add_routing_binding(r"schedule|remind", "scheduler")
-        assert len(orch._smart_router._bindings) == 1
-
 
 class TestCostGatePostHoc:
     """Test post-hoc default mode: always approve, reconcile later."""

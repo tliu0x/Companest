@@ -1,7 +1,4 @@
-import logging
 from typing import Dict, List, Optional
-
-logger = logging.getLogger(__name__)
 
 
 CEO_CYCLE_PROMPT_TEMPLATE = """\
@@ -39,7 +36,6 @@ def build_cycle_prompt(
     available_teams: List[str],
     cycle_number: int = 1,
 ) -> str:
-    """Build a structured CEO cycle prompt."""
     if available_teams:
         teams_section = "\n".join(f"- {t}" for t in available_teams)
     else:
@@ -58,7 +54,6 @@ def generate_ceo_soul(
     kpis: Optional[Dict[str, str]] = None,
     available_teams: Optional[List[str]] = None,
 ) -> str:
-    """Generate a CEO soul.md with goals, KPIs, and available teams."""
     parts = [
         f"# CEO Agent  {company_name}",
         "",

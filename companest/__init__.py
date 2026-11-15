@@ -45,7 +45,7 @@ from .modes import (
 )
 from .company import CompanyConfig, CompanyRegistry, CompanyError, GlobalBinding, ResolveResult
 from .component import CompanyComponent, CompanyContext, CompanyMemoryNamespace
-from .output import OutputSink, MemorySink, WebhookSink, CallbackSink, TelegramReportSink
+from .output import OutputSink, MemorySink
 from .ceo_engine import build_cycle_prompt, generate_ceo_soul
 from .exceptions import (
     CompanestError,
@@ -105,7 +105,7 @@ _all_names = [
     # Component
     "CompanyComponent", "CompanyContext", "CompanyMemoryNamespace",
     # Output sinks
-    "OutputSink", "MemorySink", "WebhookSink", "CallbackSink", "TelegramReportSink",
+    "OutputSink", "MemorySink",
     # CEO engine
     "build_cycle_prompt", "generate_ceo_soul",
     # Orchestrator

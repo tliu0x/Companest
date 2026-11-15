@@ -1,5 +1,3 @@
-"""Companest Multi-Team Execution"""
-
 import asyncio
 import logging
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
@@ -9,7 +7,6 @@ from .exceptions import OrchestratorError
 
 logger = logging.getLogger(__name__)
 
-# Callback type: async fn(str) -> None
 ProgressCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 
 
@@ -31,13 +28,11 @@ async def run_multi_team(
     on_progress: ProgressCallback = None,
     user_context: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Execute a multi-team routing decision."""
     assignments = sorted(decision.teams, key=lambda a: a.priority)
 
     if decision.strategy == "parallel":
         return await _run_parallel(run_team_fn, assignments, mode, on_progress, user_context)
-    else:
-        return await _run_sequential(run_team_fn, assignments, mode, on_progress, user_context)
+    return await _run_sequential(run_team_fn, assignments, mode, on_progress, user_context)
 
 
 async def _run_parallel(
@@ -47,7 +42,6 @@ async def _run_parallel(
     on_progress: ProgressCallback = None,
     user_context: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Run multiple teams in parallel, then synthesize results."""
     async def _run_one(assignment):
         result = await run_team_fn(
             assignment.instruction, assignment.team_id,
@@ -82,13 +76,11 @@ async def _run_sequential(
     on_progress: ProgressCallback = None,
     user_context: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Run teams sequentially, feeding output from one to the next."""
     team_results: List[Tuple[str, str]] = []
 
-    for i, assignment in enumerate(assignments):
+    for assignment in assignments:
         instruction = assignment.instruction
 
-        # Append context from previous teams
         if team_results:
             context_parts = []
             for tid, res in team_results:
@@ -103,18 +95,11 @@ async def _run_sequential(
         )
         team_results.append((assignment.team_id, result))
 
-    if len(team_results) == 1:
-        return team_results[0][1]
-
-    # Last team's output is the final answer for sequential
     return team_results[-1][1]
 
 
 def synthesize_results(team_results: List[Tuple[str, str]]) -> str:
-    """Combine results from multiple parallel teams into a single response."""
     parts = []
     for team_id, result in team_results:
         parts.append(f"## {team_id}\n\n{result}")
     return "\n\n---\n\n".join(parts)
-
-
