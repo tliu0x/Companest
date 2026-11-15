@@ -67,19 +67,19 @@ class TestFeedFetchersLive:
 class TestToolResolution:
     def test_resolve_collector_preset(self):
         resolved = resolve_tool_names(["collector"])
-        assert "mcp__feed__brave_search" in resolved
-        assert "mcp__feed__fetch_reddit" in resolved
-        assert "mcp__feed__fetch_hn" in resolved
-        assert "mcp__feed__fetch_rss" in resolved
-        assert "mcp__feed__fetch_x" in resolved
-        assert "mcp__feed__fetch_openbb" in resolved
-        assert "mcp__mem__memory_read" in resolved
-        assert "mcp__mem__memory_write" in resolved
-        assert "mcp__mem__memory_list" in resolved
+        assert "brave_search" in resolved
+        assert "fetch_reddit" in resolved
+        assert "fetch_hn" in resolved
+        assert "fetch_rss" in resolved
+        assert "fetch_x" in resolved
+        assert "fetch_openbb" in resolved
+        assert "memory_read" in resolved
+        assert "memory_write" in resolved
+        assert "memory_list" in resolved
 
     def test_resolve_individual_feed_tools(self):
         resolved = resolve_tool_names(["brave_search", "fetch_reddit"])
-        assert resolved == ["mcp__feed__brave_search", "mcp__feed__fetch_reddit"]
+        assert resolved == ["brave_search", "fetch_reddit"]
 
 
 class TestFeedInjection:

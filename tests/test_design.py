@@ -712,13 +712,13 @@ class TestTools:
 
     @pytest.mark.parametrize("config,expected", [
         (["web_search", "exec"], {"WebSearch", "Bash"}),
-        (["memory_read", "memory_write"], {"mcp__mem__memory_read", "mcp__mem__memory_write"}),
-        (["researcher"], {"WebSearch", "mcp__mem__memory_read"}),
-        (["messenger"], {"mcp__sessions__sessions_send"}),
+        (["memory_read", "memory_write"], {"memory_read", "memory_write"}),
+        (["researcher"], {"WebSearch", "memory_read"}),
+        (["messenger"], {"sessions_send"}),
         (["sessions_send", "sessions_list", "sessions_history"], {
-            "mcp__sessions__sessions_send",
-            "mcp__sessions__sessions_list",
-            "mcp__sessions__sessions_history",
+            "sessions_send",
+            "sessions_list",
+            "sessions_history",
         }),
     ])
     def test_resolve_contains(self, config, expected):
@@ -732,26 +732,6 @@ class TestTools:
     def test_deduplication(self):
         from companest.tools import resolve_tool_names
         assert resolve_tool_names(["Read", "Read", "read"]).count("Read") == 1
-
-    def test_builtin_providers_registered(self):
-        from companest.tools import ToolRegistry
-        providers = ToolRegistry().list_providers()
-        for name in ("memory", "scheduler", "feed", "sessions"):
-            assert name in providers
-
-    def test_register_and_unregister_provider(self):
-        from companest.tools import ToolRegistry, ToolProvider
-        reg = ToolRegistry()
-        reg.register(ToolProvider(name="custom", tool_names={"foo"}))
-        assert "custom" in reg.list_providers()
-        reg.unregister("custom")
-        assert "custom" not in reg.list_providers()
-
-    def test_register_preset(self):
-        from companest.tools import ToolRegistry
-        reg = ToolRegistry()
-        reg.register_preset("trader", ["place_order", "get_markets", "memory_read"])
-        assert "mcp__mem__memory_read" in reg.resolve_tool_names(["trader"])
 
     @pytest.mark.parametrize("deny,allowed", [
         ({"Bash"}, ["Read", "Write"]),

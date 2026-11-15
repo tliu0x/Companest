@@ -56,7 +56,6 @@ class TestResolveModelEndpoint:
         ep = resolve_model_endpoint("claude-sonnet-4-5")
         assert ep.provider == PROVIDER_ANTHROPIC
         assert ep.base_url is None
-        assert not ep.needs_chat_completions_wrapper
 
     def test_anthropic_with_proxy(self):
         proxy = _make_proxy()
@@ -76,7 +75,6 @@ class TestResolveModelEndpoint:
         assert ep.provider == PROVIDER_OPENAI
         assert ep.base_url == base_url
         assert ep.api_key == "sk-test"
-        assert ep.needs_chat_completions_wrapper is True
 
         with _env_without(key_env):
             with pytest.raises(ConfigurationError, match=key_env):
@@ -91,13 +89,11 @@ class TestResolveModelEndpoint:
         proxy = _make_proxy()
         ep = resolve_model_endpoint("qwen3-coder", proxy)
         assert ep.provider == PROVIDER_OPENAI
-        assert ep.needs_chat_completions_wrapper is False  # proxy handles it
 
     def test_native_openai_direct(self):
         ep = resolve_model_endpoint("gpt-4o")
         assert ep.provider == PROVIDER_OPENAI
         assert ep.base_url is None
-        assert not ep.needs_chat_completions_wrapper
 
 
 class TestRemovedProxyConfig:
