@@ -1,5 +1,9 @@
 # Companest Examples
 
+For the pinned Substrate development launch and the packaged sample actor, see
+[`deploy/substrate/README.md`](../deploy/substrate/README.md). The public API's
+execution path has not yet switched to Substrate.
+
 The `examples/` directory contains three practical starting points.
 
 ## Available Examples

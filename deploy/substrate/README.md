@@ -68,8 +68,44 @@ not be baked into the actor image or bootstrap arguments.
 
 ## Next migration gate
 
-Move the existing harness into an OCI actor workload and submit a real
-Companest job through company authorization and CostGate. Persist a separate
+The harness workload is built with:
+
+```bash
+docker build -f deploy/substrate/Dockerfile.actor -t localhost:5001/companest-actor:dev .
+docker push localhost:5001/companest-actor:dev
+```
+
+Copy `actor-template.example.json` outside the repository and replace
+`<ACTOR_IMAGE_DIGEST>` with the digest reference printed by the push. Create it
+using the pinned `kubectl-ate create actor-template -f <manifest>` and the
+dedicated kubeconfig/context. The example uses the upstream counter worker
+pool and atespace, and packages only the public sample in the shared scope.
+
+The workload serves `/readyz`, `POST /task` and `GET /task` on port 8080. A task
+contains `job_id`, `task`, `company_id` and `context`; `context.team_id` selects
+a team, and its absence uses existing automatic routing. The workload checks
+its configured company scope before accepting a task and invokes the existing
+orchestrator, including its team permissions, CostGate and tool restrictions.
+The job ID is supplied by the business control plane and differs from the
+Substrate actor name. This first workload uses one actor per job.
+
+Repeated identical submissions return the same job record; a different job or
+payload receives 409. Execution continues after the submitting HTTP request
+returns. The journal is under `/data`, on an upstream `durableDir`. A memory
+snapshot resumes the process. A cold process startup with a running journal
+marks the job failed with an unknown outcome and never replays it. A terminal
+result survives cold startup if the journal is present. Cancellation must
+terminate the actor through Substrate; closing the HTTP client is not a cancel.
+
+The workload listener requires an isolated actor network and trusted router
+ingress. It is not a public Companest API and must not be exposed directly.
+The sample's data is private to that actor. Shared company memory, writable
+workspaces and dynamic company configuration still need their authoritative
+storage boundary before the API can switch to this workload. Copying a mutable
+company tree into each job image would lose updates and is not a migration.
+
+Submit the packaged harness through the Companest CLI/API job path and preserve
+company authorization and CostGate. Persist a separate
 actor reference alongside the business job ID. The Python transport in
 `companest/runtime/substrate.py` calls this pinned CLI and uses its authenticated
 loopback proxy. It fails on unavailable infrastructure and never retries
@@ -79,3 +115,18 @@ workspace ownership with the task integration; counter actors do not settle
 that choice. Verify reconnect, cancellation, ambiguous submission and company
 isolation before deleting the local worker queue, instance cache or recovery
 logic. Keep `handoff/` until the migration is complete.
+
+## Development checks recorded
+
+On 2026-11-15 the pinned control plane and the counter demo launched on an
+arm64 kind node. Through `SubstrateClient`, a counter request returned 1 for
+memory, durable files and rootfs; after synchronous suspension a new request
+returned 2 for all three, and deletion succeeded. The harness image also
+started under gVisor and produced its golden snapshot.
+
+Temporary simulations covered transport errors/timeouts and the existing
+harness with its model call replaced: task submission, duplicate suppression,
+company rejection, result retrieval and cold-start failure without replay.
+The inherited suite passed with 523 tests and 3 live-network tests deselected.
+These checks do not establish a completed API migration or real model/tool
+acceptance, which is outside this task's scope.

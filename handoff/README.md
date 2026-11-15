@@ -1,5 +1,14 @@
 # Agent Substrate 迁移交接
 
+## 实施进度（2026-11-15）
+
+- `7986a35` 已提交并推送固定版本的本地启动脚本；上游固定为 `a46464663fa076221ae059e1fd4a273edd2d8b09`。
+- 已在独立 arm64 kind 集群启动真实 Substrate 控制面、存储、网络与 counter worker；通过 Python 适配层完成 counter 请求、同步休眠、恢复、状态查询、删除，三种计数均从 1 延续到 2。
+- `companest/runtime/substrate.py` 使用官方 CLI 的认证与路由，不实现 actor 调度。`runtime/actor.py` 将现有 harness 包装为单 job 工作负载；镜像已构建，gVisor 下已生成黄金快照。
+- 用户已调整验证范围：**不做真实模型/工具验收，采用模拟测试，模拟脚本不留在仓库**。临时模拟覆盖 transport、重复提交、公司拒绝、结果查询与冷启动不重放；真实模型未调用。
+- **迁移尚未完成**：`JobManager`、CLI/API 与调度入口仍未切换；公司共享记忆、可写 workspace、动态配置的权威存储边界尚需接通。当前每 job actor 中的样例数据不能作为共享业务数据替代。未删除旧执行循环或本目录。
+- 正式启动和工作负载说明见 `deploy/substrate/README.md`。下面的“已完成上下文”与原始实施顺序保留作为迁移要求；真实模型验收要求以本节用户调整为准。
+
 ## 从这里开始
 
 本分支 `feat/agent-substrate-migration` 从已合并 #15–#17 的 `main` 创建，起点是 `bef101b8e160bb284d2ab7aa78edb504bc9edde2`。本次提交只整理交接材料；**尚未安装、启动或接入 Substrate，没有迁移运行时代码**。下一 session 在本分支继续实现，不要回到旧 PR 分支。

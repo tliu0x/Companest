@@ -11,6 +11,10 @@ This sample is intentionally conservative:
 
 Enable gateway or proxy features only when you actually need them.
 
+The Substrate actor deployment is being integrated separately; see
+[`substrate/README.md`](./substrate/README.md). The development actor template
+does not yet replace this production API configuration.
+
 ```json
 {
   "name": "companest-production",

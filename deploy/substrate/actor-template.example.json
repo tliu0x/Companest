@@ -1,0 +1,14 @@
+{
+  "metadata": {"atespace": "ate-demo-counter", "name": "companest-sample"},
+  "workerSelector": {"matchLabels": {"workload": "counter"}},
+  "containers": [{
+    "name": "harness",
+    "image": "<ACTOR_IMAGE_DIGEST>",
+    "command": ["python", "-m", "companest.runtime.actor", "--config", "/sample/.companest/config.md", "--company", "@shared"],
+    "wakeupProbe": {"httpGet": {"path": "/readyz", "port": 8080}},
+    "volumeMounts": [{"name": "data", "mountPath": "/data"}]
+  }],
+  "resources": {"limits": {"cpuMillicores": 1000, "memoryBytes": 536870912}},
+  "snapshotConfig": {"preferredFidelity": "SNAPSHOT_FIDELITY_MEMORY"},
+  "volumes": [{"name": "data", "durableDir": {}}]
+}

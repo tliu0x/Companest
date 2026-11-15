@@ -9,7 +9,7 @@
     "live_network_deselected": 3,
     "source": "prior verified main-equivalent tree; not rerun for this documentation-only handoff"
   },
-  "runtime_migration_started": false,
+  "runtime_migration_started": true,
   "note": "Candidate ownership changes only; confirm actual upstream APIs and replacement behavior before deleting code.",
   "items": [
     {
@@ -49,7 +49,7 @@
       "path": "companest/agents/pi.py",
       "proposed_action": "move_harness_or_replace_if_supported",
       "rationale": "优先让现有 harness 在 actor 内运行；仅在验证选定上游 harness 等价后删除模型/工具循环。",
-      "status": "not_started",
+      "status": "in_progress",
       "tests": [
         "tests/test_pi_runtime.py"
       ],
@@ -182,9 +182,17 @@
       "path": "deploy",
       "proposed_action": "replace_deployment_path",
       "rationale": "采用所选版本上游部署入口；移除已无消费者的旧 runtime 部署配置，保持凭据和镜像边界。",
-      "status": "not_started",
+      "status": "in_progress",
       "tests": [],
       "baseline_python_lines": 0
     }
-  ]
+  ],
+  "implementation_progress": {
+    "upstream_revision": "a46464663fa076221ae059e1fd4a273edd2d8b09",
+    "deployment": "local arm64 kind control plane and counter launched; counter suspend/resume/delete checked",
+    "transport": "official CLI adapter implemented; not yet connected to JobManager",
+    "workload": "single-job existing harness packaged and launched; simulated model execution checked",
+    "validation_scope": "real model/tool acceptance excluded by user; simulation scripts stay outside repository",
+    "next": "connect CLI/API job path and resolve shared memory/workspace authority before deleting old execution code"
+  }
 }
