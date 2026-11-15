@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from companest.feeds import fetch_hn, fetch_openbb, fetch_reddit, fetch_rss
+from companest.knowledge.feeds import fetch_hn, fetch_openbb, fetch_reddit, fetch_rss
 from companest.memory import MemoryManager
 from companest.tools import (
     FEED_TOOL_NAMES,
@@ -69,7 +69,7 @@ class TestFeedFetchersLive:
 
     @pytest.mark.asyncio
     async def test_brave_search_no_key(self):
-        from companest.feeds import brave_search
+        from companest.knowledge.feeds import brave_search
         items = await brave_search("test query")
         # No BRAVE_API_KEY set  returns error item
         assert len(items) == 1
@@ -77,7 +77,7 @@ class TestFeedFetchersLive:
 
     @pytest.mark.asyncio
     async def test_fetch_x_no_key(self):
-        from companest.feeds import fetch_x
+        from companest.knowledge.feeds import fetch_x
         items = await fetch_x("karpathy")
         # No X_BEARER_TOKEN set  returns error item
         assert len(items) == 1
@@ -101,7 +101,7 @@ class TestFeedFetchersLive:
     @pytest.mark.asyncio
     async def test_fetch_openbb_normalize_quotes(self):
         """Test quote normalization with mocked API response."""
-        from companest.feeds import _normalize_quotes
+        from companest.knowledge.feeds import _normalize_quotes
         results = [
             {
                 "symbol": "AAPL",
@@ -123,7 +123,7 @@ class TestFeedFetchersLive:
     @pytest.mark.asyncio
     async def test_fetch_openbb_normalize_news(self):
         """Test news normalization with mocked API response."""
-        from companest.feeds import _normalize_news
+        from companest.knowledge.feeds import _normalize_news
         results = [
             {
                 "title": "Fed holds rates steady",

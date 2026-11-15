@@ -567,7 +567,7 @@ def cmd_serve(args) -> int:
                 await orchestrator.user_scheduler.shutdown()
             await job_manager.stop()
             # Close shared HTTP client for feeds
-            from .feeds import close_client as close_feed_client
+            from .knowledge.feeds import close_client as close_feed_client
             await close_feed_client()
             # Close LiteLLM client if present
             if hasattr(orchestrator, "cost_gate") and hasattr(orchestrator.cost_gate, "litellm_client"):

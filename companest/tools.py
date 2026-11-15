@@ -15,6 +15,7 @@ This module defines:
 - Tool preset mappings for different Pi roles
 """
 
+import inspect
 import json
 import logging
 import re
@@ -486,76 +487,31 @@ def create_scheduler_tool_defs(
 
 def create_feed_tool_defs() -> List[ToolDefinition]:
     """Create ToolDefinitions for data feed operations."""
-    from . import feeds
+    from .knowledge import feeds
 
-    async def brave_search(args):
-        items = await feeds.brave_search(
-            query=args["query"],
-            count=int(args.get("count", 10)),
-            freshness=args.get("freshness", ""),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
+    def feed_handler(fetch_name: str):
+        # Resolve the fetcher at call time. Only arguments the fetcher declares
+        # are passed, coerced to the type of its default; omitted arguments use
+        # the fetcher's own defaults.
+        async def handler(args):
+            fetch = getattr(feeds, fetch_name)
+            kwargs = {}
+            for name, param in inspect.signature(fetch).parameters.items():
+                if name not in args:
+                    continue
+                value = args[name]
+                if isinstance(param.default, int) and not isinstance(param.default, bool):
+                    value = int(value)
+                kwargs[name] = value
+            return json.dumps(await fetch(**kwargs), ensure_ascii=False, indent=2)
+        return handler
 
-    async def fetch_rss(args):
-        items = await feeds.fetch_rss(
-            url=args["url"],
-            limit=int(args.get("limit", 15)),
+    brave_search, fetch_rss, fetch_reddit, fetch_hn, fetch_x, fetch_openbb, fetch_polymarket, fetch_kalshi, fetch_metaculus = (
+        feed_handler(name) for name in (
+            "brave_search", "fetch_rss", "fetch_reddit", "fetch_hn", "fetch_x",
+            "fetch_openbb", "fetch_polymarket", "fetch_kalshi", "fetch_metaculus",
         )
-        return json.dumps(items, ensure_ascii=False, indent=2)
-
-    async def fetch_reddit(args):
-        items = await feeds.fetch_reddit(
-            subreddit=args["subreddit"],
-            sort=args.get("sort", "hot"),
-            limit=int(args.get("limit", 10)),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
-
-    async def fetch_hn(args):
-        items = await feeds.fetch_hn(
-            story_type=args.get("story_type", "top"),
-            limit=int(args.get("limit", 15)),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
-
-    async def fetch_x(args):
-        items = await feeds.fetch_x(
-            username=args["username"],
-            limit=int(args.get("limit", 10)),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
-
-    async def fetch_openbb(args):
-        items = await feeds.fetch_openbb(
-            symbols=args.get("symbols", ""),
-            data_type=args.get("data_type", "quote"),
-            provider=args.get("provider", "yfinance"),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
-
-    async def fetch_polymarket(args):
-        items = await feeds.fetch_polymarket(
-            query=args.get("query", ""),
-            limit=int(args.get("limit", 10)),
-            active_only=args.get("active_only", True),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
-
-    async def fetch_kalshi(args):
-        items = await feeds.fetch_kalshi(
-            query=args.get("query", ""),
-            limit=int(args.get("limit", 10)),
-            status=args.get("status", "open"),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
-
-    async def fetch_metaculus(args):
-        items = await feeds.fetch_metaculus(
-            query=args.get("query", ""),
-            limit=int(args.get("limit", 10)),
-            order_by=args.get("order_by", "-activity"),
-        )
-        return json.dumps(items, ensure_ascii=False, indent=2)
+    )
 
     return [
         ToolDefinition(
@@ -991,11 +947,11 @@ def create_feed_openai_tools():
     return definitions_to_openai(create_feed_tool_defs())
 
 def create_public_knowledge_mcp_server(bucket="", prefix="companest-public-knowledge/", region="us-east-1", endpoint_url=""):
-    from .public_knowledge.mcp import create_public_knowledge_tool_defs
+    from .knowledge.public import create_public_knowledge_tool_defs
     return definitions_to_mcp(create_public_knowledge_tool_defs(bucket, prefix, region, endpoint_url), "pk")
 
 def create_public_knowledge_openai_tools(bucket="", prefix="companest-public-knowledge/", region="us-east-1", endpoint_url=""):
-    from .public_knowledge.mcp import create_public_knowledge_tool_defs
+    from .knowledge.public import create_public_knowledge_tool_defs
     return definitions_to_openai(create_public_knowledge_tool_defs(bucket, prefix, region, endpoint_url))
 
 def create_sessions_mcp_server(
@@ -1473,26 +1429,14 @@ class ToolRegistry:
 
     @staticmethod
     def _pk_mcp_factory(ctx: ToolContext) -> Any:
-        import os
-        from .public_knowledge.mcp import create_public_knowledge_tool_defs
-        defs = create_public_knowledge_tool_defs(
-            bucket=os.environ.get("PK_S3_BUCKET", ""),
-            prefix=os.environ.get("PK_S3_PREFIX", "companest-public-knowledge/"),
-            region=os.environ.get("PK_S3_REGION", "us-east-1"),
-            endpoint_url=os.environ.get("PK_S3_ENDPOINT_URL", ""),
-        )
+        from .knowledge.public import create_public_knowledge_tool_defs
+        defs = create_public_knowledge_tool_defs()
         return definitions_to_mcp(defs, "pk")
 
     @staticmethod
     def _pk_openai_factory(ctx: ToolContext) -> list:
-        import os
-        from .public_knowledge.mcp import create_public_knowledge_tool_defs
-        defs = create_public_knowledge_tool_defs(
-            bucket=os.environ.get("PK_S3_BUCKET", ""),
-            prefix=os.environ.get("PK_S3_PREFIX", "companest-public-knowledge/"),
-            region=os.environ.get("PK_S3_REGION", "us-east-1"),
-            endpoint_url=os.environ.get("PK_S3_ENDPOINT_URL", ""),
-        )
+        from .knowledge.public import create_public_knowledge_tool_defs
+        defs = create_public_knowledge_tool_defs()
         return definitions_to_openai(defs)
 
 

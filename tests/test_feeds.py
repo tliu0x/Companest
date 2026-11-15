@@ -1,5 +1,5 @@
 """
-Unit tests for companest/feeds.py - mock-based (no network).
+Unit tests for companest/knowledge/feeds.py - mock-based (no network).
 
 Tests rate limiting, caching, each fetcher's parsing logic,
 and the multi-source aggregation function.
@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from companest import feeds
-from companest.feeds import (
+from companest.knowledge import feeds
+from companest.knowledge.feeds import (
     _cache,
     _cache_get,
     _cache_key,
@@ -116,7 +116,7 @@ class TestBraveSearch:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await brave_search("test query", api_key="fake-key")
 
         assert len(items) == 2
@@ -132,7 +132,7 @@ class TestBraveSearch:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             r1 = await brave_search("cached", api_key="key")
             r2 = await brave_search("cached", api_key="key")
 
@@ -145,7 +145,7 @@ class TestBraveSearch:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await brave_search("fail", api_key="key")
 
         assert len(items) == 1
@@ -179,7 +179,7 @@ class TestFetchReddit:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_reddit("test", "hot", 5)
 
         assert len(items) == 1
@@ -192,7 +192,7 @@ class TestFetchReddit:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=Exception("429 Too Many Requests"))
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_reddit("fail")
 
         assert len(items) == 1
@@ -224,7 +224,7 @@ class TestFetchHN:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=[story_resp, detail_resp_1, detail_resp_2])
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_hn("top", 2)
 
         assert len(items) == 2
@@ -237,7 +237,7 @@ class TestFetchHN:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=Exception("Timeout"))
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_hn("top", 3)
 
         assert len(items) == 1
@@ -273,7 +273,7 @@ class TestFetchRSS:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_rss("https://example.com/feed", 10)
 
         assert len(items) == 2
@@ -299,7 +299,7 @@ class TestFetchRSS:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_rss("https://example.com/atom-feed", 10)
 
         assert len(items) == 1
@@ -311,7 +311,7 @@ class TestFetchRSS:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=Exception("DNS failure"))
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_rss("https://bad.example.com/feed")
 
         assert len(items) == 1
@@ -345,7 +345,7 @@ class TestFetchX:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=[user_resp, tweets_resp])
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_x("testuser", bearer_token="fake-token")
 
         assert len(items) == 1
@@ -381,7 +381,7 @@ class TestFetchOpenBB:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await fetch_openbb("AAPL", "quote", base_url="http://localhost:6900")
 
         assert len(items) == 1
@@ -409,7 +409,7 @@ class TestFetchPolymarket:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await feeds.fetch_polymarket("AI", limit=5)
 
         assert len(items) == 1
@@ -421,7 +421,7 @@ class TestFetchPolymarket:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await feeds.fetch_polymarket("test")
 
         assert len(items) == 1
@@ -450,7 +450,7 @@ class TestFetchKalshi:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await feeds.fetch_kalshi("Fed", limit=5)
 
         assert len(items) == 1
@@ -462,7 +462,7 @@ class TestFetchKalshi:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=Exception("Timeout"))
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await feeds.fetch_kalshi("test")
 
         assert len(items) == 1
@@ -491,7 +491,7 @@ class TestFetchMetaculus:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await feeds.fetch_metaculus("AGI", limit=5)
 
         assert len(items) == 1
@@ -504,7 +504,7 @@ class TestFetchMetaculus:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=Exception("API error"))
 
-        with patch("companest.feeds._get_client", return_value=mock_client):
+        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
             items = await feeds.fetch_metaculus("test")
 
         assert len(items) == 1
@@ -516,9 +516,9 @@ class TestFetchMetaculus:
 class TestFetchMultiSource:
     @pytest.mark.asyncio
     async def test_merge_results(self):
-        with patch("companest.feeds.brave_search", new_callable=AsyncMock, return_value=[
+        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
             {"title": "Brave result", "source": "brave"},
-        ]), patch("companest.feeds.fetch_hn", new_callable=AsyncMock, return_value=[
+        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, return_value=[
             {"title": "HN story", "source": "hn"},
         ]):
             items = await fetch_multi_source("AI news", sources=["brave", "hn"])
@@ -530,7 +530,7 @@ class TestFetchMultiSource:
 
     @pytest.mark.asyncio
     async def test_unknown_source_skipped(self):
-        with patch("companest.feeds.brave_search", new_callable=AsyncMock, return_value=[
+        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
             {"title": "Result", "source": "brave"},
         ]):
             items = await fetch_multi_source("test", sources=["brave", "unknown_source"])
@@ -546,9 +546,9 @@ class TestFetchMultiSource:
 
     @pytest.mark.asyncio
     async def test_partial_failure(self):
-        with patch("companest.feeds.brave_search", new_callable=AsyncMock, return_value=[
+        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
             {"title": "Good", "source": "brave"},
-        ]), patch("companest.feeds.fetch_hn", new_callable=AsyncMock, side_effect=Exception("API down")):
+        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, side_effect=Exception("API down")):
             items = await fetch_multi_source("test", sources=["brave", "hn"])
 
         # Should have 1 good result + 1 error

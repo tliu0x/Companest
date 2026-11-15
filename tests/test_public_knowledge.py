@@ -7,15 +7,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from companest.public_knowledge.models import (
+from companest.knowledge.public import (
     PublicKnowledgeDoc,
     PublicKnowledgeIndexEntry,
     SearchQuery,
 )
-from companest.public_knowledge.search import search
-from companest.public_knowledge.index_store import IndexStore, INDEX_CAP
-from companest.public_knowledge.publisher import PublicKnowledgePublisher
-from companest.public_knowledge.s3_store import PublicKnowledgeS3Store
+from companest.knowledge.public import search
+from companest.knowledge.public import IndexStore, INDEX_CAP
+from companest.knowledge.public import PublicKnowledgePublisher
+from companest.knowledge.public import PublicKnowledgeS3Store
 
 
 # ---------------------------------------------------------------------------

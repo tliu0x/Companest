@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from companest.digests.models import (
+from companest.knowledge.digests import (
     DIGEST_TYPE_MAP,
     ApprovalQueueDigest,
     DigestEnvelope,
@@ -15,8 +15,8 @@ from companest.digests.models import (
     RiskDigest,
     SettlementDigest,
 )
-from companest.digests.ingest import DigestIngestor, IngestResult
-from companest.digests.s3_store import DigestS3Store
+from companest.knowledge.digests import DigestIngestor, IngestResult
+from companest.knowledge.digests import DigestS3Store
 
 
 NOW = datetime.now(timezone.utc)
