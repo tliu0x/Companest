@@ -5,46 +5,20 @@ from fastapi.testclient import TestClient
 
 from companest.config import CompanestConfig
 from companest.jobs import JobManager
-from companest.orchestrator import CompanestOrchestrator
 from companest.server import CompanestAPIServer
 
 
-def _write_minimal_runtime(base: Path) -> None:
-    general_pi = base / "teams" / "general" / "pis" / "assistant"
-    general_pi.mkdir(parents=True)
-    (base / "teams" / "general" / "team.md").write_text(
-        "# Team: general\n"
-        "- role: General-purpose assistant\n"
-        "- lead_pi: assistant\n"
-        "- enabled: true\n"
-        "- mode: default\n\n"
-        "#### Pi: assistant\n"
-        "- model: claude-sonnet-4-5-20250929\n"
-        "- tools: memory_read\n"
-        "- max_turns: 5\n",
-        encoding="utf-8",
-    )
-    (general_pi / "soul.md").write_text("You are a general assistant.", encoding="utf-8")
-    (base / "soul.md").write_text("Master soul", encoding="utf-8")
-    (base / "user.md").write_text("# User\n- Language: English", encoding="utf-8")
+MANIFEST = json.loads(
+    (Path(__file__).resolve().parents[1] / "examples" / "prediction-market" / "manifest.json")
+    .read_text(encoding="utf-8")
+)
 
 
-def test_events_endpoint_persists_and_filters(tmp_path):
-    manifest = json.loads(
-        (Path(__file__).resolve().parents[1] / "examples" / "prediction-market" / "manifest.json")
-        .read_text(encoding="utf-8")
-    )
-
-    _write_minimal_runtime(tmp_path)
-
-    config = CompanestConfig(debug=True)
-    orchestrator = CompanestOrchestrator(config)
-    orchestrator.init_teams(str(tmp_path))
-    job_manager = JobManager(orchestrator, data_dir=tmp_path)
-    server = CompanestAPIServer(config, job_manager, orchestrator)
+def test_events_endpoint_persists_and_filters(api_runtime, tmp_path):
+    config, _, server = api_runtime()
 
     with TestClient(server.create_app()) as client:
-        create = client.post("/api/companies", json=manifest)
+        create = client.post("/api/companies", json=MANIFEST)
         assert create.status_code == 200, create.text
 
         submit = client.post(
@@ -114,15 +88,8 @@ def test_events_endpoint_persists_and_filters(tmp_path):
         assert any(event["type"] == "job.submitted" for event in restored_data["events"])
 
 
-def test_websocket_handshake_reports_sequence_and_missed_events(tmp_path):
-    _write_minimal_runtime(tmp_path)
-
-    config = CompanestConfig(debug=True)
-    config.api.auth_token = "test-token"
-    orchestrator = CompanestOrchestrator(config)
-    orchestrator.init_teams(str(tmp_path))
-    job_manager = JobManager(orchestrator, data_dir=tmp_path)
-    server = CompanestAPIServer(config, job_manager, orchestrator)
+def test_websocket_handshake_reports_sequence_and_missed_events(api_runtime):
+    _, _, server = api_runtime(auth_token="test-token")
 
     with TestClient(server.create_app()) as client:
         submit = client.post(

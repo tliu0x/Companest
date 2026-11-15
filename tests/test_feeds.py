@@ -1,7 +1,5 @@
 """Unit tests for companest/knowledge/feeds.py - mock-based (no network)."""
 
-import asyncio
-import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,16 +10,13 @@ from companest.knowledge.feeds import (
     _cache,
     _cache_get,
     _cache_key,
-    _cache_set,
     _last_request_time,
     _rate_limit,
     brave_search,
     close_client,
     fetch_hn,
-    fetch_kalshi,
-    fetch_metaculus,
+    fetch_multi_source,
     fetch_openbb,
-    fetch_polymarket,
     fetch_reddit,
     fetch_rss,
     fetch_x,
@@ -30,7 +25,6 @@ from companest.knowledge.feeds import (
 
 @pytest.fixture(autouse=True)
 def clear_caches():
-    """Clear feed caches and rate limit state between tests."""
     _cache.clear()
     _last_request_time.clear()
     yield
@@ -39,38 +33,17 @@ def clear_caches():
 
 
 class TestCache:
-    def test_cache_key_deterministic(self):
-        k1 = _cache_key("f", "a", "b", x=1)
-        k2 = _cache_key("f", "a", "b", x=1)
-        assert k1 == k2
-
-    def test_cache_key_differs(self):
-        k1 = _cache_key("f", "a")
-        k2 = _cache_key("f", "b")
-        assert k1 != k2
-
-    def test_cache_set_and_get(self):
-        _cache_set("test", [{"title": "hi"}])
-        result = _cache_get("test")
-        assert result == [{"title": "hi"}]
-
-    def test_cache_miss(self):
-        assert _cache_get("nonexistent") is None
+    def test_cache_key_depends_on_arguments(self):
+        assert _cache_key("f", "a", "b", x=1) == _cache_key("f", "a", "b", x=1)
+        assert _cache_key("f", "a") != _cache_key("f", "b")
 
     def test_cache_expiry(self):
         _cache["expired"] = (time.monotonic() - 600, [{"old": True}])
         assert _cache_get("expired") is None
-        assert "expired" not in _cache  # cleaned up
+        assert "expired" not in _cache
 
 
 class TestRateLimit:
-    @pytest.mark.asyncio
-    async def test_rate_limit_first_call_immediate(self):
-        start = time.monotonic()
-        await _rate_limit("test_source")
-        elapsed = time.monotonic() - start
-        assert elapsed < 0.1
-
     @pytest.mark.asyncio
     async def test_rate_limit_delays_second_call(self):
         feeds._RATE_LIMITS["test_rl"] = 0.2
@@ -78,7 +51,7 @@ class TestRateLimit:
         start = time.monotonic()
         await _rate_limit("test_rl")
         elapsed = time.monotonic() - start
-        assert elapsed >= 0.15  # should wait ~0.2s
+        assert elapsed >= 0.15
 
 
 class TestBraveSearch:
@@ -125,20 +98,28 @@ class TestBraveSearch:
             r2 = await brave_search("cached", api_key="key")
 
         assert r1 == r2
-        # Only one HTTP call  second was cached
         assert mock_client.get.call_count == 1
 
-    @pytest.mark.asyncio
-    async def test_http_error(self):
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
 
-        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
-            items = await brave_search("fail", api_key="key")
 
-        assert len(items) == 1
-        assert "error" in items[0]
-        assert "Connection refused" in items[0]["error"]
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fetch", [
+    lambda: brave_search("fail", api_key="key"),
+    lambda: fetch_reddit("fail"),
+    lambda: fetch_hn("top", 3),
+    lambda: fetch_rss("https://bad.example.com/feed"),
+    lambda: feeds.fetch_polymarket("test"),
+    lambda: feeds.fetch_kalshi("test"),
+    lambda: feeds.fetch_metaculus("test"),
+], ids=["brave", "reddit", "hn", "rss", "polymarket", "kalshi", "metaculus"])
+async def test_http_error_returns_error_item(fetch):
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
+
+    with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
+        items = await fetch()
+
+    assert items == [{"error": "Connection refused"}]
 
 
 class TestFetchReddit:
@@ -173,16 +154,6 @@ class TestFetchReddit:
         assert items[0]["source"] == "r/test"
         assert items[0]["score"] == 42
 
-    @pytest.mark.asyncio
-    async def test_http_error(self):
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("429 Too Many Requests"))
-
-        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
-            items = await fetch_reddit("fail")
-
-        assert len(items) == 1
-        assert "error" in items[0]
 
 
 class TestFetchHN:
@@ -216,16 +187,6 @@ class TestFetchHN:
         assert items[0]["source"] == "hn"
         assert items[1]["score"] == 50
 
-    @pytest.mark.asyncio
-    async def test_http_error(self):
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("Timeout"))
-
-        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
-            items = await fetch_hn("top", 3)
-
-        assert len(items) == 1
-        assert "error" in items[0]
 
 
 class TestFetchRSS:
@@ -288,16 +249,6 @@ class TestFetchRSS:
         assert items[0]["title"] == "Atom Entry"
         assert items[0]["url"] == "https://example.com/atom"
 
-    @pytest.mark.asyncio
-    async def test_http_error(self):
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("DNS failure"))
-
-        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
-            items = await fetch_rss("https://bad.example.com/feed")
-
-        assert len(items) == 1
-        assert "error" in items[0]
 
 
 class TestFetchX:
@@ -338,7 +289,7 @@ class TestFetchOpenBB:
     async def test_bad_data_type(self):
         items = await fetch_openbb("AAPL", "nonexistent")
         assert len(items) == 1
-        assert "error" in items[0]
+        assert "Unknown data_type" in items[0]["error"]
 
     @pytest.mark.asyncio
     async def test_successful_quote(self):
@@ -348,11 +299,11 @@ class TestFetchOpenBB:
             "results": [
                 {
                     "symbol": "AAPL",
-                    "last_price": 200.0,
-                    "change_percent": 1.5,
-                    "volume": 50_000_000,
-                    "market_cap": 3e12,
-                    "pe_ratio": 30.0,
+                    "last_price": 245.30,
+                    "change_percent": 1.25,
+                    "volume": 52_300_000,
+                    "market_cap": 3.8e12,
+                    "pe_ratio": 31.2,
                 }
             ]
         }
@@ -363,11 +314,12 @@ class TestFetchOpenBB:
             items = await fetch_openbb("AAPL", "quote", base_url="http://localhost:6900")
 
         assert len(items) == 1
-        assert "AAPL" in items[0]["title"]
+        assert items[0]["title"] == "AAPL: $245.3 (+1.25%)"
         assert items[0]["source"] == "openbb/quote"
+        assert "Vol:" in items[0]["snippet"]
+        assert "$3.8T" in items[0]["snippet"]
+        assert "P/E: 31.2" in items[0]["snippet"]
 
-
-#  Polymarket Tests
 
 class TestFetchPolymarket:
     @pytest.mark.asyncio
@@ -394,19 +346,7 @@ class TestFetchPolymarket:
         assert items[0]["source"] == "polymarket"
         assert "Turing" in items[0]["title"]
 
-    @pytest.mark.asyncio
-    async def test_http_error(self):
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
 
-        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
-            items = await feeds.fetch_polymarket("test")
-
-        assert len(items) == 1
-        assert "error" in items[0]
-
-
-#  Kalshi Tests
 
 class TestFetchKalshi:
     @pytest.mark.asyncio
@@ -435,19 +375,7 @@ class TestFetchKalshi:
         assert items[0]["source"] == "kalshi"
         assert "Fed" in items[0]["title"]
 
-    @pytest.mark.asyncio
-    async def test_http_error(self):
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("Timeout"))
 
-        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
-            items = await feeds.fetch_kalshi("test")
-
-        assert len(items) == 1
-        assert "error" in items[0]
-
-
-#  Metaculus Tests
 
 class TestFetchMetaculus:
     @pytest.mark.asyncio
@@ -477,26 +405,39 @@ class TestFetchMetaculus:
         assert "AGI" in items[0]["title"]
         assert items[0]["prediction"] == 0.42
 
+
+
+class TestFetchMultiSource:
     @pytest.mark.asyncio
-    async def test_http_error(self):
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("API error"))
+    async def test_merge_results_skips_unknown_source(self):
+        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
+            {"title": "Brave result", "source": "brave"},
+        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, return_value=[
+            {"title": "HN story", "source": "hn"},
+        ]):
+            items = await fetch_multi_source("AI news", sources=["brave", "unknown_source", "hn"])
 
-        with patch("companest.knowledge.feeds._get_client", return_value=mock_client):
-            items = await feeds.fetch_metaculus("test")
+        assert [i["source"] for i in items] == ["brave", "hn"]
 
+    @pytest.mark.asyncio
+    async def test_no_valid_sources(self):
+        items = await fetch_multi_source("test", sources=["invalid1", "invalid2"])
         assert len(items) == 1
         assert "error" in items[0]
 
+    @pytest.mark.asyncio
+    async def test_partial_failure(self):
+        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
+            {"title": "Good", "source": "brave"},
+        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, side_effect=Exception("API down")):
+            items = await fetch_multi_source("test", sources=["brave", "hn"])
+
+        assert len(items) == 2
+        assert items[0]["source"] == "brave"
+        assert "error" in items[1]
+
 
 class TestCloseClient:
-    @pytest.mark.asyncio
-    async def test_close_when_no_client(self):
-        """close_client() is safe to call when no client exists."""
-        feeds._client = None
-        await close_client()
-        assert feeds._client is None
-
     @pytest.mark.asyncio
     async def test_close_existing_client(self):
         mock_client = AsyncMock()

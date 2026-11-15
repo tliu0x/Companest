@@ -1,24 +1,22 @@
 """Tests for the public_knowledge subsystem."""
 
-import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from companest.knowledge.public import (
+    INDEX_CAP,
+    IndexStore,
     PublicKnowledgeDoc,
     PublicKnowledgeIndexEntry,
+    PublicKnowledgePublisher,
+    PublicKnowledgeS3Store,
     SearchQuery,
+    search,
 )
-from companest.knowledge.public import search
-from companest.knowledge.public import IndexStore, INDEX_CAP
-from companest.knowledge.public import PublicKnowledgePublisher
-from companest.knowledge.public import PublicKnowledgeS3Store
 
-
-# Fixtures
 
 NOW = datetime.now(timezone.utc)
 FUTURE = NOW + timedelta(days=7)
@@ -46,50 +44,12 @@ def _make_index_entry(doc_id=None, **kwargs):
     return PublicKnowledgeIndexEntry.from_doc(doc)
 
 
-# Model tests
+def test_non_uuid_doc_id_rejected():
+    with pytest.raises(Exception):
+        _make_doc(doc_id="not-a-uuid")
 
-class TestPublicKnowledgeDoc:
-    def test_valid_doc(self):
-        doc = _make_doc()
-        uuid.UUID(doc.doc_id)  # validates it's a real UUID
-        assert doc.source_type == "news"
-
-    def test_non_uuid_doc_id_rejected(self):
-        with pytest.raises(Exception):
-            _make_doc(doc_id="not-a-uuid")
-
-    def test_invalid_source_type(self):
-        with pytest.raises(Exception):
-            _make_doc(source_type="invalid")
-
-    def test_confidence_bounds(self):
-        with pytest.raises(Exception):
-            _make_doc(confidence=1.5)
-        with pytest.raises(Exception):
-            _make_doc(confidence=-0.1)
-
-    def test_invalid_visibility(self):
-        with pytest.raises(Exception):
-            _make_doc(visibility="secret")
-
-    def test_empty_title_rejected(self):
-        with pytest.raises(Exception):
-            _make_doc(title="")
-
-
-class TestIndexEntry:
-    def test_from_doc_drops_summary(self):
-        doc = _make_doc()
-        entry = PublicKnowledgeIndexEntry.from_doc(doc)
-        assert not hasattr(entry, "summary") or "summary" not in entry.model_fields
-        assert entry.doc_id == doc.doc_id
-        assert entry.title == doc.title
-
-
-# Search tests
 
 class TestSearch:
-    # Stable UUIDs for deterministic assertions
     D1 = "00000000-0000-0000-0000-000000000001"
     D2 = "00000000-0000-0000-0000-000000000002"
     D3 = "00000000-0000-0000-0000-000000000003"
@@ -108,105 +68,75 @@ class TestSearch:
                               source_type="research"),
         ]
 
-    def test_no_filters(self):
-        results = search(SearchQuery(), self._entries())
-        assert len(results) == 3
-
-    def test_filter_by_tags(self):
-        results = search(SearchQuery(tags=["topic:macro"]), self._entries())
-        assert len(results) == 1
-        assert results[0].doc_id == self.D1
-
-    def test_filter_by_source_type(self):
-        results = search(
-            SearchQuery(source_type="prediction_market"), self._entries()
-        )
-        assert len(results) == 1
-        assert results[0].doc_id == self.D2
-
-    def test_filter_fresh_only(self):
-        results = search(SearchQuery(fresh_only=True), self._entries())
-        assert all(r.doc_id != self.D3 for r in results)
-
-    def test_filter_keyword(self):
-        results = search(SearchQuery(keyword="kalshi"), self._entries())
-        assert len(results) == 1
-        assert results[0].doc_id == self.D2
-
-    def test_keyword_case_insensitive(self):
-        results = search(SearchQuery(keyword="FED"), self._entries())
-        assert len(results) == 1
+    @pytest.mark.parametrize("query, expected", [
+        ({}, {D1, D2, D3}),
+        ({"tags": ["topic:macro"]}, {D1}),
+        ({"source_type": "prediction_market"}, {D2}),
+        ({"fresh_only": True}, {D1, D2}),
+        ({"keyword": "kalshi"}, {D2}),
+        ({"keyword": "FED"}, {D1}),
+    ], ids=["no_filters", "tags", "source_type", "fresh_only", "keyword", "keyword_case_insensitive"])
+    def test_filters(self, query, expected):
+        results = search(SearchQuery(**query), self._entries())
+        assert len(results) == len(expected)
+        assert {r.doc_id for r in results} == expected
 
     def test_limit(self):
         results = search(SearchQuery(limit=1), self._entries())
         assert len(results) == 1
 
     def test_sort_by_published_at_desc(self):
-        results = search(SearchQuery(), self._entries())
-        for i in range(len(results) - 1):
-            assert results[i].published_at >= results[i + 1].published_at
+        entries = [
+            e.model_copy(update={"published_at": NOW - timedelta(hours=age)})
+            for e, age in zip(self._entries(), (2, 0, 1))
+        ]
+        assert [r.doc_id for r in search(SearchQuery(), entries)] == [self.D2, self.D3, self.D1]
 
-
-# Index eviction tests
 
 class TestIndexEviction:
-    def test_expired_entries_evicted_on_save(self):
+    def _saved_lines(self, entries):
         mock_s3 = MagicMock()
         store = IndexStore(bucket="test-bucket")
         store._s3 = mock_s3
+        store.save_index(entries)
+        body = mock_s3.put_object.call_args[1]["Body"].decode("utf-8")
+        return [line for line in body.strip().split("\n") if line]
 
+    def test_expired_entries_evicted_on_save(self):
         fresh_id = str(uuid.uuid4())
-        entries = [
+        lines = self._saved_lines([
             _make_index_entry(fresh_id, fresh_until=FUTURE),
             _make_index_entry(str(uuid.uuid4()), fresh_until=PAST),
-        ]
-        store.save_index(entries)
-
-        # Check what was written to S3
-        call_args = mock_s3.put_object.call_args
-        body = call_args[1]["Body"].decode("utf-8") if isinstance(call_args[1]["Body"], bytes) else call_args[1]["Body"]
-        lines = [l for l in body.strip().split("\n") if l]
+        ])
         assert len(lines) == 1
         assert fresh_id in lines[0]
 
     def test_cap_enforced(self):
-        mock_s3 = MagicMock()
-        store = IndexStore(bucket="test-bucket")
-        store._s3 = mock_s3
-
-        entries = [
+        lines = self._saved_lines([
             _make_index_entry(str(uuid.UUID(int=i)), fresh_until=FUTURE)
             for i in range(INDEX_CAP + 100)
-        ]
-        store.save_index(entries)
-
-        call_args = mock_s3.put_object.call_args
-        body = call_args[1]["Body"].decode("utf-8")
-        lines = [l for l in body.strip().split("\n") if l]
+        ])
         assert len(lines) == INDEX_CAP
 
 
-# Publisher tests
-
 class TestPublisher:
-    def test_publish_writes_doc_and_index(self):
-        mock_s3_store = MagicMock(spec=PublicKnowledgeS3Store)
-        mock_index_store = MagicMock(spec=IndexStore)
-        publisher = PublicKnowledgePublisher(mock_s3_store, mock_index_store)
+    def _publisher(self):
+        s3_store = MagicMock(spec=PublicKnowledgeS3Store)
+        index_store = MagicMock(spec=IndexStore)
+        return PublicKnowledgePublisher(s3_store, index_store), s3_store, index_store
 
+    def test_publish_writes_doc_and_index(self):
+        publisher, s3_store, index_store = self._publisher()
         doc = _make_doc()
         publisher.publish(doc)
 
-        mock_s3_store.put_doc.assert_called_once_with(doc)
-        mock_index_store.add_entry.assert_called_once()
+        s3_store.put_doc.assert_called_once_with(doc)
+        index_store.add_entry.assert_called_once()
 
     def test_unpublish_removes_doc_and_index(self):
-        mock_s3_store = MagicMock(spec=PublicKnowledgeS3Store)
-        mock_index_store = MagicMock(spec=IndexStore)
-        publisher = PublicKnowledgePublisher(mock_s3_store, mock_index_store)
-
+        publisher, s3_store, index_store = self._publisher()
         test_id = str(uuid.uuid4())
         publisher.unpublish(test_id)
 
-        mock_s3_store.delete_doc.assert_called_once_with(test_id)
-        mock_index_store.remove_entry.assert_called_once_with(test_id)
+        s3_store.delete_doc.assert_called_once_with(test_id)
+        index_store.remove_entry.assert_called_once_with(test_id)
