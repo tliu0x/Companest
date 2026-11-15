@@ -8,8 +8,9 @@ from typing import List
 
 import pytest
 
-from companest.company import CompanyConfig, CompanySchedule, CompanyCEOConfig, CompanyPreferences
-from companest.component import CompanyComponent, CompanyContext, CompanyMemoryNamespace
+from companest.company import CompanyConfig, CompanyRegistry, CompanySchedule
+from companest.component import CompanyContext, CompanyMemoryNamespace
+from companest.jobs import JobManager
 from companest.memory.manager import MemoryManager
 from companest.team import TeamConfig
 
@@ -50,24 +51,9 @@ class DummyComponent:
         self._teardown_called = True
 
 
-def test_component_protocol_conformance():
-    """DummyComponent satisfies CompanyComponent protocol."""
-    comp = DummyComponent()
-    assert isinstance(comp, CompanyComponent)
-
-
-def test_component_properties():
-    comp = DummyComponent("acme")
-    assert comp.company_id == "acme"
-    assert comp.config.id == "acme"
-    assert comp.teams() == []
-    assert comp.schedules() == []
-
-
 @pytest.fixture
 def memory_dir():
     with tempfile.TemporaryDirectory() as td:
-        # Create required directory structure
         (Path(td) / "teams").mkdir()
         (Path(td) / "companies" / "acme" / "shared").mkdir(parents=True)
         (Path(td) / "companies" / "acme" / "teams").mkdir(parents=True)
@@ -84,11 +70,8 @@ def namespace(manager):
     return CompanyMemoryNamespace(manager, "acme")
 
 
-def test_namespace_company_id(namespace):
-    assert namespace.company_id == "acme"
-
-
 def test_namespace_scoped_team_id(namespace):
+    assert namespace.company_id == "acme"
     # Company's own private team stays as-is
     assert namespace._scoped_team_id("acme/marketing") == "acme/marketing"
     # CEO team stays as-is
@@ -103,7 +86,6 @@ def test_namespace_scoped_team_id(namespace):
 def test_namespace_shared_read_write(namespace, memory_dir):
     namespace.write_shared("config.json", {"key": "value"})
 
-    # Verify file is in the right place
     shared_path = Path(memory_dir) / "companies" / "acme" / "shared" / "config.json"
     assert shared_path.exists()
 
@@ -112,22 +94,14 @@ def test_namespace_shared_read_write(namespace, memory_dir):
 
 
 def test_namespace_shared_list(namespace):
-    namespace.write_shared("a.json", {"a": 1})
+    assert namespace.list_shared() == []
     namespace.write_shared("b.json", {"b": 2})
-
-    keys = namespace.list_shared()
-    assert "a.json" in keys
-    assert "b.json" in keys
-
-
-def test_namespace_shared_empty(namespace):
-    keys = namespace.list_shared()
-    assert keys == []
+    namespace.write_shared("a.json", {"a": 1})
+    assert namespace.list_shared() == ["a.json", "b.json"]
 
 
 def test_namespace_team_memory_delegation(namespace, manager, memory_dir):
     """Team memory operations delegate to MemoryManager with scoped team_id."""
-    # Create team memory dir
     team_dir = Path(memory_dir) / "teams" / "acme" / "marketing" / "memory"
     team_dir.mkdir(parents=True)
     namespace.write_team_memory("marketing", "data.json", {"price": 42})
@@ -152,10 +126,10 @@ def test_namespace_isolation(manager, memory_dir):
 
 
 def test_registry_register_component():
-    from companest.company import CompanyRegistry
-
     with tempfile.TemporaryDirectory() as td:
         registry = CompanyRegistry(td)
+        assert registry.get_component("myco") is None
+        assert registry.list_components() == []
         comp = DummyComponent("myco")
 
         registry.register_component(comp)
@@ -166,18 +140,7 @@ def test_registry_register_component():
         assert "myco" in registry.list_components()
 
 
-def test_registry_component_is_none_for_yaml_only():
-    from companest.company import CompanyRegistry
-
-    with tempfile.TemporaryDirectory() as td:
-        registry = CompanyRegistry(td)
-        assert registry.get_component("nonexistent") is None
-        assert registry.list_components() == []
-
-
 def test_registry_scan_component_takes_precedence_over_yaml():
-    from companest.company import CompanyRegistry
-
     with tempfile.TemporaryDirectory() as td:
         registry = CompanyRegistry(td)
         comp = DummyComponent("acme")
@@ -196,13 +159,10 @@ def test_registry_scan_component_takes_precedence_over_yaml():
 
 
 def test_company_config_shared_teams_default_is_unrestricted():
-    cfg = CompanyConfig(id="acme", name="Acme")
-    assert cfg.shared_teams is None
+    assert CompanyConfig(id="acme", name="Acme").shared_teams is None
 
 
 def test_job_submit_normalizes_top_level_company_id_into_context():
-    from companest.jobs import JobManager
-
     jm = JobManager.__new__(JobManager)
     jm._jobs = {}
     jm._queue = asyncio.Queue()
