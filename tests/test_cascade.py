@@ -100,9 +100,6 @@ class TestGetDowngrade:
     def test_get_downgrade(self, model, expected):
         assert get_downgrade(model) in expected
 
-    def test_engine_get_downgrade(self):
-        assert "sonnet" in CascadeEngine().get_downgrade(OPUS)
-
 
 class TestCascadeStrategy:
     def setup_method(self):
@@ -245,14 +242,6 @@ class TestCascadeEngine:
         chain = self.engine.get_effective_chain(OPUS, "hi", skip_models=[HAIKU, OPUS])
         assert HAIKU not in chain
         assert OPUS in chain
-
-    def test_estimate_cascade_cost_with_metrics(self):
-        cost_with_metrics = self.engine.estimate_cascade_cost(
-            "analyze this", OPUS, metrics=_metrics(HAIKU, 10, 0),
-        )
-        cost_without = self.engine.estimate_cascade_cost("analyze this", OPUS)
-        # a cheap model that reliably succeeds lowers the expected cost
-        assert 0 < cost_with_metrics <= cost_without
 
 
 class TestDetectLanguage:

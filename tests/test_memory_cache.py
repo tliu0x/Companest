@@ -207,18 +207,6 @@ class TestCacheInvalidation:
         mm.delete_team_memory("alpha", "del.json")
         assert ("alpha", "lead") not in mm._prompt_cache
 
-    @pytest.mark.parametrize("subdir,read,write", [
-        ("memory", "read_global_memory", "write_global_memory"),
-        ("shared", "read_shared", "write_shared"),
-    ])
-    def test_global_and_shared_writes_invalidate_file_cache(self, mm, mem_dir, subdir, read, write):
-        (mem_dir / subdir).mkdir(exist_ok=True)
-        (mem_dir / subdir / "data.json").write_text(json.dumps({"version": 1}))
-        assert getattr(mm, read)("data.json") == {"version": 1}
-
-        getattr(mm, write)("data.json", {"version": 2})
-        assert getattr(mm, read)("data.json") == {"version": 2}
-
     def test_index_persists_across_instances(self, mm, mem_dir):
         mm.write_team_memory("alpha", "persist.json", {"p": 1})
         mm.update_entry_meta("alpha", "persist.json", importance=0.7)

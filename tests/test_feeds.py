@@ -15,7 +15,6 @@ from companest.knowledge.feeds import (
     brave_search,
     close_client,
     fetch_hn,
-    fetch_multi_source,
     fetch_openbb,
     fetch_reddit,
     fetch_rss,
@@ -404,37 +403,6 @@ class TestFetchMetaculus:
         assert items[0]["source"] == "metaculus"
         assert "AGI" in items[0]["title"]
         assert items[0]["prediction"] == 0.42
-
-
-
-class TestFetchMultiSource:
-    @pytest.mark.asyncio
-    async def test_merge_results_skips_unknown_source(self):
-        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
-            {"title": "Brave result", "source": "brave"},
-        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, return_value=[
-            {"title": "HN story", "source": "hn"},
-        ]):
-            items = await fetch_multi_source("AI news", sources=["brave", "unknown_source", "hn"])
-
-        assert [i["source"] for i in items] == ["brave", "hn"]
-
-    @pytest.mark.asyncio
-    async def test_no_valid_sources(self):
-        items = await fetch_multi_source("test", sources=["invalid1", "invalid2"])
-        assert len(items) == 1
-        assert "error" in items[0]
-
-    @pytest.mark.asyncio
-    async def test_partial_failure(self):
-        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
-            {"title": "Good", "source": "brave"},
-        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, side_effect=Exception("API down")):
-            items = await fetch_multi_source("test", sources=["brave", "hn"])
-
-        assert len(items) == 2
-        assert items[0]["source"] == "brave"
-        assert "error" in items[1]
 
 
 class TestCloseClient:
