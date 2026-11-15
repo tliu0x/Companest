@@ -22,10 +22,10 @@ Alpha, but usable today as a shared runtime for multiple companies. Interfaces m
 
 ### Runtime Install
 
-Use this when you want to run the API server and Claude-backed teams:
+Use this when you want to run the API server and agent teams:
 
 ```bash
-pip install -e ".[claude,server]"
+pip install -e ".[agents,server]"
 ```
 
 ### Development Install

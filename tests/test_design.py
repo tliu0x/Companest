@@ -949,8 +949,7 @@ class TestToolRegistry:
         provider = ToolProvider(
             name="kalshi",
             tool_names={"place_order", "get_markets"},
-            mcp_factory=None,
-            openai_factory=None,
+            factory=None,
         )
         reg.register(provider)
         assert "kalshi" in reg.list_providers()

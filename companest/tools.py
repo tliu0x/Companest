@@ -1,18 +1,17 @@
 """
 Companest Tools
 
-Memory tools for Pi agents, exposed as MCP servers for claude-agent-sdk
-and as function tools for openai-agents.
-
-Built-in SDK tools (Read, Write, Edit, Bash, WebSearch, etc.) are referenced
-by name in allowed_tools -no definitions needed here.
+Tools for Pi agents. Each tool is defined once as a ToolDefinition and
+adapted to a LangChain tool for the agent runtime.
 
 This module defines:
 - ToolDefinition: define a tool once (name, description, params, handler)
-- Adapter functions: definitions_to_mcp(), definitions_to_openai()
+- definitions_to_langchain(): the adapter to LangChain tools
 - Definition builders: create_*_tool_defs() for each tool group
-- Backward-compat wrappers: create_*_mcp_server(), create_*_openai_tools()
+- ToolRegistry: providers, presets, skills and external MCP servers
 - Tool preset mappings for different Pi roles
+
+Built-in file, shell and web tools live in companest/builtin_tools.py.
 """
 
 import inspect
@@ -68,7 +67,7 @@ TOOL_PRESETS = {
 # Default deny list -tools blocked unless Pi explicitly opts out with "none"
 DEFAULT_TOOLS_DENY = {"Bash"}
 
-# Claude Agent SDK built-in tool names
+# Built-in tool names (companest/builtin_tools.py)
 CLAUDE_BUILTIN_TOOLS = {
     "Read", "Write", "Edit", "Bash", "Glob", "Grep",
     "WebSearch", "WebFetch",
@@ -167,7 +166,7 @@ def load_skills(base_path: str) -> Dict[str, SkillDefinition]:
 @dataclass
 class ToolDefinition:
     """
-    Define a tool once. Adapters convert to MCP or OpenAI format.
+    Define a tool once; definitions_to_langchain adapts it for the agent runtime.
 
     Parameters dict maps param_name -> spec:
         {"key": {"type": "string", "description": "...", "optional": True}}
@@ -179,85 +178,35 @@ class ToolDefinition:
     handler: Callable  # async (dict) -> str
 
 
-def definitions_to_mcp(defs: List[ToolDefinition], server_name: str):
-    """
-    Convert ToolDefinitions to an in-process MCP server.
-    Returns None if claude_agent_sdk is not installed.
-    """
-    try:
-        from claude_agent_sdk import tool, create_sdk_mcp_server
-    except ImportError:
-        logger.debug("claude_agent_sdk not installed, skipping MCP server")
-        return None
-
-    mcp_tools = []
-    for d in defs:
-        # Strip "optional" from param specs before passing to SDK
-        params = {
-            k: {kk: vv for kk, vv in v.items() if kk != "optional"}
-            for k, v in d.parameters.items()
-        }
-
-        @tool(d.name, d.description, params)
-        async def _handler(args, _h=d.handler):
-            text = await _h(args)
-            return {"content": [{"type": "text", "text": text}]}
-
-        mcp_tools.append(_handler)
-
-    return create_sdk_mcp_server(
-        name=server_name,
-        version="1.0.0",
-        tools=mcp_tools,
-    )
-
-
-def _to_openai_json_schema(params: Dict[str, dict]) -> dict:
-    """Convert flat param dict to full JSON Schema for OpenAI function tools."""
+def _to_json_schema(params: Dict[str, dict]) -> dict:
+    """Convert the flat parameter dict to a JSON Schema object."""
     properties = {}
     required = []
     for name, spec in params.items():
-        prop = {k: v for k, v in spec.items() if k not in ("optional",)}
-        properties[name] = prop
+        properties[name] = {k: v for k, v in spec.items() if k != "optional"}
         if not spec.get("optional", False):
             required.append(name)
-
-    schema = {
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": False,
-    }
+    schema = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required
     return schema
 
 
-def definitions_to_openai(defs: List[ToolDefinition]) -> list:
-    """
-    Convert ToolDefinitions to OpenAI Agents SDK FunctionTool objects.
-    Returns empty list if openai-agents is not installed.
-    """
-    try:
-        from agents import FunctionTool
-    except ImportError:
-        logger.debug("openai-agents not installed, skipping OpenAI tools")
-        return []
+def definitions_to_langchain(defs: List[ToolDefinition]) -> list:
+    """Convert ToolDefinitions to LangChain tools."""
+    from langchain_core.tools import StructuredTool
 
     tools = []
     for d in defs:
-        schema = _to_openai_json_schema(d.parameters)
+        async def _invoke(_h=d.handler, **kwargs):
+            return await _h(kwargs)
 
-        async def _invoke(ctx, json_string, _h=d.handler):
-            args = json.loads(json_string)
-            return await _h(args)
-
-        tools.append(FunctionTool(
+        tools.append(StructuredTool.from_function(
+            coroutine=_invoke,
             name=d.name,
             description=d.description,
-            params_json_schema=schema,
-            on_invoke_tool=_invoke,
+            args_schema=_to_json_schema(d.parameters),
         ))
-
     return tools
 
 
@@ -925,75 +874,6 @@ def create_orchestrator_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
     ]
 
 
-# -- Backward-compat wrappers (used by pi.py fallback paths) --
-
-
-def create_memory_mcp_server(memory, team_id, pi_id):
-    return definitions_to_mcp(create_memory_tool_defs(memory, team_id, pi_id), "mem")
-
-def create_memory_openai_tools(memory, team_id, pi_id):
-    return definitions_to_openai(create_memory_tool_defs(memory, team_id, pi_id))
-
-def create_scheduler_mcp_server(user_scheduler, user_id, chat_id, channel):
-    return definitions_to_mcp(create_scheduler_tool_defs(user_scheduler, user_id, chat_id, channel), "sched")
-
-def create_scheduler_openai_tools(user_scheduler, user_id, chat_id, channel):
-    return definitions_to_openai(create_scheduler_tool_defs(user_scheduler, user_id, chat_id, channel))
-
-def create_feed_mcp_server():
-    return definitions_to_mcp(create_feed_tool_defs(), "feed")
-
-def create_feed_openai_tools():
-    return definitions_to_openai(create_feed_tool_defs())
-
-def create_public_knowledge_mcp_server(bucket="", prefix="companest-public-knowledge/", region="us-east-1", endpoint_url=""):
-    from .knowledge.public import create_public_knowledge_tool_defs
-    return definitions_to_mcp(create_public_knowledge_tool_defs(bucket, prefix, region, endpoint_url), "pk")
-
-def create_public_knowledge_openai_tools(bucket="", prefix="companest-public-knowledge/", region="us-east-1", endpoint_url=""):
-    from .knowledge.public import create_public_knowledge_tool_defs
-    return definitions_to_openai(create_public_knowledge_tool_defs(bucket, prefix, region, endpoint_url))
-
-def create_sessions_mcp_server(
-    memory,
-    team_id,
-    pi_id,
-    team_registry=None,
-    company_id: Optional[str] = None,
-    shared_teams: Optional[List[str]] = None,
-):
-    return definitions_to_mcp(
-        create_sessions_tool_defs(
-            memory,
-            team_id,
-            pi_id,
-            team_registry,
-            company_id=company_id,
-            shared_teams=shared_teams,
-        ),
-        "sessions",
-    )
-
-def create_sessions_openai_tools(
-    memory,
-    team_id,
-    pi_id,
-    team_registry=None,
-    company_id: Optional[str] = None,
-    shared_teams: Optional[List[str]] = None,
-):
-    return definitions_to_openai(
-        create_sessions_tool_defs(
-            memory,
-            team_id,
-            pi_id,
-            team_registry,
-            company_id=company_id,
-            shared_teams=shared_teams,
-        )
-    )
-
-
 # -- Tool Registry --------------------------------------------
 
 
@@ -1015,12 +895,58 @@ class ToolContext:
 
 @dataclass
 class ToolProvider:
-    """A registered tool source."""
+    """A registered tool source: `factory(ctx)` returns its ToolDefinitions."""
     name: str
     tool_names: Set[str]
-    mcp_factory: Optional[Callable[[ToolContext], Any]] = None
-    openai_factory: Optional[Callable[[ToolContext], list]] = None
+    factory: Optional[Callable[[ToolContext], List[ToolDefinition]]] = None
     requires: Optional[Callable[[ToolContext], bool]] = None
+
+
+def _requires(names: Set[str], presets: tuple = (), prerequisite: Optional[Callable[[ToolContext], bool]] = None):
+    """Build a provider `requires` check.
+
+    The provider is active when its prerequisite holds and either the Pi is in
+    default-all mode or its tools_config names one of the tools or presets.
+    """
+    def check(ctx: ToolContext, default_all: bool = False) -> bool:
+        if prerequisite is not None and not prerequisite(ctx):
+            return False
+        return default_all or any(t in names or t in presets for t in ctx.tools_config)
+    return check
+
+
+def _scheduler_defs(ctx: ToolContext) -> List[ToolDefinition]:
+    uc = ctx.user_context or {}
+    return create_scheduler_tool_defs(
+        ctx.user_scheduler,
+        user_id=uc.get("user_id", ""),
+        chat_id=uc.get("chat_id", ""),
+        channel=uc.get("channel", "telegram"),
+    )
+
+
+def _sessions_defs(ctx: ToolContext) -> List[ToolDefinition]:
+    return create_sessions_tool_defs(
+        ctx.memory, ctx.team_id, ctx.pi_id,
+        team_registry=ctx.team_registry,
+        company_id=ctx.company_id,
+        shared_teams=ctx.extra.get("company_shared_teams"),
+    )
+
+
+def _public_knowledge_defs(ctx: ToolContext) -> List[ToolDefinition]:
+    from .knowledge.public import create_public_knowledge_tool_defs
+    return create_public_knowledge_tool_defs()
+
+
+def _builtin_defs(ctx: ToolContext) -> List[ToolDefinition]:
+    from .builtin_tools import create_builtin_tool_defs
+    return create_builtin_tool_defs(ctx)
+
+
+def _public_knowledge_enabled(ctx: ToolContext) -> bool:
+    import os
+    return os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true")
 
 
 class ToolRegistry:
@@ -1035,61 +961,47 @@ class ToolRegistry:
         self._providers: Dict[str, ToolProvider] = {}
         self._custom_presets: Dict[str, List[str]] = {}
         self._skills: Dict[str, SkillDefinition] = {}
-        self._external_mcp_configs: Dict[str, dict] = {}  # name -> sdk config
+        self._external_mcp_configs: Dict[str, dict] = {}  # name -> MCP server config
         self.memory_backend: Optional[MemoryBackend] = None  # set by orchestrator
         self._company_mcp_names: Dict[str, set] = {}  # company_id -> set of scoped names
         self._register_builtins()
 
     def _register_builtins(self) -> None:
-        """Register the four built-in tool providers."""
-        self.register(ToolProvider(
-            name="memory",
-            tool_names=CUSTOM_TOOL_NAMES,
-            mcp_factory=self._memory_mcp_factory,
-            openai_factory=self._memory_openai_factory,
-        ))
-        self.register(ToolProvider(
-            name="scheduler",
-            tool_names=SCHEDULER_TOOL_NAMES,
-            mcp_factory=self._scheduler_mcp_factory,
-            openai_factory=self._scheduler_openai_factory,
-            requires=self._scheduler_requires,
-        ))
-        self.register(ToolProvider(
-            name="feed",
-            tool_names=FEED_TOOL_NAMES,
-            mcp_factory=self._feed_mcp_factory,
-            openai_factory=self._feed_openai_factory,
-            requires=self._feed_requires,
-        ))
-        self.register(ToolProvider(
-            name="sessions",
-            tool_names=SESSIONS_TOOL_NAMES,
-            mcp_factory=self._sessions_mcp_factory,
-            openai_factory=self._sessions_openai_factory,
-            requires=self._sessions_requires,
-        ))
-        self.register(ToolProvider(
-            name="orchestrator",
-            tool_names=ORCHESTRATOR_TOOL_NAMES,
-            mcp_factory=self._orchestrator_mcp_factory,
-            openai_factory=self._orchestrator_openai_factory,
-            requires=self._orchestrator_requires,
-        ))
-        self.register(ToolProvider(
-            name="git",
-            tool_names=GIT_TOOL_NAMES,
-            mcp_factory=self._git_mcp_factory,
-            openai_factory=self._git_openai_factory,
-            requires=self._git_requires,
-        ))
-        self.register(ToolProvider(
-            name="public_knowledge",
-            tool_names=PUBLIC_KNOWLEDGE_TOOL_NAMES,
-            mcp_factory=self._pk_mcp_factory,
-            openai_factory=self._pk_openai_factory,
-            requires=self._pk_requires,
-        ))
+        """Register the built-in tool providers."""
+        for provider in (
+            ToolProvider("builtin", CLAUDE_BUILTIN_TOOLS, _builtin_defs, requires=lambda ctx, default_all=False: True),
+            ToolProvider(
+                "memory", CUSTOM_TOOL_NAMES,
+                lambda ctx: create_memory_tool_defs(ctx.memory, ctx.team_id, ctx.pi_id, memory_backend=ctx.memory_backend),
+            ),
+            ToolProvider(
+                "scheduler", SCHEDULER_TOOL_NAMES, _scheduler_defs,
+                _requires(SCHEDULER_TOOL_NAMES, ("scheduler",), lambda ctx: bool(ctx.user_context and ctx.user_scheduler)),
+            ),
+            ToolProvider(
+                "feed", FEED_TOOL_NAMES, lambda ctx: create_feed_tool_defs(),
+                _requires(FEED_TOOL_NAMES, ("collector",)),
+            ),
+            ToolProvider(
+                "sessions", SESSIONS_TOOL_NAMES, _sessions_defs,
+                _requires(SESSIONS_TOOL_NAMES, ("messenger",)),
+            ),
+            # Orchestrator tools need run_team_fn in the run context.
+            ToolProvider(
+                "orchestrator", ORCHESTRATOR_TOOL_NAMES, create_orchestrator_tool_defs,
+                _requires(ORCHESTRATOR_TOOL_NAMES, ("ceo",), lambda ctx: bool(ctx.extra.get("run_team_fn"))),
+            ),
+            # Git tools need a workspace attached to the run.
+            ToolProvider(
+                "git", GIT_TOOL_NAMES, create_git_tool_defs,
+                _requires(GIT_TOOL_NAMES, ("coder", "code-reviewer"), lambda ctx: bool(ctx.extra.get("workspace_path"))),
+            ),
+            ToolProvider(
+                "public_knowledge", PUBLIC_KNOWLEDGE_TOOL_NAMES, _public_knowledge_defs,
+                _requires(PUBLIC_KNOWLEDGE_TOOL_NAMES, ("researcher", "collector"), _public_knowledge_enabled),
+            ),
+        ):
+            self.register(provider)
 
     def register(self, provider: ToolProvider) -> None:
         """Add or replace a tool provider."""
@@ -1188,31 +1100,47 @@ class ToolRegistry:
 
         return all_tools
 
-    def get_mcp_servers(self, ctx: ToolContext) -> Dict[str, Any]:
-        """Get MCP servers from all active providers."""
-        servers = {}
+    def get_tool_defs(self, ctx: ToolContext) -> List[ToolDefinition]:
+        """ToolDefinitions from active providers that this Pi is allowed to use."""
+        allowed = {
+            name.rsplit("__", 1)[-1]
+            for name in self.resolve_tool_names(ctx.tools_config, tools_deny=ctx.tools_deny)
+        }
+        defs: List[ToolDefinition] = []
+        seen: Set[str] = set()
         for provider in self._providers.values():
-            if not provider.mcp_factory:
+            if not provider.factory or not self._is_active(provider, ctx):
                 continue
-            if not self._is_active(provider, ctx):
-                continue
-            server = provider.mcp_factory(ctx)
-            if server:
-                servers[provider.name] = server
-        return servers
+            for d in provider.factory(ctx) or []:
+                if d.name in allowed and d.name not in ctx.tools_deny and d.name not in seen:
+                    seen.add(d.name)
+                    defs.append(d)
+        return defs
 
-    def get_openai_tools(self, ctx: ToolContext) -> list:
-        """Get OpenAI function tools from all active providers."""
+    def get_tools(self, ctx: ToolContext) -> list:
+        """LangChain tools for this Pi run."""
+        return definitions_to_langchain(self.get_tool_defs(ctx))
+
+    async def get_external_mcp_tools(self, company_id: Optional[str] = None, tools_deny: Optional[Set[str]] = None) -> list:
+        """Load tools from the external MCP servers visible to this company.
+
+        A server that fails to connect is logged and skipped so it cannot
+        take the whole run down.
+        """
+        configs = self.get_external_mcp_servers(company_id=company_id)
+        if not configs:
+            return []
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+
         tools = []
-        for provider in self._providers.values():
-            if not provider.openai_factory:
-                continue
-            if not self._is_active(provider, ctx):
-                continue
-            provider_tools = provider.openai_factory(ctx)
-            if provider_tools:
-                tools.extend(provider_tools)
-        return tools
+        for name, cfg in configs.items():
+            try:
+                client = MultiServerMCPClient({name: _to_mcp_connection(cfg)})
+                tools.extend(await client.get_tools())
+            except Exception as e:
+                logger.warning("External MCP server %r unavailable: %s", name, e)
+        deny = tools_deny or set()
+        return [t for t in tools if t.name not in deny]
 
     def resolve_tool_names(
         self, tools_config: List[str], tools_deny: Optional[Set[str]] = None,
@@ -1276,168 +1204,19 @@ class ToolRegistry:
                 resolved_names.add(name)
         return bool(provider.tool_names & resolved_names)
 
-    # -- Built-in provider factories (thin wrappers) -----------
 
-    @staticmethod
-    def _memory_mcp_factory(ctx: ToolContext) -> Any:
-        defs = create_memory_tool_defs(ctx.memory, ctx.team_id, ctx.pi_id, memory_backend=ctx.memory_backend)
-        return definitions_to_mcp(defs, "mem")
-
-    @staticmethod
-    def _memory_openai_factory(ctx: ToolContext) -> list:
-        defs = create_memory_tool_defs(ctx.memory, ctx.team_id, ctx.pi_id, memory_backend=ctx.memory_backend)
-        return definitions_to_openai(defs)
-
-    @staticmethod
-    def _scheduler_mcp_factory(ctx: ToolContext) -> Any:
-        uc = ctx.user_context
-        if not uc or not ctx.user_scheduler:
-            return None
-        defs = create_scheduler_tool_defs(
-            ctx.user_scheduler,
-            user_id=uc.get("user_id", ""),
-            chat_id=uc.get("chat_id", ""),
-            channel=uc.get("channel", "telegram"),
-        )
-        return definitions_to_mcp(defs, "sched")
-
-    @staticmethod
-    def _scheduler_openai_factory(ctx: ToolContext) -> list:
-        uc = ctx.user_context
-        if not uc or not ctx.user_scheduler:
-            return []
-        defs = create_scheduler_tool_defs(
-            ctx.user_scheduler,
-            user_id=uc.get("user_id", ""),
-            chat_id=uc.get("chat_id", ""),
-            channel=uc.get("channel", "telegram"),
-        )
-        return definitions_to_openai(defs)
-
-    @staticmethod
-    def _scheduler_requires(ctx: ToolContext, default_all: bool = False) -> bool:
-        if not ctx.user_context or not ctx.user_scheduler:
-            return False
-        if default_all:
-            return True
-        return any(
-            t in SCHEDULER_TOOL_NAMES or t == "scheduler"
-            for t in ctx.tools_config
-        )
-
-    @staticmethod
-    def _feed_requires(ctx: ToolContext, default_all: bool = False) -> bool:
-        if default_all:
-            return True
-        return any(
-            t in FEED_TOOL_NAMES or t == "collector"
-            for t in ctx.tools_config
-        )
-
-    @staticmethod
-    def _feed_mcp_factory(ctx: ToolContext) -> Any:
-        return definitions_to_mcp(create_feed_tool_defs(), "feed")
-
-    @staticmethod
-    def _feed_openai_factory(ctx: ToolContext) -> list:
-        return definitions_to_openai(create_feed_tool_defs())
-
-    @staticmethod
-    def _sessions_requires(ctx: ToolContext, default_all: bool = False) -> bool:
-        if default_all:
-            return True
-        return any(
-            t in SESSIONS_TOOL_NAMES or t == "messenger"
-            for t in ctx.tools_config
-        )
-
-    @staticmethod
-    def _sessions_mcp_factory(ctx: ToolContext) -> Any:
-        defs = create_sessions_tool_defs(
-            ctx.memory, ctx.team_id, ctx.pi_id,
-            team_registry=ctx.team_registry,
-            company_id=ctx.company_id,
-            shared_teams=ctx.extra.get("company_shared_teams"),
-        )
-        return definitions_to_mcp(defs, "sessions")
-
-    @staticmethod
-    def _sessions_openai_factory(ctx: ToolContext) -> list:
-        defs = create_sessions_tool_defs(
-            ctx.memory, ctx.team_id, ctx.pi_id,
-            team_registry=ctx.team_registry,
-            company_id=ctx.company_id,
-            shared_teams=ctx.extra.get("company_shared_teams"),
-        )
-        return definitions_to_openai(defs)
-
-    @staticmethod
-    def _orchestrator_requires(ctx: ToolContext, default_all: bool = False) -> bool:
-        """Orchestrator tools are active only when run_team_fn is in extra."""
-        if not ctx.extra.get("run_team_fn"):
-            return False
-        if default_all:
-            return True
-        return any(
-            t in ORCHESTRATOR_TOOL_NAMES or t == "ceo"
-            for t in ctx.tools_config
-        )
-
-    @staticmethod
-    def _orchestrator_mcp_factory(ctx: ToolContext) -> Any:
-        defs = create_orchestrator_tool_defs(ctx)
-        return definitions_to_mcp(defs, "orchestrator")
-
-    @staticmethod
-    def _orchestrator_openai_factory(ctx: ToolContext) -> list:
-        defs = create_orchestrator_tool_defs(ctx)
-        return definitions_to_openai(defs)
-
-    @staticmethod
-    def _git_requires(ctx: ToolContext, default_all: bool = False) -> bool:
-        """Git tools are active only when workspace_path is in extra."""
-        if not ctx.extra.get("workspace_path"):
-            return False
-        if default_all:
-            return True
-        return any(
-            t in GIT_TOOL_NAMES or t in ("coder", "code-reviewer")
-            for t in ctx.tools_config
-        )
-
-    @staticmethod
-    def _git_mcp_factory(ctx: ToolContext) -> Any:
-        defs = create_git_tool_defs(ctx)
-        return definitions_to_mcp(defs, "git")
-
-    @staticmethod
-    def _git_openai_factory(ctx: ToolContext) -> list:
-        defs = create_git_tool_defs(ctx)
-        return definitions_to_openai(defs)
-
-    @staticmethod
-    def _pk_requires(ctx: ToolContext, default_all: bool = False) -> bool:
-        import os
-        if not os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true"):
-            return False
-        if default_all:
-            return True
-        return any(
-            t in PUBLIC_KNOWLEDGE_TOOL_NAMES or t in ("researcher", "collector")
-            for t in ctx.tools_config
-        )
-
-    @staticmethod
-    def _pk_mcp_factory(ctx: ToolContext) -> Any:
-        from .knowledge.public import create_public_knowledge_tool_defs
-        defs = create_public_knowledge_tool_defs()
-        return definitions_to_mcp(defs, "pk")
-
-    @staticmethod
-    def _pk_openai_factory(ctx: ToolContext) -> list:
-        from .knowledge.public import create_public_knowledge_tool_defs
-        defs = create_public_knowledge_tool_defs()
-        return definitions_to_openai(defs)
+def _to_mcp_connection(cfg: dict) -> dict:
+    """Convert a stored MCP server config to a langchain-mcp-adapters connection."""
+    transport = cfg.get("type", "stdio")
+    if transport == "stdio":
+        conn = {"transport": "stdio", "command": cfg["command"], "args": list(cfg.get("args", []))}
+        if cfg.get("env"):
+            conn["env"] = cfg["env"]
+        return conn
+    conn = {"transport": "streamable_http" if transport == "http" else transport, "url": cfg["url"]}
+    if cfg.get("headers"):
+        conn["headers"] = cfg["headers"]
+    return conn
 
 
 # -- Tool name resolution -------------------------------------

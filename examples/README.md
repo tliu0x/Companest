@@ -41,7 +41,7 @@ Included:
 ## Run The Local Demo
 
 ```bash
-pip install -e ".[claude,server]"
+pip install -e ".[agents,server]"
 cp -r examples/minimal-setup/.companest .companest
 cp examples/minimal-setup/.env.example .env
 companest validate

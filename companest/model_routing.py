@@ -145,3 +145,33 @@ def resolve_model_endpoint(
         f"Enable the LiteLLM proxy for custom model routing.",
         details={"model": model},
     )
+
+
+def build_chat_model(model: str, proxy_config: Optional["ProxyConfig"] = None):
+    """Build the LangChain chat model for a model name.
+
+    Claude models use ChatAnthropic; everything else speaks the OpenAI chat
+    completions protocol through ChatOpenAI. With the LiteLLM proxy enabled,
+    both point at the proxy. Raises ConfigurationError for missing keys or
+    models with no reachable endpoint.
+    """
+    endpoint = resolve_model_endpoint(model, proxy_config)
+    kwargs = {"model": model}
+    proxy_enabled = bool(proxy_config and proxy_config.enabled)
+    if proxy_enabled:
+        base_url = proxy_config.base_url.rstrip("/")
+        api_key = proxy_config.default_key or proxy_config.master_key
+        kwargs["base_url"] = base_url if endpoint.provider == PROVIDER_ANTHROPIC else base_url + "/v1"
+        if api_key:
+            kwargs["api_key"] = api_key
+    else:
+        if endpoint.base_url:
+            kwargs["base_url"] = endpoint.base_url
+        if endpoint.api_key:
+            kwargs["api_key"] = endpoint.api_key
+
+    if endpoint.provider == PROVIDER_ANTHROPIC:
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(**kwargs)
+    from langchain_openai import ChatOpenAI
+    return ChatOpenAI(**kwargs)
