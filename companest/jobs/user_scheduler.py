@@ -52,6 +52,7 @@ class ScheduledJob:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     active: bool = True
     company_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -70,6 +71,7 @@ class ScheduledJob:
             "created_at": self.created_at,
             "active": self.active,
             "company_id": self.company_id,
+            "workspace_id": self.workspace_id,
         }
 
 
@@ -97,8 +99,9 @@ class UserScheduler:
         self._db = await aiosqlite.connect(str(self._db_path))
         await self._db.execute(_METADATA_SCHEMA)
         columns = await (await self._db.execute("PRAGMA table_info(scheduled_jobs)")).fetchall()
-        if "company_id" not in {row[1] for row in columns}:
-            await self._db.execute("ALTER TABLE scheduled_jobs ADD COLUMN company_id TEXT")
+        for column in ("company_id", "workspace_id"):
+            if column not in {row[1] for row in columns}:
+                await self._db.execute(f"ALTER TABLE scheduled_jobs ADD COLUMN {column} TEXT")
         await self._db.commit()
 
         # APScheduler jobs live in memory only; _restore_jobs rebuilds them from SQLite (no pickling).
@@ -144,6 +147,7 @@ class UserScheduler:
         team_id: Optional[str] = None,
         mode: str = "default",
         company_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> ScheduledJob:
         if not self._started:
             raise SchedulerError("UserScheduler not started")
@@ -165,6 +169,7 @@ class UserScheduler:
             team_id=team_id,
             mode=mode,
             company_id=company_id,
+            workspace_id=workspace_id,
         )
 
         await self._save_job_metadata(job)
@@ -337,15 +342,15 @@ class UserScheduler:
             """INSERT INTO scheduled_jobs
                (id, user_id, chat_id, channel, task, description,
                 trigger_type, trigger_args, team_id, mode,
-                fire_count, last_fired, created_at, active, company_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                fire_count, last_fired, created_at, active, company_id, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.id, job.user_id, job.chat_id, job.channel,
                 job.task, job.description,
                 job.trigger_type, json.dumps(job.trigger_args),
                 job.team_id, job.mode,
                 job.fire_count, job.last_fired, job.created_at,
-                1 if job.active else 0, job.company_id,
+                1 if job.active else 0, job.company_id, job.workspace_id,
             ),
         )
         await self._db.commit()
@@ -394,4 +399,5 @@ class UserScheduler:
             created_at=row["created_at"],
             active=bool(row["active"]),
             company_id=row.get("company_id"),
+            workspace_id=row.get("workspace_id"),
         )

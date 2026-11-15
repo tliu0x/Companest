@@ -22,6 +22,14 @@
 - Feeds, public knowledge, and digests: `companest/knowledge/`
 - Company onboarding and public examples: `examples/`, `deploy/config.prod.md`
 
+## Execution Boundary
+
+- `companest/runtime/` contains the Substrate transport, actor workload and in-actor harness.
+- All control-plane task entry points use `JobManager`; do not add a local execution fallback or queue.
+- TeamRegistry holds declarations, not live instances. Runtime state belongs to Substrate.
+- Shared business storage and job capabilities are documented in `deploy/substrate/README.md` and `storage.md`.
+- Only default/collaborative/council are execution modes. Cascade is a model strategy; decomposition/delegation are bounded business workflows.
+
 ## Source Of Truth
 
 - Config discovery order is documented in `README.md` and implemented in the configuration layer. Preserve backward compatibility unless the change is deliberate and documented.

@@ -21,7 +21,6 @@ class TestCompanyScoping:
         from companest.orchestration.orchestrator import CompanestOrchestrator
 
         orch = CompanestOrchestrator.__new__(CompanestOrchestrator)
-        orch._ceo_pis = {}
         orch.company_registry = type("Registry", (), {
             "list_companies": lambda self: ["ceo-disabled"]
         })()

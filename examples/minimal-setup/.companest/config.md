@@ -19,7 +19,7 @@ A minimal local development configuration for the public sample.
   },
   "debug": true,
   "global_timeout": 300,
-  "data_dir": "/var/lib/companest",
+  "data_dir": "/mnt/companest/state",
   "storage_lock_dir": "/mnt/companest/locks",
   "substrate": {
     "executable": "kubectl-ate",
@@ -32,7 +32,8 @@ A minimal local development configuration for the public sample.
         "template": "companest-sample"
       }
     }
-  }
+  },
+  "control_state_dir": "/var/lib/companest"
 }
 ```
 

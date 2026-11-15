@@ -66,6 +66,7 @@ esac
 go run ./cmd/ate-setup deploy ate-system \
     --ko-default-platforms="linux/$NODE_ARCH" \
     --sandbox-classes=gvisor \
+    --preview=ExternalVolumes \
     --credential-provider='{"name":"k8s.io"}' \
     --ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/ate-system/sa/atenet-client
 go run ./cmd/ate-setup deploy demo counter --ko-default-platforms="linux/$NODE_ARCH"

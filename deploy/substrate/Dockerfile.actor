@@ -5,12 +5,8 @@ COPY pyproject.toml README.md ./
 COPY companest ./companest
 RUN pip install --no-cache-dir ".[agents,server,scheduler]" \
     && useradd --uid 10001 --create-home actor \
-    && mkdir /data /sample && chown actor:actor /data /sample
-
-# Public sample configuration only. Production images must supply a scoped
-# configuration tree, and credentials must be injected outside the sandbox.
-COPY --chown=actor:actor examples/minimal-setup/.companest /sample/.companest
+    && mkdir /data /state /locks /workspaces && chown actor:actor /data /state /locks /workspaces
 USER actor
-WORKDIR /sample
+WORKDIR /state
 ENTRYPOINT ["python", "-m", "companest.runtime.actor"]
-CMD ["--config", "/sample/.companest/config.md", "--company", "@shared"]
+CMD ["--help"]

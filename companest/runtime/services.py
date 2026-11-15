@@ -1,6 +1,8 @@
 """Job-scoped access to business services owned by the control plane."""
 
 import uuid
+import os
+import ssl
 import httpx
 
 from ..orchestration.cost_gate import CostDecision, CostEstimate
@@ -15,7 +17,8 @@ class ActorServices:
         self.capability = capability
 
     async def call(self, operation, payload):
-        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+        trust = ssl.create_default_context(cafile=os.environ.get("SSL_CERT_FILE"))
+        async with httpx.AsyncClient(timeout=120, trust_env=False, verify=trust) as client:
             response = await client.post(
                 self.url + "/" + operation, json=payload,
                 headers={"Authorization": "Bearer " + self.capability},
@@ -31,6 +34,10 @@ class ActorServices:
         })
         value["estimate"] = CostEstimate(**value["estimate"])
         return CostDecision(**value)
+
+    async def emit(self, event):
+        if event.type.value in {"task_started", "task_completed", "task_failed", "task_routed"}:
+            await self.call("events", {"type": event.type.value, "data": event.data})
 
     async def add_job(self, **kwargs):
         return ScheduledJob(**await self.call("schedule", {"action": "add", **kwargs}))

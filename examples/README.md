@@ -1,8 +1,7 @@
 # Companest Examples
 
-For the pinned Substrate development launch and the packaged sample actor, see
-[`deploy/substrate/README.md`](../deploy/substrate/README.md). The public API's
-execution path has not yet switched to Substrate.
+Execution requires the pinned Substrate runtime and persistent actor mounts; see
+[`deploy/substrate/README.md`](../deploy/substrate/README.md).
 
 The `examples/` directory contains three practical starting points.
 
@@ -10,7 +9,7 @@ The `examples/` directory contains three practical starting points.
 
 ### `minimal-setup`
 
-Use this when you want a local `.companest/` runtime that you can validate and run immediately.
+Use this when you want a set of public team declarations to validate and install on persistent storage.
 
 Included:
 
@@ -44,14 +43,19 @@ Included:
 
 ## Run The Local Demo
 
+Follow the [Substrate deployment guide](../deploy/substrate/README.md) first.
+Install the public declarations into your mounted data directory, set the
+control config's mount paths and scope-to-template map, then run:
+
 ```bash
-pip install -e ".[agents,server]"
-cp -r examples/minimal-setup/.companest .companest
-cp examples/minimal-setup/.env.example .env
-companest validate
-companest serve
+pip install -e ".[server,scheduler]"
+companest validate <CONFIG_PATH>
+companest serve -c <CONFIG_PATH>
 companest team run general "Summarize this project"
 ```
+
+The public workspace registry is a mount example. Set its path and matching
+storage identity file; company workspaces also require `company_id`.
 
 ## Registering External Companies
 

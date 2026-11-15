@@ -188,12 +188,11 @@ class MemoryManager:
     @synchronized
     def list_teams(self) -> List[str]:
         teams_dir = self.base_path / "teams"
-        if not teams_dir.exists():
-            return []
-        return [
+        shared = [
             d.name for d in teams_dir.iterdir()
             if d.is_dir() and (d / "team.md").exists()
-        ]
+        ] if teams_dir.exists() else []
+        return sorted(set(shared) | set(self._team_path_overrides))
 
     @synchronized
     def _index_path(self, team_id: str) -> Path:

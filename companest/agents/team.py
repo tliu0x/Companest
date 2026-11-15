@@ -1,6 +1,5 @@
 import logging
 import re
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -9,6 +8,7 @@ from ..memory import MemoryManager
 from .cascade import CascadeEngine
 from ..exceptions import TeamError
 from ..utils import run_sync
+from ..modes import normalize_execution
 
 if TYPE_CHECKING:
     from ..config import ProxyConfig
@@ -27,6 +27,8 @@ class TeamConfig:
         always_on: bool = False,
         pis: Optional[List[PiConfig]] = None,
         rubric: Optional[List[Dict[str, Any]]] = None,
+        cascade: bool = False,
+        workflow: Optional[str] = None,
         cascade_cross_provider: bool = False,
         cascade_skip_models: Optional[List[str]] = None,
     ):
@@ -34,7 +36,7 @@ class TeamConfig:
         self.local_id: str = ""
         self.role = role
         self.lead_pi = lead_pi
-        self.mode = mode
+        self.mode, self.cascade, self.workflow = normalize_execution(mode or "default", cascade, workflow)
         self.enabled = enabled
         self.always_on = always_on
         self.pis = pis or []
@@ -76,6 +78,8 @@ class TeamConfig:
             role=role,
             lead_pi=lead_pi,
             mode=mode,
+            cascade=_extract_field(text, "cascade", "false").lower() == "true",
+            workflow=_extract_field(text, "workflow"),
             enabled=enabled,
             always_on=always_on,
             pis=pis,
@@ -95,7 +99,9 @@ class AgentTeam:
         cascade_engine: Optional[CascadeEngine] = None,
     ):
         self.id = config.id
-        self.mode = config.mode or "default"
+        self.mode = config.mode
+        self.cascade = config.cascade
+        self.workflow = config.workflow
         self.rubric = config.rubric
         self.memory = memory
         self.pis: Dict[str, Pi] = {}
@@ -132,22 +138,16 @@ class TeamRegistry:
         self,
         base_path: str,
         memory: MemoryManager,
-        idle_timeout: int = 300,
         proxy_config: Optional["ProxyConfig"] = None,
         tool_registry=None,
         cascade_engine: Optional[CascadeEngine] = None,
     ):
         self.base_path = Path(base_path)
         self.memory = memory
-        self.idle_timeout = idle_timeout
         self.proxy_config = proxy_config
         self.tool_registry = tool_registry
         self.cascade_engine = cascade_engine
         self._configs: Dict[str, TeamConfig] = {}
-        self._instances: Dict[str, AgentTeam] = {}
-        self._last_used: Dict[str, float] = {}
-        self._active_count: Dict[str, int] = {}
-        self._meta_teams: Dict[str, AgentTeam] = {}
 
     def scan_configs(self) -> None:
         self._configs.clear()
@@ -163,20 +163,10 @@ class TeamRegistry:
                     config = TeamConfig.from_markdown(team_md)
                     if config.enabled:
                         self._configs[config.id] = config
-                        if config.always_on:
-                            team = AgentTeam(config, self.memory, proxy_config=self.proxy_config,
-                                            tool_registry=self.tool_registry,
-                                            cascade_engine=self.cascade_engine)
-                            self._meta_teams[config.id] = team
-                            logger.info(f"Meta-team loaded: {config.id}")
                 except Exception as e:
                     logger.error(f"Failed to load team config {team_dir.name}: {e}")
 
-        logger.info(
-            f"Scanned {len(self._configs)} team(s): "
-            f"{len(self._meta_teams)} meta, "
-            f"{len(self._configs) - len(self._meta_teams)} on-demand"
-        )
+        logger.info("Scanned %d team declarations", len(self._configs))
 
     def scan_company_teams(self, company_id: str, teams_dir: Path) -> None:
         self._configs.update(self._load_company_teams(company_id, teams_dir))
@@ -208,60 +198,15 @@ class TeamRegistry:
         if not config.enabled:
             return
         self._configs[config.id] = config
-        if always_on or config.always_on:
-            team = AgentTeam(config, self.memory, proxy_config=self.proxy_config,
-                             tool_registry=self.tool_registry,
-                             cascade_engine=self.cascade_engine)
-            self._meta_teams[config.id] = team
-            logger.info(f"Registered meta-team: {config.id}")
-        else:
-            logger.info(f"Registered on-demand team: {config.id}")
+        config.always_on = always_on or config.always_on
 
-    def get_or_create(self, team_id: str) -> AgentTeam:
-        if team_id in self._meta_teams:
-            return self._meta_teams[team_id]
-
-        if team_id in self._instances:
-            self._last_used[team_id] = time.time()
-            return self._instances[team_id]
-
+    def create(self, team_id: str) -> AgentTeam:
+        """Construct a harness for this actor invocation; never cache instances."""
         config = self._configs.get(team_id)
-        if not config:
+        if config is None:
             raise TeamError(f"Team not found: {team_id}")
-
-        team = AgentTeam(config, self.memory, proxy_config=self.proxy_config,
-                         tool_registry=self.tool_registry,
-                         cascade_engine=self.cascade_engine)
-        self._instances[team_id] = team
-        self._last_used[team_id] = time.time()
-        logger.info(f"On-demand team created: {team_id}")
-        return team
-
-    def acquire(self, team_id: str) -> None:
-        self._active_count[team_id] = self._active_count.get(team_id, 0) + 1
-
-    def release(self, team_id: str) -> None:
-        count = self._active_count.get(team_id, 0)
-        if count > 1:
-            self._active_count[team_id] = count - 1
-        else:
-            self._active_count.pop(team_id, None)
-        self._last_used[team_id] = time.time()
-
-    def evict_idle(self) -> List[str]:
-        now = time.time()
-        evicted = []
-        for tid, ts in list(self._last_used.items()):
-            if now - ts > self.idle_timeout:
-                if self._active_count.get(tid, 0) > 0:
-                    logger.debug(f"Skipping eviction of '{tid}': {self._active_count[tid]} task(s) active")
-                    continue
-                self._instances.pop(tid, None)
-                self._last_used.pop(tid, None)
-                self._active_count.pop(tid, None)
-                evicted.append(tid)
-                logger.info(f"Evicted idle team: {tid}")
-        return evicted
+        return AgentTeam(config, self.memory, proxy_config=self.proxy_config,
+                         tool_registry=self.tool_registry, cascade_engine=self.cascade_engine)
 
     def get_config(self, team_id: str) -> Optional[TeamConfig]:
         return self._configs.get(team_id)
@@ -273,25 +218,16 @@ class TeamRegistry:
         to_remove = [tid for tid in self._configs if tid.startswith(f"{company_id}/")]
         for tid in to_remove:
             self._configs.pop(tid, None)
-            if self._active_count.get(tid, 0) > 0:
-                logger.warning(
-                    f"Deferring instance cleanup for '{tid}': "
-                    f"{self._active_count[tid]} task(s) still active"
-                )
-                continue
-            self._instances.pop(tid, None)
-            self._last_used.pop(tid, None)
-            self._active_count.pop(tid, None)
-            self._meta_teams.pop(tid, None)
 
     def list_teams(self) -> List[str]:
         return list(self._configs.keys())
 
     def list_active(self) -> List[str]:
-        return list(self._instances.keys()) + list(self._meta_teams.keys())
+        # Live execution belongs to Substrate; declarations are not running actors.
+        return []
 
     def list_meta_teams(self) -> List[str]:
-        return list(self._meta_teams.keys())
+        return [tid for tid, cfg in self._configs.items() if cfg.always_on]
 
     def get_fleet_status(self) -> Dict:
         return {
@@ -301,7 +237,9 @@ class TeamRegistry:
             "configs": {
                 tid: {
                     "role": c.role,
-                    "mode": c.mode or "default",
+                    "mode": c.mode,
+                    "cascade": c.cascade,
+                    "workflow": c.workflow,
                     "always_on": c.always_on,
                     "pi_count": len(c.pis),
                     "lead_pi": c.lead_pi,

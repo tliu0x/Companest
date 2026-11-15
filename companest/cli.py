@@ -453,11 +453,6 @@ def cmd_serve(args) -> int:
                 "LiteLLM proxy enabled but no default key set. "
                 "Set LITELLM_DEFAULT_KEY env var."
             )
-    elif not os.getenv("ANTHROPIC_API_KEY"):
-        print_warning(
-            "No LiteLLM proxy and no ANTHROPIC_API_KEY. "
-            "Pi agents won't be able to call LLM APIs."
-        )
     print()
 
     from .orchestration.orchestrator import CompanestOrchestrator
@@ -480,7 +475,7 @@ def cmd_serve(args) -> int:
                 f"{len(orchestrator.team_registry.list_meta_teams())} meta"
             )
 
-        job_manager = JobManager(orchestrator, data_dir=Path(config.data_dir))
+        job_manager = JobManager(orchestrator, data_dir=Path(config.control_state_dir or config.data_dir))
         await job_manager.start()
 
         # user_scheduler and cost_gate only exist once init_teams() has run
@@ -637,12 +632,16 @@ def cmd_job_submit(args, call):
         "task": args.task,
         "submitted_by": getattr(args, "submitted_by", "cli"),
     }
+    if getattr(args, "idempotency_key", None):
+        payload["idempotency_key"] = args.idempotency_key
     if getattr(args, "company_id", None):
         payload["company_id"] = args.company_id
     context = {}
-    for key in ("team_id", "workspace_id"):
+    for key in ("team_id", "workspace_id", "mode", "workflow"):
         if getattr(args, key, None):
             context[key] = getattr(args, key)
+    if getattr(args, "cascade", None) is not None:
+        context["cascade"] = args.cascade
     if context:
         payload["context"] = context
 
@@ -1016,7 +1015,7 @@ def main():
     p = command(team, "run", cmd_team_run, "Run task on a team")
     p.add_argument("team_id", help="Team ID")
     p.add_argument("task", help="Task description")
-    p.add_argument("--skip-cost", action="store_true", help="Skip CostGate check")
+    p.add_argument("--skip-cost", action="store_true", help="Deprecated compatibility flag; CostGate is always enforced")
     api_url(p)
 
     finance = group("finance", "Finance / spending management")
@@ -1028,7 +1027,11 @@ def main():
     p.add_argument("--company-id", help="Company scope for this task")
     p.add_argument("--team-id", help="Run a specific team; otherwise auto-route")
     p.add_argument("--workspace-id", help="Registered workspace to use")
+    p.add_argument("--mode", choices=["default", "collaborative", "council"])
+    p.add_argument("--cascade", action=argparse.BooleanOptionalAction, default=None, help="Model cascade strategy")
+    p.add_argument("--workflow", choices=["decompose", "delegate"])
     p.add_argument("--submitted-by", default="cli", help="Client label (not an authentication identity)")
+    p.add_argument("--idempotency-key", help="Stable key for safe retries of the same submission")
     api_url(p)
     json_output(p)
     p = command(job, "status", cmd_job_status, "Get job status")

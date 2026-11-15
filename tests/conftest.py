@@ -22,7 +22,10 @@ def ensure_event_loop():
 @pytest.fixture
 def api_runtime(tmp_path):
     """Factory for (config, orchestrator, server) on a minimal one-team runtime in tmp_path."""
-    from companest.config import CompanestConfig
+    from companest.config import CompanestConfig, SubstrateConfig, ActorBinding
+    from unittest.mock import AsyncMock
+    from datetime import datetime, timezone
+    import httpx
     from companest.jobs.jobs import JobManager
     from companest.orchestration.orchestrator import CompanestOrchestrator
     from companest.server.server import CompanestAPIServer
@@ -46,12 +49,35 @@ def api_runtime(tmp_path):
         (tmp_path / "soul.md").write_text("Master soul", encoding="utf-8")
         (tmp_path / "user.md").write_text("# User\n- Language: English", encoding="utf-8")
 
-        config = CompanestConfig(debug=True)
+        (tmp_path / ".companest-storage-id").write_text("test-storage")
+        config = CompanestConfig(debug=True, data_dir=str(tmp_path), storage_lock_dir=str(tmp_path),
+            substrate=SubstrateConfig(storage_id="test-storage", scopes={
+                key: ActorBinding(atespace="test", template="sample")
+                for key in ("@shared", "prediction-market", "acme")
+            }))
         if auth_token:
             config.api.auth_token = auth_token
         orchestrator = CompanestOrchestrator(config)
         orchestrator.init_teams(str(tmp_path))
-        server = CompanestAPIServer(config, JobManager(orchestrator, data_dir=tmp_path), orchestrator)
+        # API contract tests replace only the external Substrate transport.
+        client = AsyncMock()
+        resources, records = {}, {}
+        async def create(ref, template):
+            resources[ref.name] = {"metadata": {"name": ref.name, "atespace": ref.atespace, "uid": ref.name},
+                                   "actorTemplate": {"name": template}}
+            return resources[ref.name]
+        async def get(ref):
+            return resources[ref.name]
+        async def request(ref, method, path, *, payload=None, port=8080):
+            if payload:
+                records[ref.name] = {"job_id": payload["job_id"], "company_id": payload["company_id"],
+                    "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
+                    "completed_at": None, "result": None, "error": None}
+            return httpx.Response(200, json=records[ref.name])
+        client.create_actor.side_effect = create
+        client.get_actor.side_effect = get
+        client.request.side_effect = request
+        server = CompanestAPIServer(config, JobManager(orchestrator, data_dir=tmp_path, client=client), orchestrator)
         return config, orchestrator, server
 
     return build

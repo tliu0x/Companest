@@ -269,6 +269,7 @@ async def test_external_tools_honor_plain_and_legacy_deny_names(monkeypatch):
 @pytest.mark.asyncio
 async def test_shared_pi_uses_each_runs_company_and_workspace(api_runtime, monkeypatch, tmp_path):
     _, orch, _ = api_runtime()
+    from companest.runtime.harness import ActorOrchestrator
     orch.company_registry.save(CompanyConfig(id="alpha", name="Alpha", shared_teams=["general"]))
     orch.company_registry.save(
         CompanyConfig(id="beta", name="Beta", shared_teams=["general", "other"]),
@@ -293,9 +294,9 @@ async def test_shared_pi_uses_each_runs_company_and_workspace(api_runtime, monke
 
     monkeypatch.setattr(Pi, "_run_agent", run_agent)
     await asyncio.wait_for(asyncio.gather(
-        orch.run_team("first", "general", skip_cost_check=True,
+        ActorOrchestrator.run_team(orch, "first", "general", skip_cost_check=True,
                       user_context={"company_id": "alpha", "workspace_id": "demo"}),
-        orch.run_team("second", "general", skip_cost_check=True,
+        ActorOrchestrator.run_team(orch, "second", "general", skip_cost_check=True,
                       user_context={"company_id": "beta"}),
     ), timeout=5)
 

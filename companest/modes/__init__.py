@@ -9,7 +9,21 @@ if TYPE_CHECKING:
 
 ProgressCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 
-VALID_MODES = ("default", "cascade", "loop", "council", "collaborative", "conditional")
+VALID_MODES = ("default", "collaborative", "council")
+LEGACY_MODES = ("cascade", "loop", "conditional")
+
+
+def normalize_execution(mode, cascade=False, workflow=None):
+    """Read old manifests until the next major release; advertise only 3 modes."""
+    if mode == "cascade":
+        mode, cascade = "default", True
+    elif mode == "loop":
+        mode, workflow = "default", "decompose"
+    elif mode == "conditional":
+        mode, workflow = "default", "delegate"
+    if mode not in VALID_MODES or workflow not in (None, "decompose", "delegate"):
+        raise ValueError("Invalid execution mode or workflow")
+    return mode, cascade, workflow
 
 
 def _with_memory_task_hint(
@@ -72,23 +86,16 @@ class ModeRegistry:
 def build_default_registry(run_team_fn=None) -> ModeRegistry:
     registry = ModeRegistry()
     registry.register(DefaultMode(cascade=False))
-    registry.register(DefaultMode(cascade=True), name="cascade")
-    registry.register(LoopMode())
     registry.register(CouncilMode())
     registry.register(CollaborativeMode())
-
-    if run_team_fn is not None:
-        registry.register(ConditionalMode(run_team_fn=run_team_fn))
 
     return registry
 
 
 # Imported last: the mode modules import the names defined above.
 from .default import DefaultMode
-from .loop import LoopMode
 from .council import CouncilMode
 from .collaborative import CollaborativeMode
-from .conditional import ConditionalMode
 
 __all__ = [
     "ExecutionMode",
@@ -97,8 +104,6 @@ __all__ = [
     "VALID_MODES",
     "ProgressCallback",
     "DefaultMode",
-    "LoopMode",
     "CouncilMode",
     "CollaborativeMode",
-    "ConditionalMode",
 ]

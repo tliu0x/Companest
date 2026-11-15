@@ -47,7 +47,7 @@ class CompanestAPIServer:
                 return team_id.split("/", 1)[0]
         job_id = event.get("job_id")
         if isinstance(job_id, str) and job_id:
-            job = await self.job_manager.get_job(job_id)
+            job = self.job_manager._jobs.get(job_id)
             if job and job.company_id:
                 return job.company_id
         return None
@@ -98,6 +98,9 @@ class CompanestAPIServer:
 
         @asynccontextmanager
         async def lifespan(application):
+            owns_jobs = bool(self.job_manager.settings and not self.job_manager._db)
+            if owns_jobs:
+                await self.job_manager.start()
             self._event_store = EventStore(self.job_manager._data_dir)
             self._event_history_enabled = await self._event_store.start()
             if self._event_history_enabled:
@@ -124,6 +127,8 @@ class CompanestAPIServer:
                 await self._event_store.close()
             self._event_store = None
             self._event_history_enabled = False
+            if owns_jobs:
+                await self.job_manager.stop()
 
         app = FastAPI(
             title="Companest Control Panel",
@@ -183,6 +188,7 @@ class CompanestAPIServer:
             context: Optional[Dict[str, Any]] = None
             submitted_by: str = Field(default="api", max_length=100)
             company_id: Optional[str] = Field(default=None, max_length=100)
+            idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
         class WebhookRequest(BaseModel):
             task: str = Field(..., min_length=1, max_length=50000)
@@ -228,6 +234,7 @@ class CompanestAPIServer:
                     scheduled = await scheduler.add_job(
                         user_id=user_id, chat_id=job.context.get("chat_id", ""),
                         channel=job.context.get("channel", "api"), company_id=job.company_id,
+                        workspace_id=job.context.get("workspace_id"),
                         task=body["task"], description=body.get("description", ""),
                         trigger_type=body["trigger_type"], trigger_args=body["trigger_args"],
                         team_id=team_id, mode=body.get("mode", "default"),
@@ -245,6 +252,18 @@ class CompanestAPIServer:
                 raise JobError("Unknown schedule action")
             except (KeyError, ValueError, JobError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+
+        @app.post("/internal/jobs/{job_id}/events")
+        async def actor_event(job_id: str, request: Request):
+            job = actor_job(request, job_id)
+            body = await request.json()
+            if body.get("type") not in {"task_started", "task_completed", "task_failed", "task_routed"}:
+                raise HTTPException(status_code=400, detail="Unsupported actor business event")
+            await self._broadcast_event({
+                **body.get("data", {}), "type": body["type"],
+                "job_id": job.id, "company_id": job.company_id,
+            })
+            return {"accepted": True}
 
         def _parse_status(status: Optional[str]) -> Optional[JobStatus]:
             if not status:
@@ -280,6 +299,7 @@ class CompanestAPIServer:
                     context=req.context,
                     submitted_by=req.submitted_by,
                     company_id=req.company_id,
+                    idempotency_key=req.idempotency_key,
                 )
                 await self._broadcast_event({
                     "type": "job.submitted",
@@ -323,6 +343,7 @@ class CompanestAPIServer:
                 "total": total_matching,
                 "limit": limit,
                 "offset": offset,
+                "projection": "last_observed; query an individual job to refresh execution",
             }
             if not filter_status and not company_id:
                 result["stats"] = self.job_manager.get_stats()
@@ -458,6 +479,8 @@ class CompanestAPIServer:
         class TeamRunRequest(BaseModel):
             task: str = Field(..., min_length=1, max_length=50000)
             mode: Optional[str] = Field(default=None, pattern=_modes_pattern)
+            cascade: Optional[bool] = None
+            workflow: Optional[str] = Field(default=None, pattern=r"^(decompose|delegate)$")
             skip_cost_check: bool = False
             user_context: Optional[Dict[str, Any]] = None
 
@@ -521,7 +544,7 @@ class CompanestAPIServer:
                 }
             return self.orchestrator.team_registry.get_fleet_status()
 
-        @app.get("/api/teams/{team_id}")
+        @app.get("/api/teams/{team_id:path}")
         async def get_team(team_id: str):
             if not hasattr(self.orchestrator, "team_registry"):
                 raise HTTPException(status_code=503, detail="Teams not initialized")
@@ -540,7 +563,7 @@ class CompanestAPIServer:
                 "active": team_id in self.orchestrator.team_registry.list_active(),
             }
 
-        @app.post("/api/teams/{team_id}/run")
+        @app.post("/api/teams/{team_id:path}/run")
         async def run_team_task(team_id: str, req: TeamRunRequest):
             if not self.orchestrator:
                 raise HTTPException(status_code=503, detail="Orchestrator not available")
@@ -550,10 +573,12 @@ class CompanestAPIServer:
                     team_id=team_id,
                     skip_cost_check=req.skip_cost_check,
                     mode=req.mode,
-                    user_context=req.user_context,
+                    user_context={**(req.user_context or {}),
+                                  **({"cascade": req.cascade} if req.cascade is not None else {}),
+                                  **({"workflow": req.workflow} if req.workflow else {})},
                 )
                 return {"team_id": team_id, "result": result}
-            except OrchestratorError as e:
+            except (OrchestratorError, JobError) as e:
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.get("/api/finance/summary")

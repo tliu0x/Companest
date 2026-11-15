@@ -39,12 +39,6 @@ class BackgroundManager:
 
     def setup_schedules(self) -> None:
         self._scheduler.add(
-            "team_eviction",
-            self.evict_idle_teams,
-            interval=300,
-        )
-
-        self._scheduler.add(
             "daily_spend_report",
             self.send_daily_report,
             interval=86400,
@@ -61,13 +55,6 @@ class BackgroundManager:
                     interval=cycle["interval"],
                     run_on_start=False,
                 )
-
-    async def evict_idle_teams(self) -> None:
-        evicted = self._team_registry.evict_idle()
-        if evicted:
-            logger.info(f"Evicted idle teams: {evicted}")
-            for tid in evicted:
-                await self._events.emit(EventType.TEAM_EVICTED, {"team_id": tid})
 
     async def send_daily_report(self) -> None:
         try:
@@ -123,6 +110,7 @@ class BackgroundManager:
             "chat_id": job.chat_id,
             "channel": job.channel,
             "company_id": job.company_id,
+            "workspace_id": job.workspace_id,
         }
 
         if job.team_id:

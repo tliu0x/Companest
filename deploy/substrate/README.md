@@ -1,165 +1,160 @@
-# Substrate development environment
+# Agent Substrate execution
 
-This is the first migration gate: launch the actual upstream runtime and
-exercise a stateful actor before changing Companest's execution path. The
-Companest API still uses the existing execution path until that gate and the
-agent task integration pass. Installing this environment alone does not migrate
-jobs or establish production readiness.
+Companest is the business control plane; Agent Substrate owns actor placement,
+sandbox lifecycle, suspension and recovery. Every job uses one actor, identified
+by a persisted atespace/name/UID reference separate from the business job ID.
+There is no local worker queue or execution fallback.
 
-`upstream-revision` pins the source used by the installer and CLI. The current pin is
+The integration pins upstream
 [`a46464663fa076221ae059e1fd4a273edd2d8b09`](https://github.com/agent-substrate/substrate/tree/a46464663fa076221ae059e1fd4a273edd2d8b09).
-Its `go.mod` requires Go 1.27.0 with toolchain 1.27.3. Go downloads the toolchain
-when needed; Docker and kubectl must already be available.
+`upstream-revision`, the bootstrap and the control image must use the same pin.
+The transport calls the official `kubectl-ate` CLI rather than inventing a REST
+API or Python SDK. It uses the CLI's authenticated loopback actor proxy.
 
-## Launch and verify
+## Provision the runtime and storage
 
-From the Companest repository root:
+1. Install Docker and kubectl, then run `bash deploy/substrate/bootstrap.sh`.
+   The script uses upstream's kind and ate-setup installers, creates an isolated
+   `companest-substrate` cluster/kubeconfig, builds for the actual node CPU,
+   enables gVisor and `ExternalVolumes`, and installs the CLI and counter demo.
+   Go 1.27.0/toolchain 1.27.3 is required by the pin; the toolchain downloads if
+   needed. Build concurrency defaults to two. The script refuses registry or
+   cluster collisions rather than replacing someone else's environment.
+   `COMPANEST_SUBSTRATE_STATE_DIR` selects its local state directory.
+2. Configure the pinned upstream [CSI integration](https://github.com/agent-substrate/substrate/blob/a46464663fa076221ae059e1fd4a273edd2d8b09/docs/guides/csi-deployment.md)
+   and retained storage using [storage.md](storage.md). The bootstrap does not
+   provision company business storage. `storage.example.yaml` provides NFS
+   StorageClasses; substitute the server and provision directory ownership.
+   CSI support is an upstream preview feature. Ordinary actor volumes are
+   deleted with the actor, so the retained directory configuration is required.
+3. Build/push the harness and use its digest in a copy of
+   `actor-template.example.json` outside the repository:
+
+   ```bash
+   docker build -f deploy/substrate/Dockerfile.actor -t localhost:5001/companest-actor:dev .
+   docker push localhost:5001/companest-actor:dev
+   kubectl-ate --kubeconfig <KUBECONFIG> --context <CONTEXT> create actor-template -f <MANIFEST> --preview
+   ```
+
+   The example selects the counter demo worker pool and shared scope. Production
+   requires dedicated pools, company-specific atespaces/templates, scoped
+   identities/policies, and only the permitted filesystem mounts. The image
+   contains code only; actor config, company data and workspaces come from
+   persistent mounts. Golden snapshots are disabled to read current declarations
+   on startup. The `/data/task.json` journal has its own external per-actor volume.
+4. Configure the API using `deploy/config.prod.md` or the minimal example. Set
+   `data_dir` to persistent business state, `control_state_dir` to persistent
+   local/block storage for SQLite, `storage_lock_dir` to the shared lock mount,
+   and `substrate.storage_id` to its identity marker. Explicitly map each company
+   ID to its atespace/template in `substrate.scopes`; `@shared` enables global
+   jobs. The actor's config sets `control_plane_url` to the private API endpoint
+   for budget, schedule and business event callbacks. Do not mount API admin
+   credentials or the control database into actors.
+5. Start `companest serve -c <CONFIG_PATH>`, or configure the required mount and
+   kubeconfig environment variables for `deploy/docker-compose.yml`. One API
+   process owns each job database. `server` installs required SQLite support;
+   `scheduler` enables cron/interval/date business triggers. Gateway integration
+   remains optional and is no longer a mandatory compose dependency.
+
+The CLI's bootstrap identity is for local development. Production control and
+router access require scoped identities and ingress policies. Actor port 8080
+is reachable only through trusted Substrate routing, never a public unauthenticated
+listener. The template supplies non-secret SDK placeholder keys and a projected
+trust bundle. Configure HTTPS header replacement and grants for DeepSeek and the
+sample Moonshot router using the pinned
+[credential injection guide](https://github.com/agent-substrate/substrate/blob/a46464663fa076221ae059e1fd4a273edd2d8b09/docs/guides/egress-credential-injection.md).
+Without these grants calls fail closed; placeholders are not credentials.
+Provider credentials belong in upstream egress credential injection;
+keep provider/tool destination grants limited to the company. The API still
+requires `COMPANEST_API_TOKEN` outside debug mode; its bearer token is an admin
+credential, not a tenant identity. The actor callback capability grants access
+only to that live job's company, user and services.
+
+## Submit, reconnect and cancel
 
 ```bash
-bash deploy/substrate/bootstrap.sh
+companest job submit "Summarize the briefing" --team-id general --idempotency-key briefing-001 --json
+companest job status <JOB_ID> --json
+companest job cancel <JOB_ID> --json
 ```
 
-The bootstrap uses the upstream kind creation script and `ate-setup` installer.
-It creates `companest-substrate`, writes a dedicated kubeconfig under the state
-directory, builds for the node's CPU architecture, and installs only the gVisor
-sandbox class. It also deploys upstream's counter demo and builds `kubectl-ate`.
-Build concurrency defaults to two through `GOMAXPROCS`; override it explicitly
-only when the development machine has enough spare CPU and memory.
-It does not change the user's current Kubernetes context. Upstream's local
-registry is named `kind-registry`; bootstrap refuses to replace an existing
-registry or cluster whose ownership it cannot establish. The state directory
-can be selected with `COMPANEST_SUBSTRATE_STATE_DIR`.
+Use `--company-id`, `--workspace-id`, `--mode`, `--cascade` and `--workflow` as
+needed. The API equivalents are `company_id`, `context` and `idempotency_key`.
+Retrying an idempotency key for the same company/client label and identical
+request returns the same job; conflicting content is rejected. Without a key,
+each submission intentionally creates a new job. Keep the returned job ID.
 
-Follow the pinned upstream counter walkthrough to inspect an actor, request it
-through a loopback proxy, suspend it, and request it again. The demo increments
-memory, durable-directory and root-filesystem counters. This verifies the
-runtime lifecycle only; it does not establish Companest job recovery, tenant
-isolation or model access. Temporary simulation scripts are kept outside this
-repository. Real model/tool acceptance is outside this migration's scope.
+JobManager saves intent before creation and submission. A lost POST response
+is reconciled through GET; an uncertain task request is never replayed. API
+restart reconnects to the saved actor and does not create a replacement. Old
+unfinished records without references fail with an unknown outcome. Queries
+retain full results and expose transport failures in `execution.error` without
+mistaking an unavailable execution plane for a failed job. Actor environment
+states and business job states remain separate. An individual job query refreshes its projection; list/count/stats return the
+last observed state without network fan-out during an outage. No background
+execution/recovery worker is implemented.
 
-If the Docker Desktop credential helper blocks while pulling public images,
-use a separate empty Docker configuration directory and explicitly set
-`DOCKER_HOST` to the local daemon socket reported by `docker context inspect`.
-Keep those settings in the calling shell; do not edit or copy the user's Docker
-credentials into this repository.
+The actor durably journals acceptance before execution. Identical task requests
+are idempotent; a different job/payload gets 409 and a foreign company gets 403.
+A memory snapshot can resume the same process. A cold startup finding a running
+journal reports an unknown outcome and never replays it. Client/API disconnects
+do not terminate actors. Budget callbacks require the API to be available;
+additional work fails closed when authorization cannot be obtained.
 
-## Verified upstream interfaces
+Cancellation saves intent and asks Substrate to delete the actor. Only successful
+deletion (or confirmed absence) yields `cancelled`; unavailable deletion returns
+503 and subsequent queries retry the intent. External side effects are not
+rolled back. A completed result is committed to SQLite before actor cleanup.
+An unpolled completed actor remains queryable until reconciled/retired; use the
+upstream lifecycle policy for idle sandbox resource management. Back up both
+business storage and the control database. None of this promises exactly-once
+tool/model effects.
 
-The pin exposes `substrate.ateapi.v1.Control` in
-[`api/ateapi/v1/ateapi.proto`](https://github.com/agent-substrate/substrate/blob/a46464663fa076221ae059e1fd4a273edd2d8b09/api/ateapi/v1/ateapi.proto).
-Actor lifecycle is gRPC: `CreateActor`, `GetActor`, `SuspendActor`,
-`ResumeActor`, `DeleteActor`. `Actor.status.state` describes execution
-environment state; it is not a business job status. Actor templates are
-Substrate resources; worker pools are Kubernetes CRDs. There is no assumed
-Python SDK or REST actor endpoint in this integration.
+## Business ownership after migration
 
-The upstream `kubectl-ate proxy actor` uses mTLS and a CONNECT tunnel to
-`atenet-router`; an incoming request can resume a suspended actor. API access
-and router access have distinct authentication requirements. The development
-install explicitly allows the upstream `atenet-client` identity. Production
-control-plane access must use scoped identities and access policies rather
-than the local CLI's shared bootstrap identity.
+| Area | Current owner |
+| --- | --- |
+| Jobs | Companest stores identity, scope, capability, full result and actor projection; Substrate executes. Local queue/workers/replay/eviction removed. |
+| Team registry | Declarations and per-invocation harness construction. Instance cache, active counters and idle eviction removed. |
+| Orchestrator | Company configuration, permissions, triggers, routing declarations and remote submission. Model/tool execution lives in `runtime/harness.py`. |
+| Pi | Existing LangChain harness inside the actor; Substrate core does not replace model/tool business logic. |
+| Company components | Business extensions and async-safe registration hooks retained; no actor placement responsibility. |
+| Schedulers/background | Business cron/interval/date triggers retained. CEO, enrichment, user tasks and Dreamer submit through JobManager. |
+| API/CLI/gateway | Existing admin auth, jobs/results, company operations and optional channel protocol retained; execution submits to Substrate. |
+| Events | Business task/routing events return through job capabilities and retain event-history/WebSocket contracts; actor lifecycle is not duplicated. |
+| CostGate | Control-plane authorization and estimated-spend reservation before team work, including failed/cancelled work. Actor never reads the cross-company finance ledger. |
+| Memory/knowledge | Shared mounted files, Qdrant retrieval, Dreamer, public knowledge and S3 backups retained; snapshots are not domain backups. |
+| Modes/workflows | Three modes; independent cascade strategy. Decomposition/delegation moved to bounded business workflows, without a new workflow runtime. |
+| Deployment | Pinned upstream CLI in the control image; code-only harness image, explicit persistent mounts and scope templates. |
 
-Kind snapshots use the upstream local object-storage service. These local
-volumes disappear when the cluster is deleted; they are not a backup of
-Companest company memory. Provider credentials belong in the upstream egress
-credential provider, whose namespace policy starts with no grants. They must
-not be baked into the actor image or bootstrap arguments.
+For configurations generated before migration, change `mode: cascade` to
+`mode: default` plus `cascade: true`; `mode: loop` to `workflow: decompose`;
+`mode: conditional` to `workflow: delegate`. Compatibility reads remain until
+the next major release. Delegation knows its allowed team list, checks each
+branch budget, permits at most five steps and rejects nested delegation.
+`always_on` now describes meta-team routing; it does not retain a local process.
+The old `skip_cost_check` flag is accepted for compatibility but has no effect.
 
-## Next migration gate
+## Verification scope
 
-The harness workload is built with:
+Earlier in this branch, the pinned control plane and counter launched in an
+isolated arm64 kind environment; state survived synchronous suspend/resume and
+deletion succeeded. The initial harness image also launched under gVisor. These
+historical checks are not acceptance of the final storage/API deployment.
 
-```bash
-docker build -f deploy/substrate/Dockerfile.actor -t localhost:5001/companest-actor:dev .
-docker push localhost:5001/companest-actor:dev
-```
+Per the requested scope, the remaining migration uses simulated transport/models
+and temporary scripts outside the repository. Checks cover persistent memory
+updates across processes, workspace identity/writer exclusion, real API + actor
+harness flow, restart/reconnect, uncertain POST, cancellation/outage, full
+results, central budget authorization and idempotent submission. The final
+actor manifest is strictly parsed against the pinned upstream protobuf schema.
+Existing contract tests were adapted; no new simulation script is shipped.
+Real model/tool execution and final CSI/cluster deployment acceptance were not
+performed. Run that acceptance separately before using this in production.
 
-Copy `actor-template.example.json` outside the repository and replace
-`<ACTOR_IMAGE_DIGEST>` with the digest reference printed by the push. Create it
-using the pinned `kubectl-ate create actor-template -f <manifest>` and the
-dedicated kubeconfig/context. The example uses the upstream counter worker
-pool and atespace, and packages only the public sample in the shared scope.
-
-The workload serves `/readyz`, `POST /task` and `GET /task` on port 8080. A task
-contains `job_id`, `task`, `company_id` and `context`; `context.team_id` selects
-a team, and its absence uses existing automatic routing. The workload checks
-its configured company scope before accepting a task and invokes the existing
-orchestrator, including its team permissions, CostGate and tool restrictions.
-The job ID is supplied by the business control plane and differs from the
-Substrate actor name. This first workload uses one actor per job.
-
-Repeated identical submissions return the same job record; a different job or
-payload receives 409. Execution continues after the submitting HTTP request
-returns. The journal is under `/data`, on an upstream `durableDir`. A memory
-snapshot resumes the process. A cold process startup with a running journal
-marks the job failed with an unknown outcome and never replays it. A terminal
-result survives cold startup if the journal is present. Cancellation must
-terminate the actor through Substrate; closing the HTTP client is not a cancel.
-
-The workload listener requires an isolated actor network and trusted router
-ingress. It is not a public Companest API and must not be exposed directly.
-The sample's data is private to that actor. Shared company memory, writable
-workspaces and dynamic company configuration still need their authoritative
-storage boundary before the API can switch to this workload. Copying a mutable
-company tree into each job image would lose updates and is not a migration.
-
-Submit the packaged harness through the Companest CLI/API job path and preserve
-company authorization and CostGate. Persist a separate
-actor reference alongside the business job ID. The Python transport in
-`companest/runtime/substrate.py` calls this pinned CLI and uses its authenticated
-loopback proxy. It fails on unavailable infrastructure and never retries
-mutations after an ambiguous timeout. It is not yet wired into `JobManager`.
-Finalize actor granularity and
-workspace ownership with the task integration; counter actors do not settle
-that choice. Verify reconnect, cancellation, ambiguous submission and company
-isolation before deleting the local worker queue, instance cache or recovery
-logic. Keep `handoff/` until the migration is complete.
-
-## Development checks recorded
-
-On 2026-11-15 the pinned control plane and the counter demo launched on an
-arm64 kind node. Through `SubstrateClient`, a counter request returned 1 for
-memory, durable files and rootfs; after synchronous suspension a new request
-returned 2 for all three, and deletion succeeded. The harness image also
-started under gVisor and produced its golden snapshot.
-
-Temporary simulations covered transport errors/timeouts and the existing
-harness with its model call replaced: task submission, duplicate suppression,
-company rejection, result retrieval and cold-start failure without replay.
-The inherited suite passed with 523 tests and 3 live-network tests deselected.
-These checks do not establish a completed API migration or real model/tool
-acceptance, which is outside this task's scope.
-
-## Persistent mounts
-
-The current actor now requires persistent business mounts and storage identities;
-see [storage.md](storage.md) and `storage.example.yaml`. The template uses CSI
-volumes with retained shared directories and a separate per-actor journal. Create
-it with `--preview` against a server with `ExternalVolumes` enabled. The image's
-sample files are not the authoritative company/workspace state.
-
-## Control-plane task path
-
-`companest serve` now requires `substrate` configuration with an explicit
-company-ID-to-atespace/template map (`@shared` for global work). See the current
-minimal and production configuration examples. The job database resides under
-`config.data_dir`. Only one API process may own it; SQLite is required by the
-`server` extra. The API admin bearer token remains required outside debug mode.
-
-CLI jobs, API jobs, team runs and gateway calls submit through JobManager. It
-stores the actor reference and intent before creation, keeps full results, and
-reconnects after API restart. It has no queue, execution workers or local runtime
-fallback. Old unfinished records without actor references fail with an unknown
-outcome instead of replaying. Ambiguous create/POST operations retain their job
-ID and can be queried again; POST is not replayed after an uncertain response.
-An unavailable execution plane leaves `execution.error` on the record and does
-not assert that the task failed. Closing a client/API process does not cancel an
-actor. Cancellation is acknowledged only after Substrate deletion succeeds;
-failed deletion returns 503 and leaves the cancellation intent for reconciliation.
-A terminal result is committed before the actor/journal is removed. Querying a
-job reconciles its state; no background worker polls or re-executes jobs.
-
-Budget and schedule callbacks use job-specific capabilities. They cannot use the
-admin API or another job/company. Estimated spend is reserved before a team
-executes, including nested delegation, and remains charged after cancellation.
+The full repository suite passed with **521 tests and 3 live-network tests
+deselected** after the migration. Two obsolete local-runtime implementation
+checks were removed; public API, isolation and result contracts remain covered.
+Compilation and targeted static checks passed. Temporary boundary simulations
+also checked company/capability denial, company/workspace schedule persistence,
+actor UID replacement, malformed records and durable-result-before-deletion.

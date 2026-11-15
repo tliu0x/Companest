@@ -111,7 +111,7 @@ def test_seeded_team_keeps_ceo_memory_namespace(api_runtime):
     with TestClient(server.create_app()) as client:
         response = client.post("/api/companies", json=manifest)
         assert response.status_code == 200, response.text
-        assert orchestrator._ceo_pis["seeded"].team_id == "company-seeded"
+        assert orchestrator.team_registry.get_config("company-seeded").lead_pi == "ceo"
 
 
 def test_create_company_rejects_invalid_team_id_without_persisting(api_runtime):

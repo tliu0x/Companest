@@ -40,18 +40,33 @@ expected storage and workspace identities before running tools. A nonblocking
 filesystem lock rejects concurrent writers to the same workspace. Memory
 read-modify-write operations use a shared reentrant filesystem lock.
 
-For a company template, mount only that company's directory at
-`/state/companies/<company_id>`, the explicitly allowed shared team directories
-at `/state/teams/<team_id>`, its generated CEO team at
-`/state/teams/company-<company_id>`, and that company's workspaces. Use separate
-StorageClasses with fixed retained subdirectories for those mounts. Mount only
-actor configuration, never the control plane's config/credentials/jobs database.
-The `/locks` export carries only lock files and the storage identity. All views
-use that same lock export. Company config, memory seed and team declarations
-therefore update in place and are read afresh by each job. Do not expose other
-company trees through a parent mount or a symlink. Startup rejects visible
-foreign company/team/workspace declarations, but filesystem/network isolation
-must be enforced by operator mounts and Substrate policy, including for Bash.
+For a company template, never mount the complete control-plane data tree.
+Substrate forbids nested volume mount points. Use disjoint mounts and an
+operator-provisioned scope view containing only approved links, for example:
+
+- `/scope`: retained company view with actor-only config, soul/user context,
+  `workspaces.json`, `companies/acme -> /company`,
+  `teams/general -> /shared-general`, and `teams/company-acme -> /ceo`.
+- `/company`: the authoritative `companies/acme` directory.
+- `/shared-general`: the authoritative, explicitly allowed `teams/general`.
+- `/ceo`: the authoritative generated `teams/company-acme` directory.
+- `/locks`, `/workspaces/code`, `/data`: as above, with a company-owned workspace.
+
+Set the actor command to `--config /scope/config.json --company acme` and its
+`data_dir` to `/scope`. Each mount has its own StorageClass selecting the existing
+retained subdirectory, except the unique journal. Provision the symlinks/context
+files in the scope view before launch; they are configuration, not copies of
+mutable team/company memory. The control plane continues to use its original
+canonical paths. Allowed team membership changes require updating the scope view
+and template grants, not copying data into a new job image.
+
+Mount only actor configuration, never the control plane's credentials or jobs
+database. Do not mount the finance ledger into company actors. `/locks` carries
+only lock files and the storage identity. All views use the same lock export.
+Company declarations and memory update in place and are read afresh per job.
+Never expose another company's tree through a parent mount or a symlink. Startup
+rejects visible foreign declarations; filesystem/network isolation still depends
+on operator mounts and Substrate policy, including when Bash is enabled.
 
 The sample image no longer provides mutable business state. Golden snapshots
 are disabled for these templates so each process reads current declarations.

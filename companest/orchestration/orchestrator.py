@@ -17,16 +17,15 @@ from ..jobs.scheduler import Scheduler
 from ..memory.archiver import MemoryArchiver
 from ..events import EventBus, EventCallback, EventType
 from ..agents.tools import ToolProvider, ToolRegistry, load_skills
-from .multi_team import run_multi_team, ProgressCallback
 from .background import BackgroundManager
 from ..companies.company import CompanyRegistry, CompanyConfig
 from ..companies.component import (CompanyContext, CompanyMemoryNamespace,
                                    LoopBoundRegistry, bind_to_loop, run_component_hook)
 from ..companies.ceo_engine import build_cycle_prompt, generate_ceo_soul
 from ..companies.output import MemorySink, OutputSink
-from ..agents.pi import Pi, PiConfig, _run_tool_context
+from ..agents.pi import Pi, PiConfig
 from ..agents.workspace import WorkspaceRegistry
-from ..exceptions import OrchestratorError, TeamError
+from ..exceptions import OrchestratorError
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +212,7 @@ class CompanestOrchestrator:
             )
 
         _US = _import_user_scheduler()
-        self.user_scheduler = _US(data_dir=Path(base_path)) if _US else None
+        self.user_scheduler = _US(data_dir=Path(self.config.control_state_dir or base_path)) if _US else None
 
         # Proxy env vars for the raw provider clients (router, Dreamer)
         if self.config.proxy.enabled:
@@ -241,13 +240,13 @@ class CompanestOrchestrator:
         self.dreamer = Dreamer(memory=self.memory, proxy_config=proxy)
         self.scheduler.add(
             "dream_nightly",
-            self.dreamer.run_all_dreams,
+            lambda: self._run_memory_maintenance("dream"),
             interval=86400,
             run_on_start=False,
         )
         self.scheduler.add(
             "dream_deep",
-            self.dreamer.run_deep_consolidation,
+            lambda: self._run_memory_maintenance("consolidate"),
             interval=604800,
             run_on_start=False,
         )
@@ -289,7 +288,6 @@ class CompanestOrchestrator:
 
         self.company_registry = CompanyRegistry(base_path)
         self.company_registry.scan()
-        self._ceo_pis: Dict[str, Pi] = {}
 
         if not _defer_companies:
             for company in self.company_registry.list_enabled():
@@ -307,7 +305,7 @@ class CompanestOrchestrator:
         logger.info(
             f"Teams initialized: {len(self.team_registry.list_teams())} registered, "
             f"{len(self.team_registry.list_meta_teams())} meta, "
-            f"{len(self._ceo_pis)} CEO agents"
+            "CEO declarations registered"
         )
 
     async def company_operation(self, operation, *args, **kwargs):
@@ -347,6 +345,8 @@ class CompanestOrchestrator:
         return company.shared_teams
 
     def can_access_team(self, company_id: Optional[str], team_id: str) -> bool:
+        if team_id.startswith("company-"):
+            return bool(company_id and team_id == f"company-{company_id}")
         if "/" not in team_id:
             shared_teams = self._get_company_shared_teams(company_id)
             return shared_teams is None or team_id in shared_teams
@@ -470,28 +470,13 @@ class CompanestOrchestrator:
                 max_turns=company.ceo.max_turns,
             )
 
-            ceo_pi = Pi(
-                config=ceo_config,
-                memory=self.memory,
-                team_id=team_id,
-                proxy_config=self.config.proxy if self.config.proxy.enabled else None,
-                tool_registry=self.tool_registry,
-                cascade_engine=self.cascade_engine,
-            )
-
-            ceo_pi._extra_tool_context = {
-                "run_team_fn": self.run_team,
-                "run_auto_fn": self.run_auto,
-                "company_id": company.id,
-                "company_env": company.env,
-                "company_shared_teams": company.shared_teams,
-            }
-
-            self._ceo_pis[company.id] = ceo_pi
+            self.team_registry.register(TeamConfig(
+                id=team_id, role="company", lead_pi="ceo", pis=[ceo_config],
+            ), always_on=True)
 
             self.scheduler.add(
                 f"ceo_{company.id}",
-                lambda c=company, p=ceo_pi: self._run_ceo_cycle(c, p),
+                lambda c=company: self._run_ceo_cycle(c),
                 interval=company.ceo.cycle_interval,
                 run_on_start=False,
                 scope_type="company",
@@ -532,23 +517,23 @@ class CompanestOrchestrator:
         await run_sync(self.memory.unregister_company_paths, company_id)
         self.tool_registry.unregister_company_mcp(company_id)
         self._initialized_components.discard(company_id)
-        self._ceo_pis.pop(company_id, None)
+        self.team_registry._configs.pop(f"company-{company_id}", None)
         self._output_sinks.pop(company_id, None)
 
         logger.info(f"[Company] Teardown complete: {company_id}")
 
     def _is_company_initialized(self, company_id: str) -> bool:
-        return company_id in self._initialized_components or company_id in self._output_sinks or company_id in self._ceo_pis or bool(
+        return company_id in self._initialized_components or company_id in self._output_sinks or bool(
             self.team_registry.get_configs_by_company(company_id)
         )
 
     def _initialized_company_ids(self) -> List[str]:
         """Return company IDs that may still have runtime resources attached."""
-        ids = set(self._ceo_pis) | set(self.company_registry.list_companies())
+        ids = set(self.company_registry.list_companies())
         ids.update(t.split("/", 1)[0] for t in self.team_registry.list_teams() if "/" in t)
         return sorted(ids)
 
-    async def _run_ceo_cycle(self, company: CompanyConfig, ceo_pi: Pi) -> None:
+    async def _run_ceo_cycle(self, company: CompanyConfig) -> None:
         cycle_number = self._cycle_numbers.get(company.id, 0) + 1
         self._cycle_numbers[company.id] = cycle_number
 
@@ -556,9 +541,8 @@ class CompanestOrchestrator:
             self._smart_router.get_available_teams(company.id), cycle_number,
         )
 
-        result = await ceo_pi.run(
-            prompt,
-            cascade=True,
+        result = await self.run_team(
+            prompt, f"company-{company.id}", mode="cascade",
             user_context={
                 "company_id": company.id,
                 "company_context": company.domain,
@@ -684,6 +668,20 @@ class CompanestOrchestrator:
         if not hasattr(self, "team_registry"):
             raise JobError("Teams are not initialized")
         ctx = dict(context)
+        from ..modes import normalize_execution
+        if "cascade" in ctx and not isinstance(ctx["cascade"], bool):
+            raise JobError("cascade must be a boolean model strategy flag")
+        try:
+            normalized, cascade, workflow = normalize_execution(
+                ctx.get("mode") or "default", ctx.get("cascade", False), ctx.get("workflow"),
+            )
+        except ValueError as exc:
+            raise JobError(str(exc)) from exc
+        if ctx.get("mode"):
+            ctx["mode"] = normalized
+            ctx["cascade"] = cascade
+        if workflow:
+            ctx["workflow"] = workflow
         if "company_id" not in ctx:
             resolved = self.company_registry.resolve(ctx.get("channel"), ctx.get("chat_id"), ctx.get("user_id"))
             if resolved.company:
@@ -716,6 +714,15 @@ class CompanestOrchestrator:
             raise OrchestratorError("Substrate JobManager is not started; use companest serve and the task API")
         job_id = await manager.submit(task, context=context, submitted_by="orchestrator")
         return await manager.wait(job_id)
+
+    async def _run_memory_maintenance(self, operation):
+        if not self.config.substrate:
+            raise OrchestratorError("Substrate is required for memory maintenance")
+        for scope in self.config.substrate.scopes:
+            await self._remote_job("Scheduled memory " + operation, {
+                "company_id": None if scope == "@shared" else scope,
+                "maintenance": operation,
+            })
 
     async def run_team(self, task, team_id, skip_cost_check=False, mode=None,
                        on_progress=None, user_context=None, priority="normal"):

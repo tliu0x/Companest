@@ -3,7 +3,7 @@ import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ..utils import run_sync, extract_json_array
-from . import ExecutionMode, ProgressCallback, _lead_pi, _with_memory_task_hint
+from ..modes import ProgressCallback, _lead_pi, _with_memory_task_hint
 from ..exceptions import PiError, TeamError
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class LoopMode(ExecutionMode):
+class Decomposition:
     """Decompose -execute each subtask with fresh context -synthesize."""
 
     def __init__(self, max_subtasks: int = 10, cascade: bool = True):
@@ -42,10 +42,10 @@ class LoopMode(ExecutionMode):
             self._cascade,
             user_context,
         )
-        logger.info(f"[Team:{team.id}] Ralph loop: {len(subtasks)} subtask(s)")
+        logger.info(f"[Team:{team.id}] Decomposition: {len(subtasks)} subtask(s)")
 
         if on_progress:
-            await on_progress(f"\U0001f504 Loop: {len(subtasks)} subtask(s)")
+            await on_progress(f"\U0001f504 Decomposition: {len(subtasks)} subtask(s)")
 
         if len(subtasks) <= 1:
             return await pi.run(

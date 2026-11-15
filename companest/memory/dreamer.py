@@ -238,7 +238,7 @@ class Dreamer:
                 for team, result in stats.items()
             },
         }
-        path = self.memory.base_path / "dream_log.json"
+        path = getattr(self, "log_path", self.memory.base_path / "dream_log.json")
         try:
             with self.memory._append_lock:
                 history = self.memory._read_json(path)

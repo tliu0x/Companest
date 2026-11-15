@@ -45,6 +45,28 @@
         {
           "name": "journal",
           "mountPath": "/data"
+        },
+        {
+          "name": "trust",
+          "mountPath": "/run/ate/trust"
+        }
+      ],
+      "env": [
+        {
+          "name": "DEEPSEEK_API_KEY",
+          "value": "substrate-egress-placeholder"
+        },
+        {
+          "name": "MOONSHOT_API_KEY",
+          "value": "substrate-egress-placeholder"
+        },
+        {
+          "name": "SSL_CERT_FILE",
+          "value": "/run/ate/trust/trust-bundle.pem"
+        },
+        {
+          "name": "REQUESTS_CA_BUNDLE",
+          "value": "/run/ate/trust/trust-bundle.pem"
         }
       ]
     }
@@ -57,7 +79,9 @@
   },
   "snapshotConfig": {
     "preferredFidelity": "SNAPSHOT_FIDELITY_MEMORY",
-    "goldenSnapshotMode": "GOLDEN_SNAPSHOT_MODE_DISABLED"
+    "goldenSnapshotConfig": {
+      "mode": "GOLDEN_SNAPSHOT_MODE_DISABLED"
+    }
   },
   "volumes": [
     {
@@ -94,6 +118,22 @@
           "capacityBytes": "1073741824",
           "storageClassName": "companest-journals"
         }
+      }
+    },
+    {
+      "name": "trust",
+      "systemInfo": {
+        "dataSources": [
+          {
+            "trustBundle": {
+              "names": [
+                "egress-mitm.ate.dev",
+                "system-roots.ate.dev"
+              ],
+              "path": "trust-bundle.pem"
+            }
+          }
+        ]
       }
     }
   ]

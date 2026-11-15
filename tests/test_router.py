@@ -147,7 +147,8 @@ class TestRoutingBindings:
         assert len(decision.teams) == 1
         assert decision.teams[0].team_id == "stock"
         assert decision.confidence == 0.95
-        assert decision.mode == "cascade"
+        assert decision.mode == "default"
+        assert decision.cascade is True
         assert "Binding match" in decision.reasoning
 
     def test_routing_survives_audit_failure(self):

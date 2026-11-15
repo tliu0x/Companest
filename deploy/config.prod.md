@@ -32,7 +32,7 @@ mount paths with your deployment values. There is no local execution fallback.
   },
   "debug": false,
   "global_timeout": 300,
-  "data_dir": "/var/lib/companest",
+  "data_dir": "/mnt/companest/state",
   "storage_lock_dir": "/mnt/companest/locks",
   "substrate": {
     "executable": "kubectl-ate",
@@ -45,7 +45,8 @@ mount paths with your deployment values. There is no local execution fallback.
         "template": "companest-sample"
       }
     }
-  }
+  },
+  "control_state_dir": "/var/lib/companest"
 }
 ```
 

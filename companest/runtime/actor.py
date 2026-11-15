@@ -82,6 +82,11 @@ class ActorWorkload:
                 handle.flush()
                 os.fsync(handle.fileno())
             temporary.replace(self.journal)
+            directory = os.open(self.journal.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
 
         await run_sync(write)
 
@@ -122,6 +127,11 @@ class ActorWorkload:
                 services = ActorServices(self.config.control_plane_url, request.job_id, request.capability)
                 orchestrator.cost_gate = services
                 orchestrator.user_scheduler = services
+                orchestrator.events.on_any(services.emit)
+                if self.company_id:
+                    orchestrator.dreamer.log_path = (
+                        Path(self.config.data_dir) / "companies" / self.company_id / "dream_log.json"
+                    )
                 context = dict(request.context)
                 context["company_id"] = self.company_id
                 team_id = context.get("team_id")
@@ -133,10 +143,15 @@ class ActorWorkload:
                             raise ValueError("Actor workspace is missing or has a different storage identity")
                         await run_sync(ws.validate_storage, self.company_id)
                         try:
-                            locks.enter_context(FileLock(Path(ws.path) / ".companest-execution.lock", blocking=False))
+                            key = hashlib.sha256(ws.storage_id.encode()).hexdigest()
+                            locks.enter_context(FileLock(
+                                Path(self.config.storage_lock_dir) / f"workspace-{key}.lock", blocking=False,
+                            ))
                         except BlockingIOError as exc:
                             raise ValueError("Workspace is busy with another task") from exc
-                    if team_id:
+                    if context.get("maintenance"):
+                        result = await self.maintain_memory(orchestrator, services, context["maintenance"])
+                    elif team_id:
                         result = await orchestrator.run_team(request.task, team_id, mode=context.get("mode"), user_context=context)
                     else:
                         result, routing = await orchestrator.run_auto(request.task, mode=context.get("mode"), user_context=context)
@@ -150,6 +165,29 @@ class ActorWorkload:
         finally:
             self.record["completed_at"] = datetime.now(timezone.utc).isoformat()
             await self.persist()
+
+    async def maintain_memory(self, orchestrator, services, operation):
+        teams = [tid for tid in orchestrator.team_registry.list_teams()
+                 if orchestrator.can_access_team(self.company_id, tid)]
+        if not teams:
+            raise ValueError("No authorized team for memory maintenance")
+        dreamer = orchestrator.dreamer
+        call_llm = dreamer._call_llm
+
+        async def authorized_call(prompt):
+            decision = await services.evaluate(prompt, teams[0], dreamer.model, priority="low")
+            if decision.action == "rejected":
+                raise ValueError("CostGate rejected memory maintenance: " + decision.reason)
+            return await call_llm(prompt)
+
+        dreamer._call_llm = authorized_call
+        if operation == "dream":
+            result = await dreamer.run_all_dreams()
+        elif operation == "consolidate":
+            result = await dreamer.run_deep_consolidation()
+        else:
+            raise ValueError("Unknown memory maintenance operation")
+        return json.dumps(result, ensure_ascii=False)
 
     def validate_scope(self, orchestrator):
         """Fail closed on an accidentally over-broad operator mount."""

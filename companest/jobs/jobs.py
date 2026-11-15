@@ -1,6 +1,7 @@
 import uuid
 import secrets
 import hmac
+import os
 from dataclasses import asdict
 import asyncio
 import logging
@@ -28,18 +29,6 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-VALID_TRANSITIONS: Dict[JobStatus, frozenset] = {
-    JobStatus.PENDING: frozenset({JobStatus.QUEUED, JobStatus.CANCELLED}),
-    JobStatus.QUEUED: frozenset({JobStatus.DISPATCHED, JobStatus.CANCELLED}),
-    JobStatus.DISPATCHED: frozenset({JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELLED}),
-    JobStatus.RUNNING: frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.WAITING_APPROVAL}),
-    JobStatus.WAITING_APPROVAL: frozenset({JobStatus.RUNNING, JobStatus.CANCELLED}),
-    JobStatus.COMPLETED: frozenset(),
-    JobStatus.FAILED: frozenset(),
-    JobStatus.CANCELLED: frozenset(),
-}
 
 
 @dataclass
@@ -98,11 +87,14 @@ class JobManager:
 
     def __init__(self, orchestrator=None, data_dir: Optional[Path] = None, *, client=None):
         self.orchestrator = orchestrator
-        self._data_dir = Path(data_dir or orchestrator.config.data_dir)
+        config = getattr(orchestrator, "config", None)
+        default_dir = (config.control_state_dir or config.data_dir) if config else ".companest"
+        self._data_dir = Path(data_dir or default_dir)
         self._jobs: Dict[str, Job] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._db = None
         self._authorization_lock = asyncio.Lock()
+        self._submission_lock = asyncio.Lock()
         self._owner = None
         self.settings = getattr(getattr(orchestrator, "config", None), "substrate", None)
         if client is None and self.settings:
@@ -152,7 +144,7 @@ class JobManager:
             self._owner.__exit__(None, None, None)
             self._owner = None
 
-    async def submit(self, task: str, context=None, submitted_by="api", company_id=None) -> str:
+    async def submit(self, task: str, context=None, submitted_by="api", company_id=None, idempotency_key=None) -> str:
         if not self._db:
             raise JobError("JobManager has not started")
         ctx = dict(context or {})
@@ -165,19 +157,29 @@ class JobManager:
         binding = self.settings.scopes.get(company_id or "@shared")
         if binding is None:
             raise JobError("No Substrate actor template configured for this company scope")
-        job = Job(id=str(uuid.uuid4()), task=task, context=ctx,
-                  company_id=company_id, submitted_by=submitted_by, status=JobStatus.DISPATCHED,
-                  capability=secrets.token_urlsafe(32))
-        workspace = self.orchestrator.workspace_registry.get(ctx["workspace_id"]) if ctx.get("workspace_id") else None
-        job.execution = {
-            "atespace": binding.atespace, "name": "job-" + job.id,
-            "template": binding.template, "phase": "creating",
-            "storage_id": self.settings.storage_id,
-            "workspace_storage_id": workspace.storage_id if workspace else None,
-        }
-        # Record intent before creating an actor or issuing any task request.
-        await self._persist_job(job)
-        self._jobs[job.id] = job
+        if idempotency_key is not None and (not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 128):
+            raise JobError("idempotency_key must contain 1 to 128 characters")
+        job_id = (str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([company_id, submitted_by, idempotency_key])))
+                  if idempotency_key else str(uuid.uuid4()))
+        async with self._submission_lock:
+            existing = self._jobs.get(job_id)
+            if existing:
+                if existing.task != task or existing.context != ctx:
+                    raise JobError("Idempotency key already used with a different task/context")
+                return job_id
+            job = Job(id=job_id, task=task, context=ctx,
+                      company_id=company_id, submitted_by=submitted_by, status=JobStatus.DISPATCHED,
+                      capability=secrets.token_urlsafe(32))
+            workspace = self.orchestrator.workspace_registry.get(ctx["workspace_id"]) if ctx.get("workspace_id") else None
+            job.execution = {
+                "atespace": binding.atespace, "name": "job-" + job.id,
+                "template": binding.template, "phase": "creating",
+                "storage_id": self.settings.storage_id,
+                "workspace_storage_id": workspace.storage_id if workspace else None,
+            }
+            # Record intent before creating an actor or issuing any task request.
+            await self._persist_job(job)
+            self._jobs[job.id] = job
         async with self._locks.setdefault(job.id, asyncio.Lock()):
             try:
                 resource = await self.client.create_actor(self._ref(job), binding.template)
@@ -222,13 +224,20 @@ class JobManager:
         if response.status_code != 200 and response.status_code != 202:
             raise SubstrateError(f"Actor task request returned HTTP {response.status_code}; execution not retried")
         record = response.json()
+        if not isinstance(record, dict):
+            raise SubstrateError("Actor returned an invalid job record")
         if record.get("job_id") != job.id or record.get("company_id") != job.company_id:
             raise SubstrateError("Actor returned a different job/company")
         if record.get("status") not in ("running", "completed", "failed"):
             raise SubstrateError("Actor returned an invalid job status")
+        if record["status"] != "running" and not record.get("completed_at"):
+            raise SubstrateError("Actor terminal record is missing its completion time")
+        if record["status"] == "completed" and not isinstance(record.get("result"), str):
+            raise SubstrateError("Actor completed without a full result")
+        started_at = datetime.fromisoformat(record["started_at"])
+        completed_at = datetime.fromisoformat(record["completed_at"]) if record.get("completed_at") else None
         job.status = JobStatus(record["status"])
-        job.started_at = datetime.fromisoformat(record["started_at"])
-        job.completed_at = datetime.fromisoformat(record["completed_at"]) if record.get("completed_at") else None
+        job.started_at, job.completed_at = started_at, completed_at
         job.result, job.error = record.get("result"), record.get("error")
         job.execution["phase"] = "accepted"
         job.execution.pop("error", None)
@@ -256,12 +265,18 @@ class JobManager:
                         response = await self.client.request(self._ref(job), "GET", "/task", port=8080)
                         await self._accept(job, response)
                 if job.status in self.TERMINAL and not job.execution.get("deleted"):
-                    # Results are already committed before removing the journal.
+                    # Also covers a previous failed persistence attempt: never
+                    # trust only the in-memory terminal projection for cleanup.
+                    await self._persist_job(job)
                     await self.client.delete_actor(self._ref(job))
                     job.execution["deleted"] = True
                     job.execution.pop("error", None)
             except ActorNotFound:
-                if job.execution.get("cancel_requested"):
+                if job.execution.get("phase") == "creating" and not job.execution.get("cancel_requested"):
+                    job.execution["error"] = "Actor creation is unconfirmed; query again, do not recreate"
+                    await self._persist_job(job)
+                    return job
+                elif job.execution.get("cancel_requested"):
                     job.status = JobStatus.CANCELLED
                     job.completed_at = datetime.now(timezone.utc)
                 elif job.status not in self.TERMINAL:
@@ -359,12 +374,9 @@ class JobManager:
                 if (not status or j.status == status) and (not company_id or j.company_id == company_id)]
 
     async def list_jobs(self, status=None, limit=50, offset=0, company_id=None):
-        jobs = sorted(self._matching(None, company_id), key=lambda j: j.created_at, reverse=True)
-        # A bounded read refreshes the projection; no execution/recovery worker.
-        for job in jobs[offset:offset + limit]:
-            if job.status not in self.TERMINAL:
-                await self.get_job(job.id)
-        jobs = [j for j in jobs if not status or j.status == status]
+        # Lists are the durable last-observed projection. Never fan out dozens
+        # of network requests while an operator is diagnosing an outage.
+        jobs = sorted(self._matching(status, company_id), key=lambda j: j.created_at, reverse=True)
         return jobs[offset:offset + limit]
 
     async def count_jobs(self, status=None, company_id=None):
@@ -407,8 +419,9 @@ class JobManager:
         except ImportError:
             raise JobError("Install Companest with the server extra; job persistence is required")
 
-        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._db = await aiosqlite.connect(str(self._data_dir / "jobs.db"))
+        os.chmod(self._data_dir / "jobs.db", 0o600)
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY,
@@ -507,4 +520,3 @@ class JobManager:
             logger.info(f"Loaded {len(rows)} jobs from database")
         except Exception as e:
             raise JobError("Failed to load jobs") from e
-
