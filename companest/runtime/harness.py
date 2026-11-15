@@ -14,6 +14,22 @@ from ..utils import run_sync
 
 
 class ActorOrchestrator(CompanestOrchestrator):
+    def __init__(self, config, *, job_context):
+        super().__init__(config)
+        self._job_context = dict(job_context)
+
+    def _bound_context(self, context):
+        context = dict(context or {})
+        # Nested CEO/delegation/refresh calls keep the identity and the one
+        # workspace locked by ActorWorkload. Omitted fields never widen scope.
+        for key in ("company_id", "workspace_id", "user_id", "chat_id", "channel"):
+            expected = self._job_context.get(key)
+            if key in context and context[key] != expected:
+                raise OrchestratorError(f"Nested task cannot change {key}")
+            if key in self._job_context or key == "company_id":
+                context[key] = expected
+        return context
+
     async def run_team(
         self,
         task: str,
@@ -29,22 +45,9 @@ class ActorOrchestrator(CompanestOrchestrator):
                 "Teams not initialized. Call init_teams() first."
             )
 
-        user_context = dict(user_context) if user_context else {}
+        user_context = self._bound_context(user_context)
         company_id = user_context.get("company_id")
         company_budget_hourly = None
-        if not company_id and hasattr(self, "company_registry"):
-            result = self.company_registry.resolve(
-                user_context.get("channel"),
-                user_context.get("chat_id"),
-                user_context.get("user_id"),
-            )
-            if result.company:
-                company_id = result.company.id
-                user_context["company_id"] = company_id
-                if not user_context.get("company_context"):
-                    user_context["company_context"] = result.company.domain
-                company_budget_hourly = result.company.preferences.budget_hourly_usd
-
         if company_id and not company_budget_hourly:
             company = self.company_registry.get(company_id)
             if company:
@@ -171,47 +174,8 @@ class ActorOrchestrator(CompanestOrchestrator):
                 "Teams not initialized. Call init_teams() first."
             )
 
-        user_context = dict(user_context) if user_context else {}
+        user_context = self._bound_context(user_context)
         preferred_teams = None
-        if "company_id" not in user_context:
-            resolve_result = self.company_registry.resolve(
-                user_context.get("channel"),
-                user_context.get("chat_id"),
-                user_context.get("user_id"),
-            )
-            direct = None
-            if resolve_result.company:
-                user_context["company_id"] = resolve_result.company.id
-                if not user_context.get("company_context"):
-                    user_context["company_context"] = resolve_result.company.domain
-                if resolve_result.company.preferences.preferred_teams:
-                    preferred_teams = resolve_result.company.preferences.preferred_teams
-            elif resolve_result.global_binding:
-                gb = resolve_result.global_binding
-                direct = (gb.team_id, gb.mode, "Global binding match")
-            elif user_context.get("binding_team_id"):
-                # Binding hint resolved by the gateway (companest/gateway/channel.py)
-                direct = (
-                    user_context["binding_team_id"],
-                    user_context.get("binding_mode", "default"),
-                    "Gateway binding hint (legacy)",
-                )
-            if direct:
-                direct_team, direct_mode, reasoning = direct
-                effective_mode = mode if mode is not None else direct_mode
-                result_str = await self.run_team(
-                    task, direct_team, mode=effective_mode,
-                    on_progress=on_progress, user_context=user_context,
-                )
-                decision = RoutingDecision(
-                    teams=[TeamAssignment(team_id=direct_team, instruction=task)],
-                    strategy="single",
-                    reasoning=reasoning,
-                    confidence=1.0,
-                    mode=effective_mode,
-                )
-                return result_str, decision
-
         company_id = user_context.get("company_id")
         if preferred_teams is None and company_id:
             company = self.company_registry.get(company_id)
@@ -245,7 +209,7 @@ class ActorOrchestrator(CompanestOrchestrator):
         if self._info_refresh_team not in routed_ids:
             if on_progress:
                 await on_progress("\U0001f4e1 Refreshing info feeds...")
-            await self.background.refresh_info_for_task(task)
+            await self.background.refresh_info_for_task(task, user_context=user_context)
 
         if len(decision.teams) == 1:
             assignment = decision.teams[0]

@@ -135,6 +135,33 @@ branch budget, permits at most five steps and rejects nested delegation.
 `always_on` now describes meta-team routing; it does not retain a local process.
 The old `skip_cost_check` flag is accepted for compatibility but has no effect.
 
+Nested CEO/delegation/refresh calls inherit the accepted job's company, user
+and workspace; they cannot switch to a different workspace inside the actor.
+Actor callbacks cannot raise priority above the submitted job, and company
+disablement/cancellation is checked again after budget approval waits.
+Business interval callbacks wait for remote completion; actor execution owns
+the deadline. One-shot user schedules are claimed in SQLite before dispatch,
+so restart does not replay an uncertain occurrence. A crash between claim and
+dispatch can leave that occurrence unexecuted; inspect the job records before
+explicitly scheduling a replacement.
+
+The Docker control plane also needs `COMPANEST_WORKSPACE_MOUNT`, mounted at
+`/mnt/companest/workspaces`. Its workspace declarations must reference the same
+persistent storage identities as the corresponding actor templates.
+
+### Existing Qdrant indexes
+
+Collection names now hash the complete team ID. The old separator replacement
+could alias a company's private team with a shared team, so there is deliberately
+no fallback to old collections. File memory remains authoritative and unchanged.
+For deployments using Qdrant, instantiate the configured `QdrantBackend` with
+the authoritative memory mount and call `backend.reindex_team(team_id)` for
+each registered team, using the fully qualified `company/team` ID for private
+teams. This rebuild needs the configured embedding provider and Qdrant service;
+the review only simulated it. Validate the new indexes before retiring legacy
+collections. Deploy actors with company-scoped vector-service credentials where
+available; application query filters are not a substitute for service ACLs.
+
 ## Verification scope
 
 Earlier in this branch, the pinned control plane and counter launched in an

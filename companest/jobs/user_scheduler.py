@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import uuid
@@ -90,8 +89,6 @@ class UserScheduler:
     async def start(self) -> None:
         if self._started:
             return
-        # _fire_job is called synchronously by APScheduler and needs this loop.
-        self._loop = asyncio.get_running_loop()
 
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -247,37 +244,31 @@ class UserScheduler:
             status["next_run"] = str(jobs[0].next_run_time) if jobs else None
         return status
 
-    def _fire_job(self, job_id: str) -> None:
-        def _on_task_done(task):
-            exc = task.exception() if not task.cancelled() else None
-            if exc:
-                logger.error(f"Scheduled job {job_id} raised: {exc}")
-
-        try:
-            loop = self._loop
-            if loop.is_running():
-                t = loop.create_task(self._fire_job_async(job_id))
-                t.add_done_callback(_on_task_done)
-            else:
-                loop.run_until_complete(self._fire_job_async(job_id))
-        except (RuntimeError, AttributeError):
-            logger.error(f"No event loop for job {job_id}")
+    async def _fire_job(self, job_id: str) -> None:
+        # APScheduler awaits coroutine jobs on its owning loop. Do not detach
+        # work: max_instances/coalescing must cover the complete remote task.
+        await self._fire_job_async(job_id)
 
     async def _fire_job_async(self, job_id: str) -> None:
         row = await self._get_job_row(job_id)
-        if not row:
-            logger.warning(f"Job {job_id} metadata not found, skipping")
+        if not row or not row["active"]:
+            logger.info(f"Job {job_id} is missing or inactive, skipping")
             return
 
         job = self._row_to_job(row)
         logger.info(f"Firing job {job_id}: {job.task[:60]}")
 
+        # Claim one-shot schedules before dispatch: restart must not replay
+        # an occurrence whose remote effects may already exist.
         now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            "UPDATE scheduled_jobs SET fire_count = fire_count + 1, last_fired = ? WHERE id = ?",
+        cursor = await self._db.execute(
+            "UPDATE scheduled_jobs SET fire_count = fire_count + 1, last_fired = ?, "
+            "active = CASE WHEN trigger_type = 'date' THEN 0 ELSE active END WHERE id = ? AND active = 1",
             (now, job_id),
         )
         await self._db.commit()
+        if cursor.rowcount != 1:
+            return
 
         result = None
         if self._execution_callback:
@@ -296,14 +287,6 @@ class UserScheduler:
                 )
             except Exception as e:
                 logger.error(f"Job {job_id} notification failed: {e}")
-
-        if job.trigger_type == "date":
-            await self._db.execute(
-                "UPDATE scheduled_jobs SET active = 0 WHERE id = ?",
-                (job_id,),
-            )
-            await self._db.commit()
-            logger.info(f"One-shot job {job_id} completed and deactivated")
 
     async def _restore_jobs(self) -> None:
         cursor = await self._db.execute(

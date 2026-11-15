@@ -668,6 +668,8 @@ class CompanestOrchestrator:
         if not hasattr(self, "team_registry"):
             raise JobError("Teams are not initialized")
         ctx = dict(context)
+        if ctx.get("priority", "normal") not in ("low", "normal", "high", "critical"):
+            raise JobError("Invalid task priority")
         from ..modes import normalize_execution
         if "cascade" in ctx and not isinstance(ctx["cascade"], bool):
             raise JobError("cascade must be a boolean model strategy flag")

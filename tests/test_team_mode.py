@@ -26,7 +26,7 @@ def test_team_config_parses_mode(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_team_uses_team_default_mode_when_not_overridden():
-    orchestrator = CompanestOrchestrator(CompanestConfig(debug=True))
+    orchestrator = CompanestOrchestrator(CompanestConfig(debug=True), job_context={})
     execution_mode = SimpleNamespace(execute=AsyncMock(return_value="ok"))
     team = SimpleNamespace(
         mode="council",
@@ -58,5 +58,5 @@ async def test_run_team_uses_team_default_mode_when_not_overridden():
         team,
         "Analyze this topic",
         on_progress=None,
-        user_context={},
+        user_context={"company_id": None},
     )

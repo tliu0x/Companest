@@ -179,7 +179,6 @@ class TestOrchestratorInfoCollection:
         run_team.assert_called_once()
         call_args = run_team.call_args
         assert "info-collection" in call_args.args or call_args.kwargs.get("team_id") == "info-collection"
-        assert call_args.kwargs.get("skip_cost_check") is True
         assert call_args.kwargs.get("mode") == "cascade"
         assert "watchlist.json" in call_args.args[0]
 
@@ -194,7 +193,6 @@ class TestOrchestratorInfoCollection:
         call_args = run_team.call_args
         assert call_args.args[1] == "info-collection"
         assert "latest AI news" in call_args.args[0]
-        assert call_args.kwargs.get("skip_cost_check") is True
 
     @pytest.mark.asyncio
     async def test_refresh_skipped_when_no_team(self):

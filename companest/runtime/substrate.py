@@ -78,7 +78,7 @@ class SubstrateClient:
             stdout, _stderr = await asyncio.wait_for(process.communicate(), self.timeout)
             if process.returncode:
                 # Do not expose diagnostics/credentials in public API responses.
-                if b"rpc error: code = NotFound desc = Actor " in _stderr:
+                if b"rpc error: code = notfound desc = actor " in _stderr.lower():
                     raise ActorNotFound("Substrate actor no longer exists")
                 raise SubstrateError(f"Substrate {arguments[0]} failed (exit {process.returncode})")
             if not json_output:

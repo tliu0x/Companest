@@ -293,11 +293,13 @@ async def test_shared_pi_uses_each_runs_company_and_workspace(api_runtime, monke
         return "done"
 
     monkeypatch.setattr(Pi, "_run_agent", run_agent)
+    alpha = ActorOrchestrator(orch.config, job_context={"company_id": "alpha", "workspace_id": "demo"})
+    beta = ActorOrchestrator(orch.config, job_context={"company_id": "beta"})
+    await alpha.init_teams_async(str(tmp_path))
+    await beta.init_teams_async(str(tmp_path))
     await asyncio.wait_for(asyncio.gather(
-        ActorOrchestrator.run_team(orch, "first", "general", skip_cost_check=True,
-                      user_context={"company_id": "alpha", "workspace_id": "demo"}),
-        ActorOrchestrator.run_team(orch, "second", "general", skip_cost_check=True,
-                      user_context={"company_id": "beta"}),
+        alpha.run_team("first", "general"),
+        beta.run_team("second", "general"),
     ), timeout=5)
 
     assert contexts == {

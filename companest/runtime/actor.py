@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from ..config import CompanestConfig
 from .harness import ActorOrchestrator
 from dataclasses import asdict
-from ..utils import run_sync
+from ..utils import run_sync, finish_on_cancel
 from .storage import FileLock, check_identity
 from .services import ActorServices
 
@@ -91,6 +91,11 @@ class ActorWorkload:
         await run_sync(write)
 
     async def submit(self, request: TaskRequest):
+        # Disconnecting during the journal write must not strand a running
+        # record without its coroutine, or make an accepted request replayable.
+        return await finish_on_cancel(self._submit(request))
+
+    async def _submit(self, request: TaskRequest):
         if request.storage_id != self.storage_id:
             raise HTTPException(status_code=409, detail="Actor persistent storage identity mismatch")
         if request.company_id != self.company_id or request.context.get("company_id", self.company_id) != self.company_id:
@@ -121,7 +126,8 @@ class ActorWorkload:
     async def execute(self, request: TaskRequest):
         try:
             async with asyncio.timeout(self.config.global_timeout):
-                orchestrator = ActorOrchestrator(self.config)
+                context = {**request.context, "company_id": self.company_id}
+                orchestrator = ActorOrchestrator(self.config, job_context=context)
                 await orchestrator.init_teams_async(self.config.data_dir)
                 self.validate_scope(orchestrator)
                 services = ActorServices(self.config.control_plane_url, request.job_id, request.capability)
@@ -132,8 +138,6 @@ class ActorWorkload:
                     orchestrator.dreamer.log_path = (
                         Path(self.config.data_dir) / "companies" / self.company_id / "dream_log.json"
                     )
-                context = dict(request.context)
-                context["company_id"] = self.company_id
                 team_id = context.get("team_id")
                 with ExitStack() as locks:
                     workspace_id = context.get("workspace_id")
@@ -152,7 +156,24 @@ class ActorWorkload:
                     if context.get("maintenance"):
                         result = await self.maintain_memory(orchestrator, services, context["maintenance"])
                     elif team_id:
-                        result = await orchestrator.run_team(request.task, team_id, mode=context.get("mode"), user_context=context)
+                        result = await orchestrator.run_team(
+                            request.task, team_id, mode=context.get("mode"), user_context=context,
+                            priority=context.get("priority", "normal"),
+                        )
+                        from ..orchestration.router import RoutingDecision, TeamAssignment
+                        from ..modes import normalize_execution
+                        team = orchestrator.team_registry.get_config(team_id)
+                        mode, cascade, workflow = normalize_execution(
+                            context.get("mode") or team.mode,
+                            context.get("cascade", team.cascade),
+                            context.get("workflow", team.workflow if not context.get("mode") else None),
+                        )
+                        self.record["routing"] = asdict(RoutingDecision(
+                            teams=[TeamAssignment(team_id=team_id, instruction=request.task)],
+                            mode=mode, cascade=cascade, workflow=workflow,
+                            confidence=1.0, reasoning="Explicit team or control-plane binding",
+                            task_priority=context.get("priority", "normal"),
+                        ))
                     else:
                         result, routing = await orchestrator.run_auto(request.task, mode=context.get("mode"), user_context=context)
                         self.record["routing"] = asdict(routing)

@@ -179,7 +179,7 @@ pass `skip_cost_check` / `--skip-cost`.
 ### Docker
 
 Provision Substrate and the mounts in the [deployment guide](deploy/substrate/README.md),
-then set `COMPANEST_CONFIG`, `COMPANEST_STATE_MOUNT`, `COMPANEST_LOCK_MOUNT`,
+then set `COMPANEST_CONFIG`, `COMPANEST_STATE_MOUNT`, `COMPANEST_WORKSPACE_MOUNT`, `COMPANEST_LOCK_MOUNT`,
 `SUBSTRATE_KUBECONFIG` and the API token before starting the control plane.
 
 ```bash

@@ -10,6 +10,7 @@ services:
     volumes:
       - companest-control:/var/lib/companest
       - ${COMPANEST_STATE_MOUNT:?Mount persistent business state}:/mnt/companest/state
+      - ${COMPANEST_WORKSPACE_MOUNT:?Mount persistent workspaces}:/mnt/companest/workspaces
       - ${COMPANEST_LOCK_MOUNT:?Mount shared locks}:/mnt/companest/locks
       - ${COMPANEST_CONFIG:?Set control config path}:/etc/companest/config.md:ro
       - ${SUBSTRATE_KUBECONFIG:?Set scoped kubeconfig path}:/etc/companest/substrate-kubeconfig:ro

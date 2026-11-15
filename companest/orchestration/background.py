@@ -72,14 +72,13 @@ class BackgroundManager:
             await self._run_team(
                 prompt,
                 team_id,
-                skip_cost_check=True,
                 mode="cascade",
             )
             logger.info(f"[{team_id}] Enrichment cycle completed successfully")
         except Exception as e:
             logger.error(f"[{team_id}] Enrichment cycle failed: {e}")
 
-    async def refresh_info_for_task(self, task: str) -> None:
+    async def refresh_info_for_task(self, task: str, user_context=None) -> None:
         team_id = self._info_refresh_team
         if team_id not in self._team_registry.list_teams():
             return
@@ -96,8 +95,8 @@ class BackgroundManager:
             await self._run_team(
                 prompt,
                 team_id,
-                skip_cost_check=True,
                 mode="cascade",
+                user_context=user_context,
             )
             logger.info(f"[{team_id}] On-demand refresh completed")
         except Exception as e:
@@ -118,12 +117,12 @@ class BackgroundManager:
                 task=job.task,
                 team_id=job.team_id,
                 mode=job.mode,
-                skip_cost_check=True,
                 user_context=user_context,
             )
         else:
             result, _ = await self._run_auto(
                 task=job.task,
+                mode=job.mode,
                 user_context=user_context,
             )
             return result

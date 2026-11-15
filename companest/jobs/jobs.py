@@ -293,10 +293,22 @@ class JobManager:
 
     def authenticate_actor(self, job_id, token):
         job = self._jobs.get(job_id)
-        if (not job or not job.capability or not hmac.compare_digest(job.capability, token)
-                or job.status in self.TERMINAL or job.execution.get("cancel_requested")):
+        if (not job or not job.capability or not isinstance(token, str)
+                or not hmac.compare_digest(job.capability.encode(), token.encode())):
             raise JobError("Invalid or inactive actor capability")
+        self.check_actor_scope(job)
         return job
+
+    def check_actor_scope(self, job, team_id=None):
+        if job.status in self.TERMINAL or job.execution.get("cancel_requested"):
+            raise JobError("Invalid or inactive actor capability")
+        company = self.orchestrator.company_registry.get(job.company_id) if job.company_id else None
+        if job.company_id and (company is None or not company.enabled):
+            raise JobError("Company is no longer enabled")
+        if team_id and (not self.orchestrator.can_access_team(job.company_id, team_id)
+                        or not self.orchestrator.team_registry.get_config(team_id)):
+            raise JobError("Team is outside this job's current company scope")
+        return company
 
     async def authorize(self, job, payload):
         """Authorize and charge an estimate before execution, including failures.
@@ -305,23 +317,26 @@ class JobManager:
         the same remaining budget. The durable spend log is authoritative.
         """
         team_id = payload["team_id"]
-        if not self.orchestrator.can_access_team(job.company_id, team_id):
-            raise JobError("Team is outside this job's company scope")
-        company = self.orchestrator.company_registry.get(job.company_id) if job.company_id else None
-        if job.company_id and (company is None or not company.enabled):
-            raise JobError("Company is no longer enabled")
-        config = self.orchestrator.team_registry.get_config(team_id)
-        if config is None:
-            raise JobError("Unknown team")
-        lead = next((p for p in config.pis if p.id == config.lead_pi), next(iter(config.pis), None))
-        model = lead.model if lead else "deepseek-chat"
         async with self._authorization_lock:
+            company = self.check_actor_scope(job, team_id)
+            config = self.orchestrator.team_registry.get_config(team_id)
+            lead = next((p for p in config.pis if p.id == config.lead_pi), next(iter(config.pis), None))
+            model = lead.model if lead else "deepseek-chat"
+            # A task capability cannot grant itself the critical budget bypass.
+            priorities = ("low", "normal", "high", "critical")
+            requested = payload.get("priority", "normal")
+            ceiling = job.context.get("priority", "normal")
+            if requested not in priorities or ceiling not in priorities:
+                raise JobError("Invalid task priority")
+            priority = priorities[min(priorities.index(requested), priorities.index(ceiling))]
             gate = self.orchestrator.cost_gate
             decision = await gate.evaluate(
-                payload["task"], team_id, model, priority=payload.get("priority", "normal"),
+                payload["task"], team_id, model, priority=priority,
                 company_id=job.company_id,
                 company_budget_hourly=company.preferences.budget_hourly_usd if company else None,
             )
+            # Approval can wait for a human. Recheck revocation after that wait.
+            self.check_actor_scope(job, team_id)
             if decision.action != "rejected":
                 estimate = decision.estimate
                 await run_sync(gate.record_spending, team_id, payload["task"],

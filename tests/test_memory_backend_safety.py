@@ -154,8 +154,10 @@ async def test_pi_run_prefers_memory_task_hint(tmp_path, monkeypatch):
     assert "Launch roadmap for the release." in captured["system"]
 
 
-def test_qdrant_backend_file_delegation(tmp_path):
+def test_qdrant_backend_file_delegation(tmp_path, monkeypatch):
     backend = QdrantBackend(manager=_make_memory(tmp_path), in_memory=True)
+    # File delegation does not need a vector server or downloaded embeddings.
+    monkeypatch.setattr(backend, "_upsert_entry", lambda *_: None)
 
     backend.write("alpha", "notes.json", {"topic": "memory research"})
     assert backend.read("alpha", "notes.json") == {"topic": "memory research"}

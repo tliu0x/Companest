@@ -1,4 +1,5 @@
 import logging
+import hashlib
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -75,8 +76,10 @@ class QdrantBackend(MemoryBackend):
 
     @synchronized
     def _collection_name(self, team_id: str) -> str:
-        safe_id = team_id.replace("/", "_").replace("\\", "_")
-        return f"{_COLLECTION_PREFIX}{safe_id}"
+        # Replacing separators aliases e.g. acme/research and acme_research.
+        # Never read the ambiguous legacy collection, even as a fallback.
+        digest = hashlib.sha256(team_id.encode("utf-8")).hexdigest()
+        return f"{_COLLECTION_PREFIX}v2_{digest}"
 
     @synchronized
     def _ensure_collection(self, team_id: str) -> None:
@@ -128,7 +131,7 @@ class QdrantBackend(MemoryBackend):
                 PointStruct(
                     id=point_id,
                     vector=vectors[0],
-                    payload={"key": key, "team_id": team_id, **meta},
+                    payload={**meta, "key": key, "team_id": team_id},
                 )
             ],
         )
@@ -223,6 +226,18 @@ class QdrantBackend(MemoryBackend):
         return self._file_backend.get_all_stats()
 
     @synchronized
+    def reindex_team(self, team_id: str) -> int:
+        """Rebuild a team's derived vectors from authoritative mounted files.
+
+        Used when moving from legacy collection names; errors propagate so an
+        operator cannot mistake a partial rebuild for a completed migration.
+        """
+        keys = self._file_backend.list_keys(team_id)
+        for key in keys:
+            self._upsert_entry(team_id, key)
+        return len(keys)
+
+    @synchronized
     def semantic_search(
         self,
         team_id: str,
@@ -237,15 +252,24 @@ class QdrantBackend(MemoryBackend):
 
         vectors = self._embed([query])
 
-        hits = client.search(
-            collection_name=name,
-            query_vector=vectors[0],
-            limit=limit,
-        )
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        scope_filter = Filter(must=[FieldCondition(key="team_id", match=MatchValue(value=team_id))])
+        if hasattr(client, "query_points"):
+            hits = client.query_points(
+                collection_name=name, query=vectors[0], query_filter=scope_filter,
+                limit=limit, with_payload=True,
+            ).points
+        else:
+            hits = client.search(
+                collection_name=name, query_vector=vectors[0], query_filter=scope_filter,
+                limit=limit, with_payload=True,
+            )
 
         results: List[Dict[str, Any]] = []
         for hit in hits:
             payload = hit.payload or {}
+            if payload.get("team_id") != team_id:
+                continue
             results.append({
                 "key": payload.get("key", ""),
                 "score": hit.score,
