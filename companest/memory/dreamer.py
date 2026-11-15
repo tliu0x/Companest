@@ -93,6 +93,8 @@ class Dreamer:
                 logger.error(f"[Dreamer] Dream failed for {team_id}: {e}")
                 stats[team_id] = {"error": str(e)}
 
+        if not dry_run:
+            self._write_dream_log(stats, "nightly")
         return stats
 
     async def run_team_dream(self, team_id: str, dry_run: bool = False) -> Dict[str, Any]:
@@ -221,7 +223,29 @@ class Dreamer:
             except Exception as e:
                 logger.error(f"[Dreamer] Deep consolidation failed for {team_id}: {e}")
                 stats[team_id] = {"error": str(e)}
+        self._write_dream_log(stats, "deep")
         return stats
+
+    def _write_dream_log(self, stats: Dict[str, Any], kind: str) -> None:
+        fields = {"scored", "compacted", "gc_deleted", "merged", "into",
+                  "overview_generated", "skipped", "reason", "error"}
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "kind": kind,
+            "stats": {
+                team: {key: value for key, value in result.items() if key in fields}
+                for team, result in stats.items()
+            },
+        }
+        path = self.memory.base_path / "dream_log.json"
+        try:
+            with self.memory._append_lock:
+                history = self.memory._read_json(path)
+                if not isinstance(history, list):
+                    history = []
+                self.memory._write_json(path, [*history[-99:], entry])
+        except Exception as e:
+            logger.warning("Failed to write dream log: %s", e)
 
     def _cutoff(self) -> datetime:
         return datetime.now(timezone.utc) - timedelta(hours=self.short_tier_max_age_hours)

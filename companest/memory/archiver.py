@@ -2,6 +2,7 @@ import logging
 import os
 import tarfile
 import tempfile
+from pathlib import Path, PurePosixPath
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -76,3 +77,39 @@ class MemoryArchiver:
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+    async def restore_snapshot(self, s3_key: str, target_path: str) -> Path:
+        """Restore into a new target directory and return its .companest path."""
+        target = Path(target_path).absolute()
+        if target.exists() or target.is_symlink():
+            raise ArchiverError(f"Restore target already exists: {target}")
+        if target.resolve().is_relative_to(self.memory.base_path.resolve()):
+            raise ArchiverError("Restore target must be outside the active memory directory")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".companest-restore-", dir=target.parent) as work:
+            work_path = Path(work)
+            archive = work_path / "snapshot.tar.gz"
+            staging = work_path / "extracted"
+            try:
+                self._get_s3().download_file(self.bucket, s3_key, str(archive))
+                with tarfile.open(archive, "r:gz") as tar:
+                    members = tar.getmembers()
+                    for member in members:
+                        path = PurePosixPath(member.name)
+                        if (path.is_absolute() or ".." in path.parts
+                                or not path.parts or path.parts[0] != ".companest"
+                                or not (member.isfile() or member.isdir())):
+                            raise ArchiverError(f"Unsafe snapshot member: {member.name}")
+                    tar.extractall(staging, members=members, filter="data")
+                restored = staging / ".companest"
+                if not restored.is_dir():
+                    raise ArchiverError("Snapshot has no .companest directory")
+                target.mkdir()
+                try:
+                    restored.rename(target / ".companest")
+                except BaseException:
+                    target.rmdir()
+                    raise
+            except (OSError, tarfile.TarError) as e:
+                raise ArchiverError(f"Snapshot restore failed: {e}") from e
+        return target / ".companest"

@@ -1,17 +1,17 @@
 """Tests for the public_knowledge subsystem."""
 
+import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from unittest.mock import MagicMock
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from companest.knowledge.public import (
-    INDEX_CAP,
     IndexStore,
     PublicKnowledgeDoc,
     PublicKnowledgeIndexEntry,
-    PublicKnowledgePublisher,
     PublicKnowledgeS3Store,
     SearchQuery,
     search,
@@ -47,6 +47,24 @@ def _make_index_entry(doc_id=None, **kwargs):
 def test_non_uuid_doc_id_rejected():
     with pytest.raises(Exception):
         _make_doc(doc_id="not-a-uuid")
+
+def test_reads_existing_documents_and_index():
+    doc = _make_doc()
+    entry = PublicKnowledgeIndexEntry.from_doc(doc)
+    s3 = MagicMock()
+    s3.get_object.side_effect = [
+        {"Body": BytesIO(doc.model_dump_json().encode())},
+        {"Body": BytesIO((entry.model_dump_json() + "\ninvalid json\n").encode())},
+    ]
+    docs = PublicKnowledgeS3Store(bucket="test-bucket")
+    index = IndexStore(bucket="test-bucket")
+    docs._s3 = index._s3 = s3
+
+    assert docs.get_doc(doc.doc_id) == doc
+    assert index.load_index() == [entry]
+    assert search(SearchQuery(keyword="Test"), index=[entry]) == [entry]
+    s3.put_object.assert_not_called()
+    s3.delete_object.assert_not_called()
 
 
 class TestSearch:
@@ -91,52 +109,3 @@ class TestSearch:
             for e, age in zip(self._entries(), (2, 0, 1))
         ]
         assert [r.doc_id for r in search(SearchQuery(), entries)] == [self.D2, self.D3, self.D1]
-
-
-class TestIndexEviction:
-    def _saved_lines(self, entries):
-        mock_s3 = MagicMock()
-        store = IndexStore(bucket="test-bucket")
-        store._s3 = mock_s3
-        store.save_index(entries)
-        body = mock_s3.put_object.call_args[1]["Body"].decode("utf-8")
-        return [line for line in body.strip().split("\n") if line]
-
-    def test_expired_entries_evicted_on_save(self):
-        fresh_id = str(uuid.uuid4())
-        lines = self._saved_lines([
-            _make_index_entry(fresh_id, fresh_until=FUTURE),
-            _make_index_entry(str(uuid.uuid4()), fresh_until=PAST),
-        ])
-        assert len(lines) == 1
-        assert fresh_id in lines[0]
-
-    def test_cap_enforced(self):
-        lines = self._saved_lines([
-            _make_index_entry(str(uuid.UUID(int=i)), fresh_until=FUTURE)
-            for i in range(INDEX_CAP + 100)
-        ])
-        assert len(lines) == INDEX_CAP
-
-
-class TestPublisher:
-    def _publisher(self):
-        s3_store = MagicMock(spec=PublicKnowledgeS3Store)
-        index_store = MagicMock(spec=IndexStore)
-        return PublicKnowledgePublisher(s3_store, index_store), s3_store, index_store
-
-    def test_publish_writes_doc_and_index(self):
-        publisher, s3_store, index_store = self._publisher()
-        doc = _make_doc()
-        publisher.publish(doc)
-
-        s3_store.put_doc.assert_called_once_with(doc)
-        index_store.add_entry.assert_called_once()
-
-    def test_unpublish_removes_doc_and_index(self):
-        publisher, s3_store, index_store = self._publisher()
-        test_id = str(uuid.uuid4())
-        publisher.unpublish(test_id)
-
-        s3_store.delete_doc.assert_called_once_with(test_id)
-        index_store.remove_entry.assert_called_once_with(test_id)

@@ -135,6 +135,27 @@ class TestCostGate:
         assert decision.action == "auto_approve"
         assert decision.priority == "high"
 
+    @pytest.mark.parametrize("cost,normal,low", [
+        (0.0049, "auto_approve", "auto_approve"),
+        (0.005, "auto_approve", "notify_approve"),
+        (0.007, "auto_approve", "notify_approve"),
+        (0.01, "notify_approve", "notify_approve"),
+    ])
+    def test_low_priority_approval_boundary(self, monkeypatch, cost, normal, low):
+        from companest.orchestration.cost_gate import CostEstimate
+
+        self._budget(
+            auto_approve_threshold=0.01, escalation_threshold=1.0,
+            daily_limit=100.0, mode="approval",
+            priority_multipliers={"normal": 1.0, "low": 0.5},
+        )
+        estimate = CostEstimate(100, 100, cost, "stock", "test-model")
+        monkeypatch.setattr(self.cg, "estimate_cost", lambda *args: estimate)
+        for priority, expected in (("normal", normal), ("low", low)):
+            decision = _run(self.cg.evaluate("task", "stock", "test-model", priority=priority))
+            assert decision.action == expected
+            assert decision.priority == priority
+
     def test_rolling_window_excludes_old(self):
         from datetime import datetime, timezone, timedelta
 

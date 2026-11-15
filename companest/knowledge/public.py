@@ -13,7 +13,6 @@ from .s3 import S3JsonStore
 
 logger = logging.getLogger(__name__)
 
-INDEX_CAP = 10_000
 DEFAULT_PREFIX = "companest-public-knowledge/"
 
 
@@ -98,15 +97,9 @@ class PublicKnowledgeS3Store(S3JsonStore):
                  region: str = "us-east-1", endpoint_url: Optional[str] = None) -> None:
         super().__init__(bucket, prefix, region, endpoint_url)
 
-    def put_doc(self, doc: PublicKnowledgeDoc) -> str:
-        return self._put(f"docs/{doc.doc_id}.json", doc.model_dump_json(indent=2))
-
     def get_doc(self, doc_id: str) -> Optional[PublicKnowledgeDoc]:
         data = self._get_json(f"docs/{doc_id}.json")
         return None if data is None else PublicKnowledgeDoc(**data)
-
-    def delete_doc(self, doc_id: str) -> None:
-        self._delete(f"docs/{doc_id}.json")
 
 
 class IndexStore(S3JsonStore):
@@ -132,39 +125,6 @@ class IndexStore(S3JsonStore):
             except Exception as e:
                 logger.warning("Skipping invalid index line %d: %s", line_num, e)
         return entries
-
-    def save_index(self, entries: List[PublicKnowledgeIndexEntry]) -> None:
-        """Write the index, dropping expired entries and enforcing the cap."""
-        now = datetime.now(timezone.utc)
-        active = [e for e in entries if _is_fresh(e, now)]
-        if len(active) > INDEX_CAP:
-            active.sort(key=lambda e: e.published_at, reverse=True)
-            active = active[:INDEX_CAP]
-        body = "".join(e.model_dump_json() + "\n" for e in active)
-        self._put(self.KEY, body, content_type="application/x-ndjson")
-
-    def add_entry(self, entry: PublicKnowledgeIndexEntry) -> None:
-        """Add an entry, replacing any existing one with the same doc_id."""
-        entries = [e for e in self.load_index() if e.doc_id != entry.doc_id]
-        self.save_index(entries + [entry])
-
-    def remove_entry(self, doc_id: str) -> None:
-        self.save_index([e for e in self.load_index() if e.doc_id != doc_id])
-
-
-class PublicKnowledgePublisher:
-    def __init__(self, s3_store: PublicKnowledgeS3Store, index_store: IndexStore) -> None:
-        self._s3_store = s3_store
-        self._index_store = index_store
-
-    def publish(self, doc: PublicKnowledgeDoc) -> str:
-        key = self._s3_store.put_doc(doc)
-        self._index_store.add_entry(PublicKnowledgeIndexEntry.from_doc(doc))
-        return key
-
-    def unpublish(self, doc_id: str) -> None:
-        self._s3_store.delete_doc(doc_id)
-        self._index_store.remove_entry(doc_id)
 
 
 def search(

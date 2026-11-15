@@ -62,6 +62,60 @@ def _long_term_entry_lines(prompt):
     long_section = prompt.split("## Long-term Memory\n")[1].split("\n\n---\n\n")[0]
     return [line for line in long_section.split("\n") if line.startswith("- ")]
 
+@pytest.mark.asyncio
+async def test_dream_log_persists_summaries_and_errors(dreamer, mm, monkeypatch):
+    async def run_team(team_id, dry_run=False):
+        if team_id == "beta":
+            raise RuntimeError("scoring unavailable")
+        return {"scored": 2, "compacted": 1, "gc_deleted": 1, "gc_keys": ["private.json"]}
+
+    monkeypatch.setattr(dreamer, "run_team_dream", run_team)
+    result = await dreamer.run_all_dreams()
+    path = mm.base_path / "dream_log.json"
+    history = json.loads(path.read_text())
+    assert history[0]["kind"] == "nightly"
+    assert datetime.fromisoformat(history[0]["timestamp"]).tzinfo is not None
+    assert history[0]["stats"] == {
+        "alpha": {"scored": 2, "compacted": 1, "gc_deleted": 1},
+        "beta": {"error": "scoring unavailable"},
+    }
+    assert result["alpha"]["gc_keys"] == ["private.json"]
+    before = path.read_bytes()
+    await dreamer.run_all_dreams(dry_run=True)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_deep_dream_log_caps_history_and_survives_restart(dreamer, mm):
+    path = mm.base_path / "dream_log.json"
+    path.write_text(json.dumps([{"sequence": n} for n in range(100)]))
+    await dreamer.run_deep_consolidation()
+    restarted = Dreamer(MemoryManager(str(mm.base_path)))
+    await restarted.run_all_dreams()
+    history = json.loads(path.read_text())
+    assert len(history) == 100
+    assert history[0] == {"sequence": 2}
+    assert [row["kind"] for row in history[-2:]] == ["deep", "nightly"]
+    assert history[-2]["stats"]["alpha"]["skipped"] is True
+
+
+@pytest.mark.asyncio
+async def test_dream_log_failure_preserves_previous_log(dreamer, mm, monkeypatch, caplog):
+    path = mm.base_path / "dream_log.json"
+    path.write_text("[]")
+    write_json = mm._write_json
+
+    def fail_write(destination, data):
+        if destination == path:
+            raise OSError("disk full")
+        write_json(destination, data)
+
+    monkeypatch.setattr(mm, "_write_json", fail_write)
+    result = await dreamer.run_all_dreams()
+    assert result["alpha"]["skipped"] is True
+    assert path.read_text() == "[]"
+    assert "Failed to write dream log" in caplog.text
+
 
 class TestIndexCRUD:
 
