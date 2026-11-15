@@ -11,9 +11,6 @@ from .tools import ToolRegistry, ToolProvider, ToolContext, DEFAULT_TOOLS_DENY, 
 from .parser import (
     MarkdownConfigParser,
     ParseResult,
-    CodeBlock,
-    parse_markdown_config,
-    validate_config_file,
     generate_config_template,
 )
 from .memory import (
@@ -58,7 +55,6 @@ from .exceptions import (
     JobError,
     PiError,
     TeamError,
-    CostGateError,
     ArchiverError,
     SchedulerError,
 )
@@ -123,8 +119,7 @@ _all_names = [
     # Master (optional)
     "MasterConnection",
     # Parser
-    "MarkdownConfigParser", "ParseResult", "CodeBlock",
-    "parse_markdown_config", "validate_config_file", "generate_config_template",
+    "MarkdownConfigParser", "ParseResult", "generate_config_template",
     # Pi Agent Teams
     "MemoryManager", "EnrichmentSource", "Dreamer", "DreamerError",
     "Pi", "PiConfig",
@@ -144,7 +139,7 @@ _all_names = [
     "CompanestError", "ConfigurationError", "OrchestratorError",
     "GatewayError", "GatewayConnectionError", "GatewayAuthError",
     "MasterError", "JobError", "PiError", "TeamError",
-    "CostGateError", "ArchiverError", "SchedulerError", "CompanyError",
+    "ArchiverError", "SchedulerError", "CompanyError",
 ]
 
 __all__ = [name for name in _all_names if globals().get(name) is not None]

@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from .memory import MemoryManager
-from .exceptions import CostGateError
 
 logger = logging.getLogger(__name__)
 

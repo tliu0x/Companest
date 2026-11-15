@@ -632,9 +632,9 @@ class TestExceptions:
     def test_hierarchy(self):
         from companest.exceptions import (
             CompanestError, PiError, TeamError,
-            CostGateError, ArchiverError, SchedulerError,
+            ArchiverError, SchedulerError,
         )
-        for exc_cls in [PiError, TeamError, CostGateError, ArchiverError, SchedulerError]:
+        for exc_cls in [PiError, TeamError, ArchiverError, SchedulerError]:
             assert issubclass(exc_cls, CompanestError), f"{exc_cls.__name__} not a CompanestError"
 
     def test_exception_details(self):
