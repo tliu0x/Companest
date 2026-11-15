@@ -35,9 +35,6 @@ class EventType(str, Enum):
     COST_REJECTED = "cost_rejected"
     CIRCUIT_BREAKER_TRIPPED = "circuit_breaker_tripped"
     TOOL_REGISTERED = "tool_registered"
-    EVOLUTION_PROPOSAL_CREATED = "evolution_proposal_created"
-    CANARY_STARTED = "canary_started"
-    CANARY_PROMOTED = "canary_promoted"
 
 
 @dataclass

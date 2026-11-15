@@ -4,7 +4,7 @@ Companest Memory Backend  Abstract Contract
 Defines the MemoryBackend ABC that all storage implementations must satisfy.
 The default FileBackend wraps the existing MemoryManager via delegation,
 preserving backward compatibility while enabling future backends
-(Viking vector store, S3-backed, etc.).
+(vector store, S3-backed, etc.).
 """
 
 import logging

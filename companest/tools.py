@@ -271,7 +271,7 @@ def create_memory_tool_defs(
 
     # Use the provided backend if available, otherwise default to FileBackend.
     # All memory operations go through the backend so that switching backends
-    # (e.g. file -> viking) affects the entire memory surface, not just search.
+    # (e.g. file -> qdrant) affects the entire memory surface, not just search.
     _backend = memory_backend if memory_backend is not None else FileBackend(memory)
     _search_service = MemorySearchService(_backend)
 

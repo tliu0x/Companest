@@ -3,7 +3,7 @@ import logging
 import pytest
 
 from companest.config import CompanestConfig
-from companest.memory import FileBackend, MemoryManager, MemorySearchService, QdrantBackend, VikingBackend
+from companest.memory import FileBackend, MemoryManager, MemorySearchService, QdrantBackend
 from companest.orchestrator import CompanestOrchestrator
 from companest.pi import Pi, PiConfig
 from companest.tools import create_memory_tool_defs
@@ -14,17 +14,7 @@ def _make_memory(tmp_path):
     return MemoryManager(str(tmp_path))
 
 
-def test_viking_backend_does_not_claim_unimplemented_capabilities(caplog):
-    with caplog.at_level(logging.WARNING):
-        backend = VikingBackend()
-
-    assert backend.supports_semantic_search is False
-    assert backend.supports_native_compaction is False
-    assert backend.supports_snapshot is False
-    assert "not yet implemented" in caplog.text
-
-
-def test_orchestrator_falls_back_to_file_backend_for_viking(tmp_path, caplog):
+def test_orchestrator_falls_back_to_file_backend_for_unknown_backend(tmp_path, caplog):
     (tmp_path / "teams").mkdir()
     config = CompanestConfig(memory_backend="viking")
     orchestrator = CompanestOrchestrator(config)
@@ -33,7 +23,7 @@ def test_orchestrator_falls_back_to_file_backend_for_viking(tmp_path, caplog):
         orchestrator.init_teams(str(tmp_path))
 
     assert isinstance(orchestrator.memory_backend, FileBackend)
-    assert "deprecated" in caplog.text
+    assert "Unknown memory backend" in caplog.text
 
 
 def test_semantic_mode_downgrades_to_exact_for_file_backend(tmp_path):

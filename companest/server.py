@@ -292,8 +292,8 @@ class CompanestAPIServer:
                     # Skip CORS preflight requests
                     if request.method == "OPTIONS":
                         return await call_next(request)
-                    # Skip auth for health check, admin UI, console frontend, and WebSocket paths
-                    if request.url.path == "/health" or request.url.path.startswith(("/admin", "/_nicegui", "/ws/", "/console")):
+                    # Skip auth for health check and WebSocket paths
+                    if request.url.path == "/health" or request.url.path.startswith("/ws/"):
                         return await call_next(request)
                     # Check bearer token
                     auth_header = request.headers.get("Authorization", "")
@@ -1078,38 +1078,6 @@ class CompanestAPIServer:
             parsed = [GlobalBinding(**b) for b in bindings]
             self.orchestrator.company_registry.save_global_bindings(parsed)
             return {"status": "saved", "count": len(parsed)}
-
-        # Mount NiceGUI admin UI (optional  requires nicegui package)
-        if api_token:
-            try:
-                from .admin import init_admin
-                init_admin(app, self.orchestrator, api_token)
-                logger.info("Admin UI mounted at /admin")
-            except ImportError:
-                logger.info("NiceGUI not installed, admin UI disabled")
-
-        # Mount console frontend (static files from Vite build)
-        console_dist = Path(__file__).parent.parent / "console" / "dist"
-        if console_dist.is_dir():
-            from starlette.responses import FileResponse
-
-            @app.get("/console/{rest_of_path:path}")
-            async def console_spa(rest_of_path: str):
-                # Serve static assets if they exist, otherwise serve index.html (SPA fallback)
-                file_path = (console_dist / rest_of_path).resolve()
-                # Prevent path traversal — resolved path must stay within dist directory
-                if rest_of_path and file_path.is_relative_to(console_dist.resolve()) and file_path.is_file():
-                    return FileResponse(file_path)
-                return FileResponse(console_dist / "index.html")
-
-            # Serve /console root
-            @app.get("/console")
-            async def console_root():
-                return FileResponse(console_dist / "index.html")
-
-            logger.info(f"Console frontend mounted at /console (serving from {console_dist})")
-        else:
-            logger.info("Console frontend not built (console/dist not found), skipping mount")
 
         # --- Public Knowledge & Digest Routers (v1) ---
         import os
