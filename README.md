@@ -8,6 +8,18 @@ Companest is a control plane for agent-native companies. It runs shared teams an
 
 Alpha, but usable today as a shared runtime for multiple companies. Interfaces may still change while packaging, docs, and operational defaults continue to harden.
 
+## Public Repository Privacy
+
+This repository is public. Keep personal information out of tracked files, Git history, commit messages, and public PR descriptions or comments. This rule applies to human contributors and coding agents.
+
+- Do not include personal names, private email addresses, phone numbers, addresses, personal account identifiers, local home-directory paths, or links to private AI sessions. Keep repository URLs needed for installation, attribution, and security reporting; do not add unrelated personal profiles or account history.
+- Use fictional data and placeholders in documentation, examples, fixtures, and logs. Keep real credentials, personal configuration, and runtime data outside version control.
+- Before committing, configure and verify a non-personal Git author and committer identity for this checkout. Do not assume the machine's global Git identity is safe for publication; a noreply email alone does not hide a personal author name.
+- Before pushing or publishing a PR, review staged content, outgoing commit metadata and messages, and the PR text for personal information. Never reproduce actual personal data in a cleanup description or test fixture.
+- If personal information was already published, remove it from current content and audit every affected branch, tag, and historical commit. A new deletion commit does not remove older copies. Coordinate any history rewrite and follow up on retained PR references or cached views with the hosting provider.
+
+See [SECURITY.md](./SECURITY.md) for private security reporting.
+
 ## What Companest Does
 
 - runs shared teams and company-private teams in one runtime
