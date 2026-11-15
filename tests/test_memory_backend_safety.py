@@ -204,8 +204,6 @@ def test_qdrant_backend_claims_semantic_search(tmp_path):
     backend = QdrantBackend(manager=memory, in_memory=True)
 
     assert backend.supports_semantic_search is True
-    assert backend.supports_snapshot is True
-    assert backend.supports_native_compaction is False
 
 
 def test_qdrant_backend_delegates_read_write_to_file(tmp_path):

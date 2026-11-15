@@ -1,5 +1,3 @@
-"""Companest Memory Search Service"""
-
 import json
 import logging
 import re
@@ -37,7 +35,6 @@ _COMMON_QUERY_TERMS = {
     "with",
 }
 
-# Scoring weights for exact matching
 _WEIGHT_KEY = 0.95
 _WEIGHT_TAG = 0.85
 _WEIGHT_SUMMARY = 0.70
@@ -45,8 +42,6 @@ _WEIGHT_SUMMARY = 0.70
 
 @dataclass
 class SearchResult:
-    """A single search result with scoring metadata."""
-
     key: str
     source: str  # "active" | "archive"
     score: float  # 0.0-1.0
@@ -54,7 +49,6 @@ class SearchResult:
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self, explain: bool = False) -> dict:
-        """Serialize to dict. When explain=False, omit scoring details."""
         data = {"key": self.key, "source": self.source, **self.meta}
         if explain:
             data["_score"] = round(self.score, 4)
@@ -63,8 +57,6 @@ class SearchResult:
 
 
 class MemorySearchService:
-    """Search service that operates against a MemoryBackend."""
-
     def __init__(self, backend: MemoryBackend) -> None:
         self._backend = backend
 
@@ -78,7 +70,6 @@ class MemorySearchService:
         include_archive: bool = True,
         explain: bool = False,
     ) -> List[dict]:
-        """Search team memory. Returns list of result dicts."""
         resolved_mode = self._choose_mode(mode, query)
         logger.debug(
             "memory_search team=%s query=%r mode=%s->%s limit=%d",
@@ -122,7 +113,7 @@ class MemorySearchService:
         if not task or limit <= 0 or budget_chars <= 0:
             return []
 
-        search_limit = max(limit * 3, limit, 12)
+        search_limit = max(limit * 3, 12)
         candidates: Dict[tuple, dict] = {}
 
         for result in self.search(
@@ -135,22 +126,21 @@ class MemorySearchService:
         ):
             self._merge_retrieval_candidate(candidates, result)
 
-        if self._supports_exact:
-            term_limit = max(limit * 2, 8)
-            for term in self._task_terms(task):
-                for result in self.search(
-                    team_id,
-                    term,
-                    mode="exact",
-                    limit=term_limit,
-                    include_archive=include_archive,
-                    explain=True,
-                ):
-                    self._merge_retrieval_candidate(
-                        candidates,
-                        result,
-                        matched_term=term,
-                    )
+        term_limit = max(limit * 2, 8)
+        for term in self._task_terms(task):
+            for result in self.search(
+                team_id,
+                term,
+                mode="exact",
+                limit=term_limit,
+                include_archive=include_archive,
+                explain=True,
+            ):
+                self._merge_retrieval_candidate(
+                    candidates,
+                    result,
+                    matched_term=term,
+                )
 
         ranked = sorted(
             candidates.values(),
@@ -183,9 +173,7 @@ class MemorySearchService:
             if entry_size > remaining:
                 if selected or remaining < 80:
                     break
-                # Calculate the fixed overhead to reserve
-                tags = entry.get("tags", [])
-                tags_len = sum(len(str(t)) for t in tags)
+                tags_len = sum(len(str(t)) for t in entry["tags"])
                 fixed_overhead = len(entry["key"]) + tags_len + 48
                 max_text = max(remaining - fixed_overhead, 0)
                 entry["text"] = self._truncate_text(entry["text"], max_text)
@@ -201,7 +189,6 @@ class MemorySearchService:
         return selected
 
     def _choose_mode(self, requested: str, query: str) -> str:
-        """Resolve 'auto' to a concrete mode based on backend capabilities and query characteristics."""
         if requested not in _VALID_MODES:
             logger.warning(
                 "Unknown memory search mode %r, falling back to exact",
@@ -230,17 +217,6 @@ class MemorySearchService:
             return "hybrid"
         return "semantic"
 
-    @property
-    def _supports_exact(self) -> bool:
-        """Check whether the backend supports exact search."""
-        try:
-            self._backend.get_index("__probe__")
-            return True
-        except NotImplementedError:
-            return False
-        except Exception:
-            return True
-
     def _exact_search(
         self,
         team_id: str,
@@ -249,13 +225,6 @@ class MemorySearchService:
         include_archive: bool = True,
     ) -> List[SearchResult]:
         """Keyword matching against key names, tags, and summaries."""
-        if not self._supports_exact:
-            logger.debug(
-                "Backend %s does not support exact search (get_index), skipping",
-                type(self._backend).__name__,
-            )
-            return []
-
         query_lower = query.lower()
         results: List[SearchResult] = []
 
@@ -273,11 +242,7 @@ class MemorySearchService:
             ))
 
         if include_archive:
-            try:
-                archive_results = self._backend.search_archive(team_id, query)
-            except NotImplementedError:
-                archive_results = []
-            for result in archive_results:
+            for result in self._backend.search_archive(team_id, query):
                 key = result.pop("key", "")
                 importance = result.get("importance", 0.0)
                 base = max(
@@ -300,7 +265,6 @@ class MemorySearchService:
         return results
 
     def _score_entry(self, query_lower: str, key: str, meta: dict) -> float:
-        """Score a single index entry against a lowercased query."""
         base = 0.0
 
         key_lower = key.lower()
@@ -417,7 +381,6 @@ class MemorySearchService:
 
     @staticmethod
     def _truncate_text(text: str, max_chars: int) -> str:
-        """Trim text to fit the prompt budget."""
         if max_chars <= 0:
             return ""
         if len(text) <= max_chars:
@@ -429,9 +392,8 @@ class MemorySearchService:
     @staticmethod
     def _estimate_prompt_size(entry: dict) -> int:
         """Rough char estimate for a formatted retrieval entry."""
-        tags = entry.get("tags", [])
-        tags_len = sum(len(str(tag)) for tag in tags)
-        return len(entry.get("key", "")) + len(entry.get("text", "")) + tags_len + 48
+        tags_len = sum(len(str(tag)) for tag in entry["tags"])
+        return len(entry["key"]) + len(entry["text"]) + tags_len + 48
 
     def _semantic_search(
         self,
@@ -440,25 +402,11 @@ class MemorySearchService:
         *,
         include_archive: bool = True,
     ) -> List[SearchResult]:
-        """Vector similarity search."""
-        if not self._backend.supports_semantic_search:
-            logger.debug(
-                "Backend %s does not support semantic search, skipping",
-                type(self._backend).__name__,
-            )
-            return []
-
         try:
             hits = self._backend.semantic_search(
                 team_id, query,
                 include_archive=include_archive,
             )
-        except NotImplementedError:
-            logger.debug(
-                "Backend %s declares semantic search but method is not implemented",
-                type(self._backend).__name__,
-            )
-            return []
         except Exception as e:
             logger.warning(
                 "Semantic search failed for team %s: %s", team_id, e,

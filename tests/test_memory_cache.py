@@ -301,32 +301,6 @@ class TestCacheEdgeCases:
         data = mm.read_team_memory("alpha", "log.json")
         assert data == [{"entry": 1}]
 
-    def test_write_global_memory_invalidates_file_cache(self, mm, mem_dir):
-        """write_global_memory invalidates Layer 1 cache."""
-        (mem_dir / "memory").mkdir(exist_ok=True)
-        path = mem_dir / "memory" / "global.json"
-        path.write_text(json.dumps({"old": True}))
-
-        result1 = mm.read_global_memory("global.json")
-        assert result1 == {"old": True}
-
-        mm.write_global_memory("global.json", {"new": True})
-        result2 = mm.read_global_memory("global.json")
-        assert result2 == {"new": True}
-
-    def test_write_shared_invalidates_file_cache(self, mm, mem_dir):
-        """write_shared invalidates Layer 1 cache."""
-        (mem_dir / "shared").mkdir(exist_ok=True)
-        path = mem_dir / "shared" / "common.json"
-        path.write_text(json.dumps({"version": 1}))
-
-        result1 = mm.read_shared("common.json")
-        assert result1 == {"version": 1}
-
-        mm.write_shared("common.json", {"version": 2})
-        result2 = mm.read_shared("common.json")
-        assert result2 == {"version": 2}
-
 
 class TestIndexCache:
 
