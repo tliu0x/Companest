@@ -1,3 +1,5 @@
+import asyncio
+import copy
 import logging
 import os
 import re
@@ -9,6 +11,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 
 from ..exceptions import CompanyError
+from ..utils import finish_on_cancel, run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +131,40 @@ class CompanyRegistry:
         self._mtimes: Dict[str, float] = {}
         self._bindings_mtime: float = 0.0
         self._components: Dict[str, Any] = {}  # company_id -> CompanyComponent
+        self._mutation_lock = asyncio.Lock()
+
+    def _io_snapshot(self):
+        snapshot = copy.copy(self)
+        for name in ("_configs", "_mtimes", "_components", "_global_bindings"):
+            setattr(snapshot, name, copy.copy(getattr(self, name)))
+        return snapshot
+
+    async def _mutate_async(self, method, *args):
+        async def mutate():
+            snapshot = self._io_snapshot()
+            result = await run_sync(getattr(snapshot, method), *args)
+            for name in ("_configs", "_mtimes", "_components", "_global_bindings", "_bindings_mtime"):
+                setattr(self, name, getattr(snapshot, name))
+            return result
+
+        async with self._mutation_lock:
+            return await finish_on_cancel(mutate())
+
+    async def save_async(self, config: CompanyConfig) -> None:
+        await self._mutate_async("save", config)
+
+    async def delete_async(self, company_id: str) -> bool:
+        return await self._mutate_async("delete", company_id)
+
+    async def reload_async(self) -> None:
+        await self._mutate_async("reload")
+
+    async def save_global_bindings_async(self, bindings: List[GlobalBinding]) -> None:
+        await self._mutate_async("save_global_bindings", bindings)
+
+    async def check_for_changes_async(self) -> bool:
+        snapshot = self._io_snapshot()
+        return await run_sync(snapshot.check_for_changes)
 
     def register_component(self, component: Any) -> None:
         cid = component.company_id

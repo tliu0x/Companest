@@ -3,6 +3,7 @@ import asyncio
 import os
 import shutil
 from contextlib import asynccontextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta, timezone
@@ -691,7 +692,14 @@ class CompanestAPIServer:
                 validated.append(team_def)
             return validated
 
-        def _write_inline_teams(company_id: str, validated_teams: List[dict]) -> Path:
+        def _company_mutation(handler):
+            @wraps(handler)
+            async def wrapped(*args, **kwargs):
+                _company_registry()
+                return await self.orchestrator.company_operation(handler, *args, **kwargs)
+            return wrapped
+
+        def _write_inline_teams(company_id: str, validated_teams: List[dict], replace=False) -> Path:
             """Write validated team definitions to disk and return the company's teams directory."""
             teams_root = Path(self.orchestrator.memory.base_path) / "companies" / company_id / "teams"
             for team_def in validated_teams:
@@ -709,6 +717,16 @@ class CompanestAPIServer:
                     soul_md = pi_def.get("soul_md", "")
                     if soul_md:
                         (pi_dir / "soul.md").write_text(soul_md, encoding="utf-8")
+            if replace:
+                provided_ids = {team_def["id"] for team_def in validated_teams}
+                if teams_root.exists():
+                    for existing in teams_root.iterdir():
+                        if existing.is_dir() and existing.name not in provided_ids:
+                            if not _SAFE_ID_RE.match(existing.name):
+                                logger.warning(f"Skipping removal of invalid team directory: {existing.name}")
+                                continue
+                            shutil.rmtree(existing)
+                            logger.info(f"Removed stale team directory: {existing.name}")
             return teams_root
 
         @app.get("/api/companies")
@@ -725,6 +743,7 @@ class CompanestAPIServer:
             return {"companies": companies, "total": len(companies)}
 
         @app.post("/api/companies")
+        @_company_mutation
         async def create_company(req: CompanyCreateRequest):
             registry = _company_registry()
             if registry.get(req.id):
@@ -737,8 +756,8 @@ class CompanestAPIServer:
                 if val is not None:
                     config_data[field_name] = val
             config = CompanyConfig(**config_data)
-            registry.save(config)
-            _write_inline_teams(req.id, validated_teams)
+            await registry.save_async(config)
+            await run_sync(_write_inline_teams, req.id, validated_teams)
             await self.orchestrator.apply_company(req.id)
             await self._broadcast_event({
                 "type": "company.created",
@@ -778,6 +797,7 @@ class CompanestAPIServer:
             return data
 
         @app.patch("/api/companies/{company_id}")
+        @_company_mutation
         async def update_company(company_id: str, req: CompanyUpdateRequest):
             registry, config = _require_company(company_id)
             validated_teams = _validate_inline_teams_payload(req.teams) if req.teams is not None else None
@@ -788,18 +808,9 @@ class CompanestAPIServer:
                     data[key].update(val)
                 else:
                     data[key] = val
-            registry.save(CompanyConfig(**data))
+            await registry.save_async(CompanyConfig(**data))
             if validated_teams is not None:
-                teams_root = _write_inline_teams(company_id, validated_teams)
-                provided_ids = {team_def["id"] for team_def in validated_teams}
-                if teams_root.exists():
-                    for existing in teams_root.iterdir():
-                        if existing.is_dir() and existing.name not in provided_ids:
-                            if not _SAFE_ID_RE.match(existing.name):
-                                logger.warning(f"Skipping removal of invalid team directory: {existing.name}")
-                                continue
-                            shutil.rmtree(existing)
-                            logger.info(f"Removed stale team directory: {existing.name}")
+                await run_sync(_write_inline_teams, company_id, validated_teams, replace=True)
             await self.orchestrator.apply_company(company_id)
             await self._broadcast_event({
                 "type": "company.updated",
@@ -809,10 +820,11 @@ class CompanestAPIServer:
             return {"status": "updated", "id": company_id}
 
         @app.delete("/api/companies/{company_id}")
+        @_company_mutation
         async def delete_company(company_id: str):
             registry, _ = _require_company(company_id)
             await self.orchestrator.teardown_company(company_id)
-            registry.delete(company_id)
+            await registry.delete_async(company_id)
             await self._broadcast_event({
                 "type": "company.deleted",
                 "company_id": company_id,
@@ -832,13 +844,14 @@ class CompanestAPIServer:
             return {"jobs": [j.to_dict() for j in jobs], "total": total_matching}
 
         @app.post("/api/companies/{company_id}/bind")
+        @_company_mutation
         async def add_company_binding(company_id: str, req: CompanyBindRequest):
             registry, config = _require_company(company_id)
             binding = CompanyBinding(channel=req.channel, chat_id=req.chat_id, user_id=req.user_id)
             data = config.model_dump()
             data["bindings"].append(binding.model_dump())
             updated = CompanyConfig(**data)
-            registry.save(updated)
+            await registry.save_async(updated)
             await self._broadcast_event({
                 "type": "company.binding_added",
                 "company_id": company_id,
@@ -854,11 +867,11 @@ class CompanestAPIServer:
             return {"bindings": [b.model_dump() for b in bindings]}
 
         @app.put("/api/bindings")
-        async def set_global_bindings(bindings: list):
+        @_company_mutation
+        async def set_global_bindings(bindings: List[GlobalBinding]):
             registry = _company_registry()
-            parsed = [GlobalBinding(**b) for b in bindings]
-            registry.save_global_bindings(parsed)
-            return {"status": "saved", "count": len(parsed)}
+            await registry.save_global_bindings_async(bindings)
+            return {"status": "saved", "count": len(bindings)}
 
         if os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true"):
             from ..knowledge.public import create_public_knowledge_router

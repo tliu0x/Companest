@@ -470,7 +470,7 @@ def cmd_serve(args) -> int:
 
         companest_dir = Path(config.data_dir)
         if (companest_dir / "teams").exists():
-            orchestrator.init_teams(
+            await orchestrator.init_teams_async(
                 base_path=str(companest_dir),
                 s3_bucket=os.getenv("COMPANEST_S3_BUCKET") or None,
             )

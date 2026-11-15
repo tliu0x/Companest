@@ -8,6 +8,7 @@ from .pi import Pi, PiConfig
 from ..memory import MemoryManager
 from .cascade import CascadeEngine
 from ..exceptions import TeamError
+from ..utils import run_sync
 
 if TYPE_CHECKING:
     from ..config import ProxyConfig
@@ -178,8 +179,17 @@ class TeamRegistry:
         )
 
     def scan_company_teams(self, company_id: str, teams_dir: Path) -> None:
+        self._configs.update(self._load_company_teams(company_id, teams_dir))
+
+    async def scan_company_teams_async(self, company_id: str, teams_dir: Path) -> None:
+        configs = await run_sync(self._load_company_teams, company_id, teams_dir)
+        self._configs.update(configs)
+
+    @staticmethod
+    def _load_company_teams(company_id: str, teams_dir: Path) -> Dict[str, TeamConfig]:
+        configs = {}
         if not teams_dir.exists():
-            return
+            return configs
         for team_dir in sorted(teams_dir.iterdir()):
             team_md = team_dir / "team.md"
             if team_dir.is_dir() and team_md.exists():
@@ -188,10 +198,11 @@ class TeamRegistry:
                     config.local_id = config.id  # physical directory name
                     config.id = f"{company_id}/{config.id}"
                     if config.enabled:
-                        self._configs[config.id] = config
+                        configs[config.id] = config
                         logger.info(f"Company team loaded: {config.id}")
                 except Exception as e:
                     logger.error(f"Failed to load company team {company_id}/{team_dir.name}: {e}")
+        return configs
 
     def register(self, config: TeamConfig, always_on: bool = False) -> None:
         if not config.enabled:

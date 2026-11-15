@@ -7,7 +7,12 @@ from typing import Any, Dict, Iterator, List, Optional
 
 async def run_sync(func, /, *args, **kwargs):
     """Offload blocking work; finish its cleanup before propagating cancellation."""
-    task = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
+    return await finish_on_cancel(asyncio.to_thread(func, *args, **kwargs))
+
+
+async def finish_on_cancel(awaitable):
+    """Finish an in-flight operation before releasing its caller's resources."""
+    task = asyncio.create_task(awaitable)
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError:

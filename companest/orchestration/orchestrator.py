@@ -1,10 +1,11 @@
+import asyncio
 import importlib.util
 import logging
 import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
 
-from ..utils import run_sync
+from ..utils import run_sync, finish_on_cancel
 from ..config import CompanestConfig
 from ..memory import MemoryManager, Dreamer, EnrichmentSource, FileBackend, QdrantBackend
 from ..agents.team import TeamConfig, TeamRegistry
@@ -19,7 +20,8 @@ from ..agents.tools import ToolProvider, ToolRegistry, load_skills
 from .multi_team import run_multi_team, ProgressCallback
 from .background import BackgroundManager
 from ..companies.company import CompanyRegistry, CompanyConfig
-from ..companies.component import CompanyContext, CompanyMemoryNamespace
+from ..companies.component import (CompanyContext, CompanyMemoryNamespace,
+                                   LoopBoundRegistry, bind_to_loop, run_component_hook)
 from ..companies.ceo_engine import build_cycle_prompt, generate_ceo_soul
 from ..companies.output import MemorySink, OutputSink
 from ..agents.pi import Pi, PiConfig, _run_tool_context
@@ -54,6 +56,9 @@ def _import_user_scheduler():
 class CompanestOrchestrator:
     def __init__(self, config: CompanestConfig):
         self.config = config
+        self._company_lock = asyncio.Lock()
+        self._company_owner = None
+        self._initialized_components = set()
         self.events = EventBus()
         self.tool_registry = ToolRegistry()
         self._enrichment_cycles: Dict[str, dict] = {
@@ -149,6 +154,7 @@ class CompanestOrchestrator:
         base_path: str = ".companest",
         s3_bucket: Optional[str] = None,
         s3_region: str = "us-east-2",
+        *, _defer_companies: bool = False,
     ) -> None:
         proxy = self.config.proxy if self.config.proxy.enabled else None
         self.memory = MemoryManager(base_path)
@@ -285,12 +291,12 @@ class CompanestOrchestrator:
         self.company_registry.scan()
         self._ceo_pis: Dict[str, Pi] = {}
 
-        for company in self.company_registry.list_enabled():
-            try:
-                self._init_company(company)
-            except Exception as e:
-                logger.error(f"Failed to init company {company.id}: {e}")
-
+        if not _defer_companies:
+            for company in self.company_registry.list_enabled():
+                try:
+                    self._init_company(company)
+                except Exception as e:
+                    logger.error(f"Failed to init company {company.id}: {e}")
         self.scheduler.add(
             "company_watcher",
             self._check_company_changes,
@@ -303,6 +309,32 @@ class CompanestOrchestrator:
             f"{len(self.team_registry.list_meta_teams())} meta, "
             f"{len(self._ceo_pis)} CEO agents"
         )
+
+    async def company_operation(self, operation, *args, **kwargs):
+        """Serialize lifecycle writers; finish an accepted change before cancellation."""
+        if self._company_owner is asyncio.current_task():
+            return await operation(*args, **kwargs)
+        async def invoke():
+            self._company_owner = asyncio.current_task()
+            try:
+                return await operation(*args, **kwargs)
+            finally:
+                self._company_owner = None
+        async with self._company_lock:
+            return await finish_on_cancel(invoke())
+
+    async def init_teams_async(self, base_path=".companest", s3_bucket=None, s3_region="us-east-2"):
+        """Bootstrap before serving requests without blocking the caller's event loop."""
+        async def initialize():
+            if hasattr(self, "team_registry"):
+                raise OrchestratorError("Teams already initialized")
+            await run_sync(self.init_teams, base_path, s3_bucket, s3_region, _defer_companies=True)
+            for company in self.company_registry.list_enabled():
+                try:
+                    await self._init_company_async(company)
+                except Exception as exc:
+                    logger.error(f"Failed to init company {company.id}: {exc}")
+        await self.company_operation(initialize)
 
     def _get_company_shared_teams(self, company_id: Optional[str]) -> Optional[List[str]]:
         # None = no whitelist (every global team allowed); an unknown company gets [] (none).
@@ -320,37 +352,80 @@ class CompanestOrchestrator:
             return shared_teams is None or team_id in shared_teams
         return company_id == team_id.split("/", 1)[0]
 
-    def _init_company(self, company: CompanyConfig) -> None:
-        team_id = f"company-{company.id}"
+    def _company_context(self, company, *, worker=False):
         ns = CompanyMemoryNamespace(self.memory, company.id)
+        ctx = CompanyContext(
+            company_id=company.id,
+            memory=ns,
+            tool_registry=self.tool_registry,
+            event_bus=self.events,
+            add_binding=lambda pat, tid, mode: self._smart_router.add_binding(
+                pat, tid, mode, owner_company_id=company.id
+            ),
+            register_enrichment=lambda src: (
+                setattr(src, 'company_id', company.id) or self.memory.register_enrichment(src)
+            ),
+        )
+        if worker:
+            ctx.tool_registry = LoopBoundRegistry(self.tool_registry)
+            ctx.event_bus = LoopBoundRegistry(self.events)
+            ctx.add_binding = bind_to_loop(ctx.add_binding)
+        return ctx
 
-        company_teams_dir = self.memory.base_path / "companies" / company.id / "teams"
-        self.team_registry.scan_company_teams(company.id, company_teams_dir)
-        for tid, cfg in self.team_registry.get_configs_by_company(company.id).items():
+    def _register_company_memory_paths(self, company_id, configs):
+        root = self.memory.base_path / "companies" / company_id / "teams"
+        for tid, cfg in configs.items():
             if cfg.local_id:
-                self.memory.register_team_path(tid, company_teams_dir / cfg.local_id)
+                self.memory.register_team_path(tid, root / cfg.local_id)
 
+    def _prepare_company_memory(self, company, available):
+        with self.memory._io_lock:
+            self._generate_ceo_soul(company, available)
+            self._seed_company_memory(company)
+
+    def _seed_company_memory(self, company):
+        ns = CompanyMemoryNamespace(self.memory, company.id)
+        seed = company.memory_seed
+        for key, content in seed.get("shared", {}).items():
+            if ns.read_shared(key) is None:
+                ns.write_shared(key, content)
+        for seed_team_id, team_seed in seed.get("teams", {}).items():
+            for key, content in team_seed.items():
+                if ns.read_team_memory(seed_team_id, key) is None:
+                    ns.write_team_memory(seed_team_id, key, content)
+
+    def _init_company(self, company: CompanyConfig) -> None:
+        root = self.memory.base_path / "companies" / company.id / "teams"
+        self.team_registry.scan_company_teams(company.id, root)
+        self._register_company_memory_paths(company.id, self.team_registry.get_configs_by_company(company.id))
         component = self.company_registry.get_component(company.id)
         if component is not None:
-            ctx = CompanyContext(
-                company_id=company.id,
-                memory=ns,
-                tool_registry=self.tool_registry,
-                event_bus=self.events,
-                add_binding=lambda pat, tid, mode: self._smart_router.add_binding(
-                    pat, tid, mode, owner_company_id=company.id
-                ),
-                register_enrichment=lambda src: (
-                    setattr(src, 'company_id', company.id) or self.memory.register_enrichment(src)
-                ),
-            )
+            self._initialized_components.add(company.id)
             try:
-                component.on_init(ctx)
-                logger.info(f"[Company] Component on_init() complete: {company.id}")
-            except Exception as e:
-                logger.error(f"[Company] Component on_init() failed for {company.id}: {e}")
+                component.on_init(self._company_context(company))
+            except Exception as exc:
+                logger.error(f"[Company] Component on_init() failed for {company.id}: {exc}")
+        self._prepare_company_memory(company, self._smart_router.get_available_teams(company.id))
+        self._register_company_runtime(company)
 
-        self._generate_ceo_soul(company)
+    async def _init_company_async(self, company: CompanyConfig) -> None:
+        root = self.memory.base_path / "companies" / company.id / "teams"
+        await self.team_registry.scan_company_teams_async(company.id, root)
+        configs = self.team_registry.get_configs_by_company(company.id)
+        await run_sync(self._register_company_memory_paths, company.id, configs)
+        component = self.company_registry.get_component(company.id)
+        if component is not None:
+            self._initialized_components.add(company.id)
+            try:
+                await run_component_hook(component.on_init, self._company_context(company, worker=True))
+            except Exception as exc:
+                logger.error(f"[Company] Component on_init() failed for {company.id}: {exc}")
+        available = self._smart_router.get_available_teams(company.id)
+        await run_sync(self._prepare_company_memory, company, available)
+        self._register_company_runtime(company)
+
+    def _register_company_runtime(self, company):
+        team_id = f"company-{company.id}"
         sinks = self._output_sinks.setdefault(company.id, [])
         if not any(isinstance(sink, MemorySink) for sink in sinks):
             sinks.insert(0, MemorySink(self.memory))
@@ -361,15 +436,6 @@ class CompanestOrchestrator:
                 rb.get("mode", "cascade"),
                 owner_company_id=company.id,
             )
-
-        seed = company.memory_seed
-        for key, content in seed.get("shared", {}).items():
-            if ns.read_shared(key) is None:
-                ns.write_shared(key, content)
-        for seed_team_id, team_seed in seed.get("teams", {}).items():
-            for key, content in team_seed.items():
-                if ns.read_team_memory(seed_team_id, key) is None:
-                    ns.write_team_memory(seed_team_id, key, content)
 
         for mcp_cfg in company.mcp_servers:
             cfg = dict(mcp_cfg)
@@ -439,17 +505,23 @@ class CompanestOrchestrator:
 
     async def apply_company(self, company_id: str) -> None:
         """Register or update a company — immediate effect, no watcher delay."""
+        await self.company_operation(self._apply_company, company_id)
+
+    async def _apply_company(self, company_id: str) -> None:
         config = self.company_registry.get(company_id)
         if self._is_company_initialized(company_id):
             await self.teardown_company(company_id)
         if config and config.enabled:
-            self._init_company(config)
+            await self._init_company_async(config)
 
     async def teardown_company(self, company_id: str) -> None:
+        await self.company_operation(self._teardown_company, company_id)
+
+    async def _teardown_company(self, company_id: str) -> None:
         comp = self.company_registry.get_component(company_id)
         if comp and hasattr(comp, 'on_teardown'):
             try:
-                comp.on_teardown()
+                await run_component_hook(comp.on_teardown)
             except Exception as e:
                 logger.error(f"[Company] on_teardown failed for {company_id}: {e}")
 
@@ -459,13 +531,14 @@ class CompanestOrchestrator:
         self.team_registry.unregister_company(company_id)
         await run_sync(self.memory.unregister_company_paths, company_id)
         self.tool_registry.unregister_company_mcp(company_id)
+        self._initialized_components.discard(company_id)
         self._ceo_pis.pop(company_id, None)
         self._output_sinks.pop(company_id, None)
 
         logger.info(f"[Company] Teardown complete: {company_id}")
 
     def _is_company_initialized(self, company_id: str) -> bool:
-        return company_id in self._ceo_pis or bool(
+        return company_id in self._initialized_components or company_id in self._output_sinks or company_id in self._ceo_pis or bool(
             self.team_registry.get_configs_by_company(company_id)
         )
 
@@ -506,7 +579,7 @@ class CompanestOrchestrator:
             except Exception as e:
                 logger.error(f"[OutputSink] Failed for {company.id}: {e}")
 
-    def _generate_ceo_soul(self, company: CompanyConfig) -> None:
+    def _generate_ceo_soul(self, company: CompanyConfig, available_teams=None) -> None:
         """Generate team and CEO soul.md files for a company (skip if exists)."""
         team_id = f"company-{company.id}"
         base = self.memory.base_path
@@ -544,7 +617,7 @@ class CompanestOrchestrator:
                 domain=company.domain,
                 goals=merged_goals,
                 kpis=company.ceo.kpis,
-                available_teams=self._smart_router.get_available_teams(company.id),
+                available_teams=available_teams if available_teams is not None else self._smart_router.get_available_teams(company.id),
             )
             ceo_soul_path.write_text(soul_content, encoding="utf-8")
 
@@ -566,7 +639,10 @@ class CompanestOrchestrator:
             )
 
     async def _check_company_changes(self) -> None:
-        if self.company_registry.check_for_changes():
+        await self.company_operation(self._reload_company_changes)
+
+    async def _reload_company_changes(self) -> None:
+        if await self.company_registry.check_for_changes_async():
             logger.info("[Company] Config changes detected, reloading...")
             old_ids = set(self._initialized_company_ids())
 
@@ -577,13 +653,13 @@ class CompanestOrchestrator:
                 except Exception as e:
                     logger.error(f"Failed to teardown company {cid}: {e}")
 
-            self.company_registry.reload()
+            await self.company_registry.reload_async()
 
             new_ids = set()
             for company in self.company_registry.list_enabled():
                 new_ids.add(company.id)
                 try:
-                    self._init_company(company)
+                    await self._init_company_async(company)
                 except Exception as e:
                     logger.error(f"Failed to re-init company {company.id}: {e}")
 
