@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+import tempfile
 from typing import Any
 
 import httpx
@@ -103,6 +104,41 @@ class SubstrateClient:
 
     async def get_actor(self, actor: ActorRef) -> dict:
         return await self._command("get", "actor", actor.name, "-a", actor.atespace)
+
+    async def configure_egress(self, actor: ActorRef, rules: list[dict]) -> None:
+        """Install the operator's policy before ingress wakes the actor.
+
+        Creation is retry-safe only when the existing policy matches. Never
+        overwrite a policy after an ambiguous create or a control-plane restart.
+        Upstream validates rules; these are configuration, never task input.
+        """
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as manifest:
+            json.dump({"rules": rules}, manifest)
+            manifest.flush()
+            try:
+                policy = await self._command(
+                    "create", "egress-policy", actor.name, "-a", actor.atespace,
+                    "-f", manifest.name,
+                )
+            except SubstrateError:
+                policy = await self._command("get", "egress-policy", actor.name, "-a", actor.atespace)
+        if self._canonical_rules(policy.get("rules", [])) != self._canonical_rules(rules):
+            raise SubstrateError("Actor egress policy differs from the configured company scope")
+
+    @staticmethod
+    def _canonical_rules(rules):
+        # Only normalize the pinned API's defaults and unordered sets. Unknown
+        # fields/effects remain in the comparison, so broader policies fail closed.
+        rules = json.loads(json.dumps(rules))
+        for rule in rules:
+            for protocol, body in rule.items():
+                if protocol in ("http", "https") and "ports" not in body:
+                    body["ports"] = {"numbers": [80 if protocol == "http" else 443]}
+                if "hostnames" in body:
+                    body["hostnames"].sort()
+                if "numbers" in body.get("ports", {}):
+                    body["ports"]["numbers"].sort()
+        return sorted(json.dumps(rule, sort_keys=True) for rule in rules)
 
     async def suspend_actor(self, actor: ActorRef) -> dict:
         return await self._command("suspend", "actor", actor.name, "-a", actor.atespace, "--mode=sync")

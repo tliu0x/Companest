@@ -117,6 +117,7 @@ class MCPServerConfig(BaseModel):
 class ActorBinding(BaseModel):
     atespace: str
     template: str
+    egress_rules: List[Dict[str, Any]] = Field(default_factory=list, max_length=256)
 
     model_config = {"extra": "forbid"}
 

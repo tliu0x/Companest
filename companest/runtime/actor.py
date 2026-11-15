@@ -12,7 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -21,7 +21,7 @@ from ..config import CompanestConfig
 from .harness import ActorOrchestrator
 from dataclasses import asdict
 from ..utils import run_sync, finish_on_cancel
-from .storage import FileLock, check_identity
+from .storage import FileLock, check_identity, LOCK_PROTOCOL
 from .services import ActorServices
 
 
@@ -33,6 +33,7 @@ class TaskRequest(BaseModel):
     storage_id: str = Field(min_length=1)
     workspace_storage_id: str | None = None
     capability: str = Field(min_length=32, repr=False)
+    lock_protocol: Literal["hardlink-v1"]
 
     model_config = {"extra": "forbid"}
 
@@ -124,6 +125,8 @@ class ActorWorkload:
         return {key: value for key, value in self.record.items() if key != "request_hash"}
 
     async def execute(self, request: TaskRequest):
+        from .storage import LOCK_OWNER
+        owner_token = LOCK_OWNER.set({"job_id": request.job_id, "company_id": self.company_id})
         try:
             async with asyncio.timeout(self.config.global_timeout):
                 context = {**request.context, "company_id": self.company_id}
@@ -186,8 +189,11 @@ class ActorWorkload:
         except Exception as exc:
             self.record.update(status="failed", error=str(exc))
         finally:
-            self.record["completed_at"] = datetime.now(timezone.utc).isoformat()
-            await self.persist()
+            try:
+                self.record["completed_at"] = datetime.now(timezone.utc).isoformat()
+                await self.persist()
+            finally:
+                LOCK_OWNER.reset(owner_token)
 
     async def maintain_memory(self, orchestrator, services, operation):
         teams = [tid for tid in orchestrator.team_registry.list_teams()
@@ -244,7 +250,7 @@ def create_app(workload: ActorWorkload) -> FastAPI:
 
     @app.get("/readyz")
     async def ready():
-        return {"ready": True}
+        return {"ready": True, "lock_protocol": LOCK_PROTOCOL}
 
     @app.post("/task", status_code=202)
     async def submit(request: TaskRequest):

@@ -69,6 +69,8 @@ def api_runtime(tmp_path):
         async def get(ref):
             return resources[ref.name]
         async def request(ref, method, path, *, payload=None, port=8080):
+            if path == "/readyz":
+                return httpx.Response(200, json={"ready": True, "lock_protocol": "hardlink-v1"})
             if payload:
                 records[ref.name] = {"job_id": payload["job_id"], "company_id": payload["company_id"],
                     "status": "running", "started_at": datetime.now(timezone.utc).isoformat(),

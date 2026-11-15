@@ -43,7 +43,45 @@ mount paths with your deployment values. There is no local execution fallback.
     "scopes": {
       "@shared": {
         "atespace": "ate-demo-counter",
-        "template": "companest-sample"
+        "template": "companest-sample",
+        "egress_rules": [
+          {
+            "http": {
+              "hostnames": ["companest-api"],
+              "ports": {
+                "numbers": [8000]
+              }
+            }
+          },
+          {
+            "https": {
+              "hostnames": ["api.deepseek.com"],
+              "effects": {
+                "replaceHeaders": [
+                  {
+                    "header": "Authorization",
+                    "prefix": "Bearer ",
+                    "credentialUri": "ate-secret://k8s.io/default/companest-models/deepseek/api-key"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "https": {
+              "hostnames": ["api.moonshot.cn"],
+              "effects": {
+                "replaceHeaders": [
+                  {
+                    "header": "Authorization",
+                    "prefix": "Bearer ",
+                    "credentialUri": "ate-secret://k8s.io/default/companest-models/moonshot/api-key"
+                  }
+                ]
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -69,3 +107,8 @@ Use these only if you enable the related features:
 Substrate actor storage must be provisioned before enabling execution. Set
 `storage_lock_dir` to the shared lock mount; use retained shared memory/workspace
 directories and separate per-actor journals. See [storage setup](substrate/storage.md).
+
+`substrate.scopes.*.egress_rules` uses the pinned Substrate EgressPolicy rule schema.
+Replace the callback hostname/port and credential references with your deployment
+values; provision the referenced secrets and company-scoped provider grants separately.
+Empty rules deny network access. Templates do not pass egress policy to new actors.

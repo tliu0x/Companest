@@ -441,9 +441,9 @@ def cmd_serve(args) -> int:
             "Master connection disabled. "
             "Telegram/chat tasks won't be received."
         )
-    if not Path(".companest/teams").exists():
+    if not (Path(config.data_dir) / "teams").exists():
         print_warning(
-            "No .companest/teams/ directory found. "
+            f"No teams/ directory found in {config.data_dir}. "
             "Pi Agent Teams will not be available."
         )
     if config.proxy.enabled:
@@ -461,6 +461,7 @@ def cmd_serve(args) -> int:
     from .gateway.master import MasterConnection
 
     async def _start():
+        await JobManager.recover_retired_actor_locks(config)
         orchestrator = CompanestOrchestrator(config)
 
         companest_dir = Path(config.data_dir)

@@ -30,7 +30,45 @@ A minimal local development configuration for the public sample.
     "scopes": {
       "@shared": {
         "atespace": "ate-demo-counter",
-        "template": "companest-sample"
+        "template": "companest-sample",
+        "egress_rules": [
+          {
+            "http": {
+              "hostnames": ["companest-api"],
+              "ports": {
+                "numbers": [8000]
+              }
+            }
+          },
+          {
+            "https": {
+              "hostnames": ["api.deepseek.com"],
+              "effects": {
+                "replaceHeaders": [
+                  {
+                    "header": "Authorization",
+                    "prefix": "Bearer ",
+                    "credentialUri": "ate-secret://k8s.io/default/companest-models/deepseek/api-key"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "https": {
+              "hostnames": ["api.moonshot.cn"],
+              "effects": {
+                "replaceHeaders": [
+                  {
+                    "header": "Authorization",
+                    "prefix": "Bearer ",
+                    "credentialUri": "ate-secret://k8s.io/default/companest-models/moonshot/api-key"
+                  }
+                ]
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -41,3 +79,8 @@ A minimal local development configuration for the public sample.
 - `debug: true` allows local runs without `COMPANEST_API_TOKEN`
 - Set `debug: false` and configure `COMPANEST_API_TOKEN` before exposing the API
 - Proxy is disabled in the public sample so Pis call provider SDKs directly
+
+`substrate.scopes.*.egress_rules` uses the pinned Substrate EgressPolicy rule schema.
+Replace the callback hostname/port and credential references with your deployment
+values; provision the referenced secrets and company-scoped provider grants separately.
+Empty rules deny network access. Templates do not pass egress policy to new actors.

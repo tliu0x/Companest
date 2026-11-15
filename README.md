@@ -58,7 +58,9 @@ pip install -e ".[dev]"
 First provision Substrate, the actor image and persistent mounts using the
 [deployment guide](deploy/substrate/README.md). Copy the public declarations to
 the mounted data directory and set `data_dir`, `control_state_dir`,
-`storage_lock_dir` and `substrate.scopes` in your config. Then:
+`storage_lock_dir` and `substrate.scopes` in your config. Each scope's
+`egress_rules` must allow its private control-plane callback and model/tool
+destinations; new actors do not inherit template egress policies. Then:
 
 ```bash
 companest validate <CONFIG_PATH>

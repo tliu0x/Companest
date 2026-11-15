@@ -2,7 +2,7 @@
 
 Actors use mounted files directly. There is no per-job copy/sync of memory or
 workspaces. The control plane and all authorized actors must see the same files.
-The filesystem must support atomic rename, fsync and POSIX advisory locks;
+The filesystem must support atomic hard-link creation, rename and fsync;
 NFSv4 is the supplied deployment example. Back up this storage separately from
 Substrate snapshots. The control plane's `jobs.db` stays on its own persistent
 local/block volume, not NFS; run one API process per job database.
@@ -14,8 +14,11 @@ Apply a substituted copy of `storage.example.yaml`. The NFS driver's
 [`subDir` and `onDelete: retain`](https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/docs/driver-parameters.md)
 keep shared directories independent of actor deletion. Kubernetes reclaimPolicy
 alone does not do that: Substrate invokes CSI directly. Pin and validate your
-CSI driver version before deployment; this migration tests mounts by simulation.
-Provision export ownership for image UID 10001, without world-writable exports.
+CSI driver version before deployment. Provision export ownership for image UID
+10001, including newly allocated journal directories, without world-writable
+exports. The local kind check used NFS CSI v4.13.4 with mTLS and server-side UID
+mapping for the provisioner. An NFSv4 `fsid=0` export is mounted as `/`, even
+when its server-side directory is named `/exports`.
 
 The shared-scope template mounts `shared` at `/state`, `locks` at `/locks`, the
 workspace at `/workspaces/code`, and a unique journal volume at `/data`. Prepare
@@ -38,7 +41,37 @@ workspaces belong only to the shared scope. Every dispatched workspace requires
 an identity marker; missing/wrong mounts fail closed. The actor verifies the
 expected storage and workspace identities before running tools. A nonblocking
 filesystem lock rejects concurrent writers to the same workspace. Memory
-read-modify-write operations use a shared reentrant filesystem lock.
+read-modify-write operations use the same shared locking protocol.
+
+## Lock ownership and recovery
+
+The pinned gVisor runtime's `flock` did not exclude another sandbox or the native
+control process in the real kind check. Shared memory/workspace locks therefore
+publish a complete owner record with an atomic hard link at `<lock>.claim`.
+The record carries a unique acquisition token and, in actors, the unchanged
+`job_id` and `company_id`. Normal release verifies ownership before unlinking.
+Contention fails immediately for workspaces and after 30 seconds for memory;
+this timeout never expires or steals a claim. Suspended actors retain ownership.
+
+After Substrate confirms actor deletion, JobManager removes only that job's
+claims. Before memory initialization, `companest serve` also checks recorded
+claim owners against Substrate and recovers claims for confirmed missing actors.
+An outage, a suspended actor or a terminal database row alone is insufficient.
+The next managed memory access recovers any pending file commit normally.
+
+Claims without a known job owner, including a control process killed during a
+write, remain locked. Stop the relevant writers and establish that the owner has
+terminated before removing that specific claim; never clear the lock directory
+by age. If an actor crashed with a claim and still exists in Substrate, retire
+that actor before restarting the API. This favors data integrity over automatic
+availability after an uncertain crash.
+
+The API's local/block `jobs.db` owner still uses a native kernel lock. Run the
+control container on the native runtime, with one API process per database.
+Drain old actors and stop old control writers before upgrading both images;
+the `hardlink-v1` readiness/task handshake rejects incompatible new submissions.
+Existing memory/workspace IDs and files are unchanged; old empty `.lock` files
+are harmless, but old code must not remain active alongside the new protocol.
 
 For a company template, never mount the complete control-plane data tree.
 Substrate forbids nested volume mount points. Use disjoint mounts and an

@@ -2,6 +2,7 @@ import uuid
 import secrets
 import hmac
 import os
+import sqlite3
 from dataclasses import asdict
 import asyncio
 import logging
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from ..exceptions import JobError
 from ..runtime.substrate import ActorRef, SubstrateClient, SubstrateError, ActorNotFound
-from ..runtime.storage import FileLock, check_identity
+from ..runtime.storage import LocalFileLock, check_identity, release_job_locks, LOCK_PROTOCOL
 from ..utils import run_sync
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class Job:
             "submitted_by": self.submitted_by,
             "company_id": self.company_id,
             "duration_ms": self.duration_ms,
-            "execution": dict(self.execution),
+            "execution": {key: value for key, value in self.execution.items() if key != "egress_rules"},
         }
 
 
@@ -84,6 +85,48 @@ class JobManager:
     """
 
     TERMINAL = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
+
+    @staticmethod
+    async def recover_retired_actor_locks(config) -> None:
+        """Before memory initialization, recover only Substrate-confirmed deaths.
+
+        Holding the local database owner lock excludes another API process.
+        Neither elapsed time nor a saved terminal status proves actor death.
+        """
+        if not config.substrate or not config.storage_lock_dir:
+            return
+        directory = Path(config.storage_lock_dir)
+        await run_sync(check_identity, directory, config.substrate.storage_id)
+        control = Path(config.control_state_dir or config.data_dir)
+
+        def records():
+            ids = set()
+            for claim in directory.glob("*.claim"):
+                try:
+                    owner = json.loads(claim.read_text())
+                except FileNotFoundError:
+                    continue
+                if owner.get("job_id"):
+                    ids.add(owner["job_id"])
+            if not ids or not (control / "jobs.db").exists():
+                return []
+            with sqlite3.connect(control / "jobs.db") as db:
+                return [(jid, json.loads(execution)) for jid, execution in
+                        db.execute("SELECT job_id, execution FROM jobs") if jid in ids and execution]
+
+        with LocalFileLock(control / ".jobs-owner.lock", blocking=False):
+            settings = config.substrate
+            client = SubstrateClient(settings.executable, kubeconfig=settings.kubeconfig,
+                                     context=settings.context, token_file=settings.token_file,
+                                     timeout=settings.timeout)
+            for job_id, execution in await run_sync(records):
+                if not execution.get("uid"):
+                    continue
+                ref = ActorRef(execution["atespace"], execution["name"])
+                try:
+                    await client.get_actor(ref)
+                except ActorNotFound:
+                    await run_sync(release_job_locks, directory, job_id)
 
     def __init__(self, orchestrator=None, data_dir: Optional[Path] = None, *, client=None):
         self.orchestrator = orchestrator
@@ -116,7 +159,7 @@ class JobManager:
         if not lock_dir:
             raise JobError("storage_lock_dir must identify the shared persistent lock mount")
         await run_sync(check_identity, Path(lock_dir), self.settings.storage_id)
-        self._owner = FileLock(self._data_dir / ".jobs-owner.lock", blocking=False)
+        self._owner = LocalFileLock(self._data_dir / ".jobs-owner.lock", blocking=False)
         try:
             self._owner.__enter__()
         except BlockingIOError as exc:
@@ -176,6 +219,7 @@ class JobManager:
                 "template": binding.template, "phase": "creating",
                 "storage_id": self.settings.storage_id,
                 "workspace_storage_id": workspace.storage_id if workspace else None,
+                "egress_rules": binding.egress_rules,
             }
             # Record intent before creating an actor or issuing any task request.
             await self._persist_job(job)
@@ -210,6 +254,16 @@ class JobManager:
             job.execution["phase"] = "created"
 
     async def _send(self, job):
+        if "egress_rules" in job.execution:
+            await self.client.configure_egress(self._ref(job), job.execution["egress_rules"])
+        ready = await self.client.request(self._ref(job), "GET", "/readyz", port=8080)
+        if ready.status_code != 200:
+            raise SubstrateError("Actor is not ready; task has not been submitted")
+        readiness = ready.json()
+        if not isinstance(readiness, dict) or readiness.get("ready") is not True:
+            raise SubstrateError("Actor returned invalid readiness; task has not been submitted")
+        if readiness.get("lock_protocol") != LOCK_PROTOCOL:
+            raise SubstrateError("Actor storage lock protocol mismatch; deploy control and actor images together")
         job.execution["phase"] = "submitting"
         await self._persist_job(job)
         response = await self.client.request(self._ref(job), "POST", "/task", port=8080, payload={
@@ -217,6 +271,7 @@ class JobManager:
             "context": job.context, "storage_id": job.execution["storage_id"],
             "workspace_storage_id": job.execution.get("workspace_storage_id"),
             "capability": job.capability,
+            "lock_protocol": LOCK_PROTOCOL,
         })
         await self._accept(job, response)
 
@@ -251,6 +306,8 @@ class JobManager:
             return None
         async with self._locks.setdefault(job.job_id, asyncio.Lock()):
             if not job.execution or job.execution.get("deleted"):
+                if job.execution.get("deleted"):
+                    await self._release_storage_locks(job)
                 return job
             try:
                 # A live reference must still identify the same instance.
@@ -270,6 +327,7 @@ class JobManager:
                     await self._persist_job(job)
                     await self.client.delete_actor(self._ref(job))
                     job.execution["deleted"] = True
+                    await self._release_storage_locks(job)
                     job.execution.pop("error", None)
             except ActorNotFound:
                 if job.execution.get("phase") == "creating" and not job.execution.get("cancel_requested"):
@@ -284,6 +342,7 @@ class JobManager:
                     job.error = "Actor disappeared; outcome unknown, task not replayed"
                     job.completed_at = datetime.now(timezone.utc)
                 job.execution["deleted"] = True
+                await self._release_storage_locks(job)
                 job.execution.pop("error", None)
             except (SubstrateError, ValueError, KeyError, TypeError) as exc:
                 # Transport failure is not evidence that a running task failed.
@@ -349,11 +408,15 @@ class JobManager:
             await self.client.delete_actor(self._ref(job))
         except ActorNotFound:
             pass
+        await self._release_storage_locks(job)
         job.status = JobStatus.CANCELLED
         job.completed_at = datetime.now(timezone.utc)
         job.execution["deleted"] = True
         job.execution.pop("error", None)
         await self._persist_job(job)
+
+    async def _release_storage_locks(self, job):
+        await run_sync(release_job_locks, Path(self.orchestrator.config.storage_lock_dir), job.job_id)
 
     async def cancel_job(self, job_id: str) -> bool:
         job = self._jobs.get(job_id)

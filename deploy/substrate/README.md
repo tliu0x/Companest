@@ -47,7 +47,12 @@ API or Python SDK. It uses the CLI's authenticated loopback actor proxy.
    local/block storage for SQLite, `storage_lock_dir` to the shared lock mount,
    and `substrate.storage_id` to its identity marker. Explicitly map each company
    ID to its atespace/template in `substrate.scopes`; `@shared` enables global
-   jobs. The actor's config sets `control_plane_url` to the private API endpoint
+   jobs. Each binding's `egress_rules` uses the pinned EgressPolicy rule schema.
+   Include the callback hostname/port and permitted model/tool destinations,
+   with credential-injection effects where needed. An omitted/empty list denies
+   network access. JobManager installs the rules on each actor before waking it;
+   neither ordinary nor golden template policies are inherited by task actors.
+   The actor's config sets `control_plane_url` to the private API endpoint
    for budget, schedule and business event callbacks. Do not mount API admin
    credentials or the control database into actors.
 5. Start `companest serve -c <CONFIG_PATH>`, or configure the required mount and
@@ -93,6 +98,12 @@ mistaking an unavailable execution plane for a failed job. Actor environment
 states and business job states remain separate. An individual job query refreshes its projection; list/count/stats return the
 last observed state without network fan-out during an outage. No background
 execution/recovery worker is implemented.
+
+Before POST, JobManager probes `/readyz`. Provisioning, capacity or startup
+failures keep the job in the pre-submission phase, so a later query can finish
+dispatching the same actor without replaying a task. Rules are saved with the
+job; a restart accepts an existing policy only if it matches those rules.
+It never overwrites a mismatched policy or takes policy from task context.
 
 The actor durably journals acceptance before execution. Identical task requests
 are idempotent; a different job/payload gets 409 and a foreign company gets 403.
@@ -185,20 +196,35 @@ changes. See the [memory lifecycle and tool contract](../../companest/memory/REA
 
 ## Verification scope
 
-Earlier in this branch, the pinned control plane and counter launched in an
-isolated arm64 kind environment; state survived synchronous suspend/resume and
-deletion succeeded. The initial harness image also launched under gVisor. These
-historical checks are not acceptance of the final storage/API deployment.
+On 2026-11-15 the current integration launched locally on Docker Desktop arm64,
+kind Kubernetes v1.37.0, the pinned Substrate control plane, gVisor, and NFS CSI
+v4.13.4 with mTLS. The API, CLI, Substrate transport, actors, tools and CSI mounts
+ran as real processes. Only the model HTTP service returned deterministic mock
+completions/tool calls; no provider credentials or paid model calls were used.
 
-Per the requested scope, the remaining migration uses simulated transport/models
-and temporary scripts outside the repository. Checks cover persistent memory
-updates across processes, workspace identity/writer exclusion, real API + actor
-harness flow, restart/reconnect, uncertain POST, cancellation/outage, full
-results, central budget authorization and idempotent submission. The final
-actor manifest is strictly parsed against the pinned upstream protobuf schema.
-Existing contract tests were adapted; no new simulation script is shipped.
-Real model/tool execution and final CSI/cluster deployment acceptance were not
-performed. Run that acceptance separately before using this in production.
+The two-company run checked full results and job/Pi memory provenance, retained
+memory/history and workspace files after actor deletion, CLI idempotency, API
+container restart reconnecting to the same actor UID, and central budget/event
+callbacks. Cross-company team/workspace requests, actor payloads and callback
+capabilities were rejected. A tool inside the sandbox checked that foreign
+company mounts and admin credentials were absent and ungranted DNS was denied.
+
+Real lock contention found that sandbox-local flock did not protect shared
+storage. Atomic file claims now exclude the native control process and other
+actors. Cold image startup also exercised readiness failure followed by safe
+continuation of the same actor before task submission. See
+[storage locking and crash recovery](storage.md#lock-ownership-and-recovery).
+The final run retained all 100 unique memory appends and 100 revisions while a
+gVisor actor and the native control container wrote concurrently. Deleting an
+actor during a real tool call removed only its memory/workspace claims; a later
+actor still read the original company memory and workspace files. Backup/restore
+regressions also confirm that live lock claims are not copied into snapshots.
+
+This was a local single-node launch check using the demo worker pool and local
+bootstrap identity. It does not establish cloud/production availability or
+real-model quality. Temporary scripts, mock services, manifests and credentials
+stay outside the repository. Earlier fault simulations remain supplementary to
+this real-runtime check.
 
 The migration initially passed 521 default tests. PR review removed 39
 duplicate/wrapper test functions (68 cases), then 5 cases for the removed backend
