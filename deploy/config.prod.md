@@ -11,9 +11,9 @@ This sample is intentionally conservative:
 
 Enable gateway or proxy features only when you actually need them.
 
-The Substrate actor deployment is being integrated separately; see
-[`substrate/README.md`](./substrate/README.md). The development actor template
-does not yet replace this production API configuration.
+Execution requires Substrate and persistent mounts; see
+[`substrate/README.md`](./substrate/README.md). Replace sample scope/template and
+mount paths with your deployment values. There is no local execution fallback.
 
 ```json
 {
@@ -31,7 +31,21 @@ does not yet replace this production API configuration.
     "enabled": false
   },
   "debug": false,
-  "global_timeout": 300
+  "global_timeout": 300,
+  "data_dir": "/var/lib/companest",
+  "storage_lock_dir": "/mnt/companest/locks",
+  "substrate": {
+    "executable": "kubectl-ate",
+    "kubeconfig": "/etc/companest/substrate-kubeconfig",
+    "context": "kind-companest-substrate",
+    "storage_id": "example-storage-v1",
+    "scopes": {
+      "@shared": {
+        "atespace": "ate-demo-counter",
+        "template": "companest-sample"
+      }
+    }
+  }
 }
 ```
 

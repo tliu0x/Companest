@@ -22,7 +22,7 @@ workspace at `/workspaces/code`, and a unique journal volume at `/data`. Prepare
 `shared` with the public sample teams and an actor-only `config.json` containing:
 
 ```json
-{"data_dir":"/state", "storage_lock_dir":"/locks"}
+{"data_dir":"/state", "storage_lock_dir":"/locks", "control_plane_url":"http://companest-api:8000"}
 ```
 
 Put `example-storage-v1` in `locks/.companest-storage-id`. In the workspace,
@@ -57,3 +57,13 @@ The sample image no longer provides mutable business state. Golden snapshots
 are disabled for these templates so each process reads current declarations.
 The per-actor external journal is intentionally distinct from business storage:
 a cold restart sees the accepted task and never replays unknown side effects.
+
+Budget decisions and estimated spend remain on the control plane. Actors call
+`/internal/jobs/<job_id>/authorize` with a per-job capability (never the API
+admin token); terminal/cancelled jobs lose access. Estimates are charged before
+execution and retained on failure/cancel, so concurrent actors cannot reuse the
+same remaining budget. This remains estimated billing, not provider usage.
+Only the job's company teams are permitted. Do not mount the finance ledger in
+company actors. Schedule tool calls use the same scoped channel and retain their
+company/user identity in the control-plane database. Allow actor egress to this
+private API URL; use HTTPS outside a trusted private mesh.

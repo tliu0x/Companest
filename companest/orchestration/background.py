@@ -122,6 +122,7 @@ class BackgroundManager:
             "user_id": job.user_id,
             "chat_id": job.chat_id,
             "channel": job.channel,
+            "company_id": job.company_id,
         }
 
         if job.team_id:

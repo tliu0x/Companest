@@ -138,3 +138,28 @@ see [storage.md](storage.md) and `storage.example.yaml`. The template uses CSI
 volumes with retained shared directories and a separate per-actor journal. Create
 it with `--preview` against a server with `ExternalVolumes` enabled. The image's
 sample files are not the authoritative company/workspace state.
+
+## Control-plane task path
+
+`companest serve` now requires `substrate` configuration with an explicit
+company-ID-to-atespace/template map (`@shared` for global work). See the current
+minimal and production configuration examples. The job database resides under
+`config.data_dir`. Only one API process may own it; SQLite is required by the
+`server` extra. The API admin bearer token remains required outside debug mode.
+
+CLI jobs, API jobs, team runs and gateway calls submit through JobManager. It
+stores the actor reference and intent before creation, keeps full results, and
+reconnects after API restart. It has no queue, execution workers or local runtime
+fallback. Old unfinished records without actor references fail with an unknown
+outcome instead of replaying. Ambiguous create/POST operations retain their job
+ID and can be queried again; POST is not replayed after an uncertain response.
+An unavailable execution plane leaves `execution.error` on the record and does
+not assert that the task failed. Closing a client/API process does not cancel an
+actor. Cancellation is acknowledged only after Substrate deletion succeeds;
+failed deletion returns 503 and leaves the cancellation intent for reconciliation.
+A terminal result is committed before the actor/journal is removed. Querying a
+job reconciles its state; no background worker polls or re-executes jobs.
+
+Budget and schedule callbacks use job-specific capabilities. They cannot use the
+admin API or another job/company. Estimated spend is reserved before a team
+executes, including nested delegation, and remains charged after cancellation.

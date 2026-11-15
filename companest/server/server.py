@@ -15,6 +15,7 @@ from ..jobs.jobs import JobManager, JobStatus
 from ..orchestration.orchestrator import CompanestOrchestrator
 from ..companies.company import _SAFE_ID_RE, CompanyBinding, CompanyConfig, GlobalBinding
 from ..exceptions import JobError, OrchestratorError
+from ..runtime.substrate import SubstrateError
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class CompanestAPIServer:
 
     def create_app(self):
         try:
-            from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+            from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
             from fastapi.middleware.cors import CORSMiddleware
             from pydantic import BaseModel, Field
         except ImportError:
@@ -150,7 +151,8 @@ class CompanestAPIServer:
                     if request.method == "OPTIONS":
                         return await call_next(request)
                     # /ws/ is exempt here: the WebSocket handler checks the token in its handshake.
-                    if request.url.path == "/health" or request.url.path.startswith("/ws/"):
+                    if (request.url.path == "/health" or request.url.path.startswith("/ws/")
+                            or request.url.path.startswith("/internal/jobs/")):
                         return await call_next(request)
                     auth_header = request.headers.get("Authorization", "")
                     token = auth_header.removeprefix("Bearer ").strip()
@@ -186,6 +188,63 @@ class CompanestAPIServer:
             task: str = Field(..., min_length=1, max_length=50000)
             context: Optional[Dict[str, Any]] = None
             callback_url: Optional[str] = Field(default=None, max_length=2000)
+
+        class AuthorizationRequest(BaseModel):
+            request_id: str = Field(max_length=128)
+            task: str = Field(min_length=1, max_length=50000)
+            team_id: str = Field(min_length=1, max_length=200)
+            model: str = Field(max_length=200)
+            priority: str = "normal"
+
+        def actor_job(request, job_id):
+            token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+            try:
+                return self.job_manager.authenticate_actor(job_id, token)
+            except JobError:
+                raise HTTPException(status_code=403, detail="Invalid or inactive actor capability")
+
+        @app.post("/internal/jobs/{job_id}/authorize")
+        async def authorize_actor(job_id: str, req: AuthorizationRequest, request: Request):
+            job = actor_job(request, job_id)
+            try:
+                return await self.job_manager.authorize(job, req.model_dump())
+            except JobError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+
+        @app.post("/internal/jobs/{job_id}/schedule")
+        async def schedule_actor(job_id: str, request: Request):
+            job = actor_job(request, job_id)
+            scheduler = getattr(self.orchestrator, "user_scheduler", None)
+            user_id = job.context.get("user_id")
+            if not scheduler or not user_id:
+                raise HTTPException(status_code=400, detail="Scheduler and submitting user identity are required")
+            body = await request.json()
+            action = body.get("action")
+            try:
+                if action == "add":
+                    team_id = body.get("team_id")
+                    if team_id and not self.orchestrator.can_access_team(job.company_id, team_id):
+                        raise JobError("Team is outside this job's company scope")
+                    scheduled = await scheduler.add_job(
+                        user_id=user_id, chat_id=job.context.get("chat_id", ""),
+                        channel=job.context.get("channel", "api"), company_id=job.company_id,
+                        task=body["task"], description=body.get("description", ""),
+                        trigger_type=body["trigger_type"], trigger_args=body["trigger_args"],
+                        team_id=team_id, mode=body.get("mode", "default"),
+                    )
+                    return scheduled.to_dict()
+                jobs = await scheduler.list_jobs(user_id=user_id)
+                owned = [j for j in jobs if j.company_id == job.company_id]
+                if action == "list":
+                    return [j.to_dict() for j in owned]
+                if action == "cancel":
+                    target = body.get("job_id")
+                    if not any(j.id == target for j in owned):
+                        raise JobError("Schedule is outside this job's scope")
+                    return await scheduler.cancel_job(target, user_id=user_id)
+                raise JobError("Unknown schedule action")
+            except (KeyError, ValueError, JobError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
 
         def _parse_status(status: Optional[str]) -> Optional[JobStatus]:
             if not status:
@@ -229,7 +288,8 @@ class CompanestAPIServer:
                     "submitted_by": req.submitted_by,
                     "task": req.task[:200],
                 })
-                return {"job_id": job_id, "status": "queued"}
+                job = self.job_manager._jobs[job_id]
+                return {"job_id": job_id, "status": job.status.value}
             except JobError as e:
                 raise HTTPException(status_code=400, detail=str(e))
             except Exception as e:
@@ -281,6 +341,8 @@ class CompanestAPIServer:
                 return {"status": "not_cancellable", "job_id": job_id}
             except JobError as e:
                 raise HTTPException(status_code=404, detail=str(e))
+            except SubstrateError as e:
+                raise HTTPException(status_code=503, detail=str(e))
 
         @app.get("/api/fleet/status")
         async def fleet_status():

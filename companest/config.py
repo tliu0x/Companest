@@ -144,6 +144,7 @@ class SubstrateConfig(BaseModel):
 class CompanestConfig(BaseModel):
     substrate: Optional[SubstrateConfig] = None
     storage_lock_dir: Optional[str] = None
+    control_plane_url: Optional[str] = None
     api: APIConfig = Field(
         default_factory=APIConfig,
         description="API server configuration"

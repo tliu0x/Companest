@@ -18,7 +18,21 @@ A minimal local development configuration for the public sample.
     "enabled": false
   },
   "debug": true,
-  "global_timeout": 300
+  "global_timeout": 300,
+  "data_dir": "/var/lib/companest",
+  "storage_lock_dir": "/mnt/companest/locks",
+  "substrate": {
+    "executable": "kubectl-ate",
+    "kubeconfig": "/etc/companest/substrate-kubeconfig",
+    "context": "kind-companest-substrate",
+    "storage_id": "example-storage-v1",
+    "scopes": {
+      "@shared": {
+        "atespace": "ate-demo-counter",
+        "template": "companest-sample"
+      }
+    }
+  }
 }
 ```
 

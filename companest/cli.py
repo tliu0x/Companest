@@ -480,7 +480,7 @@ def cmd_serve(args) -> int:
                 f"{len(orchestrator.team_registry.list_meta_teams())} meta"
             )
 
-        job_manager = JobManager(orchestrator, data_dir=Path(".companest"))
+        job_manager = JobManager(orchestrator, data_dir=Path(config.data_dir))
         await job_manager.start()
 
         # user_scheduler and cost_gate only exist once init_teams() has run
@@ -646,7 +646,7 @@ def cmd_job_submit(args, call):
     if context:
         payload["context"] = context
 
-    data = call("post", "/api/jobs", json=payload, timeout=30)
+    data = call("post", "/api/jobs", json=payload, timeout=90)
     if _print_json(args, data):
         return
 
@@ -656,12 +656,14 @@ def cmd_job_submit(args, call):
 
 @_api_command("Failed to get job status")
 def cmd_job_status(args, call):
-    data = call("get", f"/api/jobs/{args.job_id}", timeout=10)
+    data = call("get", f"/api/jobs/{args.job_id}", timeout=90)
     if _print_json(args, data):
         return
 
     print(colored(f"\n=== Job {args.job_id[:8]}... ===\n", Colors.BOLD))
     print(f"  Status:  {data['status']}")
+    if data.get("execution", {}).get("error"):
+        print_warning(data["execution"]["error"])
     print(f"  Task:    {data['task'][:80]}")
     print(f"  Created: {data['created_at']}")
 

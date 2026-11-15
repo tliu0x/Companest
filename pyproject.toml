@@ -38,6 +38,7 @@ agents = [
 server = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
+    "aiosqlite>=0.19.0",
 ]
 gateway = [
     "websockets>=12.0",

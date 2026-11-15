@@ -19,6 +19,10 @@ class SubstrateError(RuntimeError):
     """A substrate operation failed; never fall back to local execution."""
 
 
+class ActorNotFound(SubstrateError):
+    """The control API explicitly reported a missing actor."""
+
+
 @dataclass(frozen=True)
 class ActorRef:
     atespace: str
@@ -74,6 +78,8 @@ class SubstrateClient:
             stdout, _stderr = await asyncio.wait_for(process.communicate(), self.timeout)
             if process.returncode:
                 # Do not expose diagnostics/credentials in public API responses.
+                if b"rpc error: code = NotFound desc = Actor " in _stderr:
+                    raise ActorNotFound("Substrate actor no longer exists")
                 raise SubstrateError(f"Substrate {arguments[0]} failed (exit {process.returncode})")
             if not json_output:
                 return None

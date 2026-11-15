@@ -18,9 +18,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from ..config import CompanestConfig
-from ..orchestration.orchestrator import CompanestOrchestrator
+from .harness import ActorOrchestrator
+from dataclasses import asdict
 from ..utils import run_sync
 from .storage import FileLock, check_identity
+from .services import ActorServices
 
 
 class TaskRequest(BaseModel):
@@ -30,6 +32,7 @@ class TaskRequest(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
     storage_id: str = Field(min_length=1)
     workspace_storage_id: str | None = None
+    capability: str = Field(min_length=32, repr=False)
 
     model_config = {"extra": "forbid"}
 
@@ -48,6 +51,11 @@ class ActorWorkload:
         if not self.config.storage_lock_dir:
             raise ValueError("Actor requires storage_lock_dir on a persistent shared mount")
         await run_sync(check_identity, Path(self.config.storage_lock_dir), self.storage_id)
+        if not self.config.control_plane_url:
+            raise ValueError("Actor requires control_plane_url for budget and schedule services")
+        companies = Path(self.config.data_dir) / "companies"
+        if companies.exists() and any(p.is_dir() and p.name != self.company_id for p in companies.iterdir()):
+            raise ValueError("Actor filesystem exposes another company's directory")
         if self.journal.exists():
             self.record = json.loads(await run_sync(self.journal.read_text))
             if self.record.get("company_id") != self.company_id:
@@ -108,9 +116,12 @@ class ActorWorkload:
     async def execute(self, request: TaskRequest):
         try:
             async with asyncio.timeout(self.config.global_timeout):
-                orchestrator = CompanestOrchestrator(self.config)
+                orchestrator = ActorOrchestrator(self.config)
                 await orchestrator.init_teams_async(self.config.data_dir)
                 self.validate_scope(orchestrator)
+                services = ActorServices(self.config.control_plane_url, request.job_id, request.capability)
+                orchestrator.cost_gate = services
+                orchestrator.user_scheduler = services
                 context = dict(request.context)
                 context["company_id"] = self.company_id
                 team_id = context.get("team_id")
@@ -128,7 +139,8 @@ class ActorWorkload:
                     if team_id:
                         result = await orchestrator.run_team(request.task, team_id, mode=context.get("mode"), user_context=context)
                     else:
-                        result, _ = await orchestrator.run_auto(request.task, mode=context.get("mode"), user_context=context)
+                        result, routing = await orchestrator.run_auto(request.task, mode=context.get("mode"), user_context=context)
+                        self.record["routing"] = asdict(routing)
             self.record.update(status="completed", result=result)
         except asyncio.CancelledError:
             self.record.update(status="failed", error="Actor process stopped during execution; outcome may be unknown")
