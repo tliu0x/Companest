@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# (team_id, keyword patterns, priority)
 DEFAULT_ROUTES: List[Tuple[str, List[str], int]] = [
     ("stock", [
         r"stock|ticker|etf|spy|qqq|tsla|nvda|aapl",

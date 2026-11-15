@@ -93,48 +93,31 @@ except ImportError:
 
 
 _all_names = [
-    # Config
     "CompanestConfig", "APIConfig", "MasterConfig",
-    # Company
     "CompanyConfig", "CompanyRegistry", "CompanyError", "GlobalBinding", "ResolveResult",
-    # Component
     "CompanyComponent", "CompanyContext", "CompanyMemoryNamespace",
-    # Output sinks
     "OutputSink", "MemorySink",
-    # CEO engine
     "build_cycle_prompt", "generate_ceo_soul",
-    # Orchestrator
     "CompanestOrchestrator",
-    # Events
     "EventBus", "Event", "EventType",
-    # Tools
     "ToolRegistry", "ToolProvider", "ToolContext",
-    # Client (optional)
     "GatewayClient",
-    # Jobs (optional)
     "JobManager", "Job", "JobStatus",
-    # Server (optional)
     "CompanestAPIServer",
-    # Master (optional)
     "MasterConnection",
-    # Parser
     "MarkdownConfigParser", "ParseResult", "generate_config_template",
-    # Pi Agent Teams
     "MemoryManager", "EnrichmentSource", "Dreamer", "DreamerError",
     "Pi", "PiConfig",
     "AgentTeam", "TeamConfig", "TeamRegistry",
     "CostGate", "CostEstimate", "CostDecision", "UserNotifier",
-    # Cascade
     "CascadeEngine", "CascadeStrategy", "CascadeMetrics", "AdequacyChecker", "ModelTier",
     "MemoryArchiver",
     "UserScheduler",
     "Scheduler",
     "TeamRouter", "SmartRouter", "RoutingDecision", "TeamAssignment", "RoutingBinding",
     "DEFAULT_TOOLS_DENY", "SESSIONS_TOOL_NAMES",
-    # Execution Modes
     "ExecutionMode", "ModeRegistry", "build_default_registry", "VALID_MODES",
     "DefaultMode", "LoopMode", "CouncilMode", "CollaborativeMode",
-    # Exceptions
     "CompanestError", "ConfigurationError", "OrchestratorError",
     "GatewayError", "GatewayConnectionError", "GatewayAuthError",
     "MasterError", "JobError", "PiError", "TeamError",

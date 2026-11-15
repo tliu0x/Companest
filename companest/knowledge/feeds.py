@@ -33,7 +33,6 @@ async def close_client() -> None:
         _client = None
 
 
-# Per-source minimum interval (seconds) between requests
 _RATE_LIMITS: Dict[str, float] = {
     "brave": 1.0,
     "reddit": 2.0,

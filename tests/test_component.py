@@ -72,13 +72,9 @@ def namespace(manager):
 
 def test_namespace_scoped_team_id(namespace):
     assert namespace.company_id == "acme"
-    # Company's own private team stays as-is
     assert namespace._scoped_team_id("acme/marketing") == "acme/marketing"
-    # CEO team stays as-is
     assert namespace._scoped_team_id("company-acme") == "company-acme"
-    # Bare private team names are scoped to the company
     assert namespace._scoped_team_id("marketing") == "acme/marketing"
-    # Another company's team is rejected
     with pytest.raises(ValueError, match="cannot access"):
         namespace._scoped_team_id("other/secret")
 

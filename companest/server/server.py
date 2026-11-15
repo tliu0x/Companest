@@ -750,7 +750,6 @@ class CompanestAPIServer:
         async def get_company(company_id: str):
             _, config = _require_company(company_id)
             data = config.model_dump()
-            # Redact env vars (sensitive)
             data["env"] = {k: "***" for k in data["env"]}
             if hasattr(self.orchestrator, "team_registry"):
                 data["teams"] = self._company_teams(company_id)

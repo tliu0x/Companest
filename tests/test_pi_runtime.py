@@ -96,9 +96,7 @@ async def test_tool_call_loop_writes_memory(memory):
 
     assert await _run(pi, model) == "saved"
     assert memory.read_team_memory("alpha", "note.json") == {"x": 1}
-    # The tool result is fed back to the model on the second step.
     assert model.seen_messages[1][-1].type == "tool"
-    # Usage is summed over both model steps.
     assert pi.last_usage["input_tokens"] == 30 and pi.last_usage["output_tokens"] == 12
 
 

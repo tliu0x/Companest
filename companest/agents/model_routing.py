@@ -12,14 +12,12 @@ if TYPE_CHECKING:
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_OPENAI = "openai"
 
-# OpenAI-compatible chat completions endpoints: prefix -> (base_url, api_key_env_var)
 _OPENAI_COMPATIBLE_ENDPOINTS = {
     "deepseek":  ("https://api.deepseek.com",      "DEEPSEEK_API_KEY"),
     "moonshot":  ("https://api.moonshot.cn/v1",     "MOONSHOT_API_KEY"),
     "kimi":      ("https://api.moonshot.cn/v1",     "MOONSHOT_API_KEY"),
 }
 
-# Only reachable via proxy/LiteLLM
 _PROXY_ONLY_PREFIXES = ("qwen", "mistral", "llama", "gemma", "yi-", "glm-", "qwq")
 
 _NATIVE_OPENAI_PREFIXES = ("gpt-", "o3", "o4", "openai/")
@@ -37,7 +35,6 @@ def detect_provider(model: str, proxy_enabled: bool = False) -> str:
         return PROVIDER_ANTHROPIC
     if model.startswith(_NATIVE_OPENAI_PREFIXES + tuple(_OPENAI_COMPATIBLE_ENDPOINTS) + _PROXY_ONLY_PREFIXES):
         return PROVIDER_OPENAI
-    # Unknown model: a proxy can route anything via the OpenAI protocol
     return PROVIDER_OPENAI if proxy_enabled else PROVIDER_ANTHROPIC
 
 

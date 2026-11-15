@@ -355,7 +355,6 @@ class CompanestOrchestrator:
                 owner_company_id=company.id,
             )
 
-        # Seed memory only where the key does not exist yet
         seed = company.memory_seed
         for key, content in seed.get("shared", {}).items():
             if ns.read_shared(key) is None:
@@ -447,7 +446,6 @@ class CompanestOrchestrator:
             except Exception as e:
                 logger.error(f"[Company] on_teardown failed for {company_id}: {e}")
 
-        # Also removes the CEO cycle, which is registered under the company scope
         self.scheduler.remove_by_scope("company", company_id)
         self._smart_router.remove_bindings_by_owner(company_id)
         self.memory.remove_enrichments_by_company(company_id)
@@ -764,7 +762,6 @@ class CompanestOrchestrator:
                 user_context.get("chat_id"),
                 user_context.get("user_id"),
             )
-            # (team_id, mode, reasoning) when a binding bypasses SmartRouter
             direct = None
             if resolve_result.company:
                 user_context["company_id"] = resolve_result.company.id
@@ -824,7 +821,6 @@ class CompanestOrchestrator:
                 f"\U0001f50d \u2192 {teams_str} ({effective_mode}, {decision.confidence:.0%})"
             )
 
-        # Quick info refresh before the routed team runs, unless it is the info team itself
         routed_ids = {t.team_id for t in decision.teams}
         if self._info_refresh_team not in routed_ids:
             if on_progress:

@@ -1,23 +1,4 @@
-"""
-Companest Master Connection
-
-Connects Companest to a master gateway as a controller.
-The master is the user-facing gateway (Telegram, web chat, etc.).
-Companest receives inbound task requests from the master, processes them
-through the orchestrator, and sends results back.
-
-Message flow:
-    1. Master sends: {type:"req", id:"abc", method:"task.team", params:{...}}
-    2. Companest processes through orchestrator
-    3. Companest responds: {type:"res", id:"abc", ok:true, payload:{...}}
-
-Supported inbound methods:
-    - task.team: Route to a specific Pi Agent Team
-    - task.auto: Auto-detect team from content and execute
-    - task.execute: Deprecated  redirects to task.auto
-    - ping: Health check
-    - status: Teams + orchestrator status
-"""
+"""Dispatch inbound gateway tasks through the orchestrator and return results."""
 
 import asyncio
 import logging
@@ -31,31 +12,15 @@ from ..exceptions import MasterError, OrchestratorError
 
 logger = logging.getLogger(__name__)
 
-# Max result size sent back to user (chars)
 _MAX_RESULT_SIZE = 50_000
 _DEDUP_WINDOW = 10.0  # seconds  identical requests within this window are deduped
 
 
 class MasterConnection:
-    """
-    Manages the WebSocket connection to a master gateway.
-
-    Listens for inbound task requests from the master, dispatches them
-    through the orchestrator, and sends results back. Concurrency is
-    controlled via an asyncio.Semaphore.
-
-    Example:
-        conn = MasterConnection(config.master, orchestrator)
-        await conn.start()   # blocks until stopped
-        await conn.stop()
-    """
+    """Dispatch gateway requests with bounded task concurrency."""
 
     def __init__(self, config: MasterConfig, orchestrator):
-        """
-        Args:
-            config: MasterConfig with connection settings
-            orchestrator: CompanestOrchestrator for task execution
-        """
+        """Configure the gateway connection and task orchestrator."""
         self.config = config
         self.orchestrator = orchestrator
 
@@ -64,11 +29,9 @@ class MasterConnection:
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self._running = False
 
-        # Per-user rate limiting: user_id -> list of request timestamps
         self._user_requests: Dict[str, list] = {}
         self._rate_limit_rpm = getattr(config, "rate_limit_rpm", 30)
 
-        # Request deduplication: (user_id, task_hash) -> timestamp
         self._recent_requests: Dict[str, float] = {}
 
     async def start(self) -> None:
@@ -98,8 +61,6 @@ class MasterConnection:
             logger.error(f"Failed to connect to master: {e}")
             raise MasterError(f"Failed to connect to master: {e}")
 
-        # Keep running until stopped  the client's receive loop
-        # handles reconnection internally
         try:
             while self._running and self._client.is_connected:
                 await asyncio.sleep(1)
@@ -110,7 +71,6 @@ class MasterConnection:
         """Disconnect and cancel active tasks."""
         self._running = False
 
-        # Cancel all active task processors
         for task_id, task in list(self._active_tasks.items()):
             if not task.done():
                 task.cancel()
@@ -120,7 +80,6 @@ class MasterConnection:
                     pass
         self._active_tasks.clear()
 
-        # Disconnect from master
         if self._client:
             await self._client.disconnect()
             self._client = None
@@ -128,13 +87,7 @@ class MasterConnection:
         logger.info("Master connection stopped")
 
     def _on_inbound_request(self, frame: dict) -> None:
-        """
-        Callback from the gateway client when an inbound req frame arrives.
-
-        Spawns an asyncio.Task to handle the request asynchronously.
-        This callback runs synchronously in the receive loop context,
-        so we must not block.
-        """
+        """Schedule request handling without blocking the receive loop."""
         request_id = frame.get("id")
         method = frame.get("method", "")
 
@@ -185,7 +138,6 @@ class MasterConnection:
         except asyncio.CancelledError:
             raise
         except MasterError:
-            # Response delivery failure  already logged, nothing more to do
             pass
         except Exception as e:
             logger.error(f"Error handling request {request_id}: {e}")
@@ -207,7 +159,6 @@ class MasterConnection:
             return f"Task too long ({len(task)} chars, max {max_length})"
         self._check_injection(task)
         return None
-    # Security filters
 
     _INJECTION_PATTERNS = re.compile(
         r"(?i)("
@@ -243,11 +194,7 @@ class MasterConnection:
     )
 
     def _check_injection(self, task: str) -> None:
-        """Log warning if task contains suspicious injection patterns.
-
-        Does not reject or strip  too many false positives.
-        Output sanitization is handled separately by _sanitize_output().
-        """
+        """Warn about injection patterns without rejecting input; redact outputs separately."""
         matches = self._INJECTION_PATTERNS.findall(task)
         if matches:
             logger.warning(
@@ -263,18 +210,12 @@ class MasterConnection:
         return result
 
     def _extract_user_context(self, params: dict) -> dict:
-        """Extract user context from request params.
-
-        Includes optional binding hints from the gateway (legacy transition):
-        binding_team_id / binding_mode are set when the gateway had a local
-        static binding match.  Companest may honour or override these.
-        """
+        """Extract user context and optional legacy binding hints."""
         ctx: dict = {
             "user_id": params.get("user_id", ""),
             "chat_id": params.get("chat_id", ""),
             "channel": params.get("channel", "telegram"),
         }
-        # Pass through binding hints if present
         if params.get("binding_team_id"):
             ctx["binding_team_id"] = params["binding_team_id"]
         if params.get("binding_mode"):
@@ -300,7 +241,6 @@ class MasterConnection:
         now = time.monotonic()
         window = 60.0  # 1 minute
         timestamps = self._user_requests.get(user_id, [])
-        # Prune old entries
         timestamps = [t for t in timestamps if now - t < window]
         self._user_requests[user_id] = timestamps
         if len(timestamps) >= self._rate_limit_rpm:
@@ -314,7 +254,6 @@ class MasterConnection:
             return None
         dedup_key = f"{user_id}:{hash(task)}"
         now = time.monotonic()
-        # Prune old entries periodically
         if len(self._recent_requests) > 1000:
             self._recent_requests = {
                 k: v for k, v in self._recent_requests.items()
@@ -334,12 +273,7 @@ class MasterConnection:
         return result[:_MAX_RESULT_SIZE] + f"\n\n... (truncated, {len(result)} chars total)"
 
     async def _handle_task_team(self, request_id: str, params: dict) -> None:
-        """Handle task.team  route to specific Pi Agent Team.
-
-        Optional params:
-            mode: "default" | "cascade" | "loop" | "council"
-            cascade: bool (deprecated  use mode="cascade" instead)
-        """
+        """Run task.team; legacy cascade=True maps to mode="cascade"."""
         task = params.get("task")
         team_id = params.get("team_id")
         err = self._validate_task_input(task)
@@ -350,7 +284,6 @@ class MasterConnection:
             )
             return
 
-        # Rate limit and dedup checks
         user_id = params.get("user_id", "")
         rate_err = self._check_rate_limit(user_id)
         if rate_err:
@@ -379,7 +312,6 @@ class MasterConnection:
         if mode is None:
             mode = "cascade" if params.get("cascade") else "default"
 
-        # Task priority for cost gate
         priority = params.get("priority", "normal")
         if priority not in ("critical", "high", "normal", "low"):
             priority = "normal"
@@ -415,17 +347,7 @@ class MasterConnection:
                 )
 
     async def _handle_task_auto(self, request_id: str, params: dict) -> None:
-        """Handle task.auto  LLM-powered auto-routing via SmartRouter.
-
-        Uses orchestrator.run_auto() which:
-        1. Calls SmartRouter (Haiku LLM  keyword fallback)
-        2. Supports multi-team execution (sequential/parallel)
-        3. Explicitly declines when no team fits
-
-        Optional params:
-            mode: "default" | "cascade" | "loop" | "council" | None (router decides)
-            cascade: bool (deprecated  use mode="cascade" instead)
-        """
+        """Route task.auto through run_auto; mode=None leaves mode selection to the router."""
         task = params.get("task")
         err = self._validate_task_input(task)
         if err:
@@ -435,7 +357,6 @@ class MasterConnection:
             )
             return
 
-        # Rate limit and dedup checks
         user_id = params.get("user_id", "")
         rate_err = self._check_rate_limit(user_id)
         if rate_err:
@@ -498,7 +419,6 @@ class MasterConnection:
                 })
             except OrchestratorError as e:
                 if e.details.get("declined"):
-                    # Graceful decline  not an error, just no suitable team
                     await self._send_response(request_id, True, {
                         "result": f"I'm not sure which team should handle this. {e.message}",
                         "team_ids": [],
@@ -542,11 +462,7 @@ class MasterConnection:
         payload: Optional[Dict[str, Any]] = None,
         error: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Send a response frame back to the master.
-
-        Raises MasterError if the response cannot be delivered, so callers
-        know the user won't receive the result.
-        """
+        """Send a response, raising MasterError if delivery fails."""
         if not self._client or not self._client.is_connected:
             logger.error(
                 f"Cannot send response {request_id}: not connected. "

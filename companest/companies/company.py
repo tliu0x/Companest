@@ -49,7 +49,6 @@ class CompanyBinding(BaseModel):
             return False
         if self.user_id is not None and self.user_id != user_id:
             return False
-        # At least one field must be set to match
         return self.channel is not None or self.chat_id is not None or self.user_id is not None
 
 

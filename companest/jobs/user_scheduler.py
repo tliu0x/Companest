@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 ExecutionCallback = Callable[["ScheduledJob"], Coroutine[Any, Any, str]]
 
-# async fn(chat_id, channel, user_id, message)
 NotificationCallback = Callable[[str, str, str, str], Coroutine[Any, Any, None]]
 
 _METADATA_SCHEMA = """

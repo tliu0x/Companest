@@ -147,7 +147,6 @@ class TestFeedInjection:
             "items": items,
         })
         prompt = mm.build_system_prompt("engineering", "dev")
-        # Max 20 items (MemoryManager._MAX_FEED_ITEMS)
         assert "Item 0" in prompt
         assert "Item 19" in prompt
         assert "Item 20" not in prompt

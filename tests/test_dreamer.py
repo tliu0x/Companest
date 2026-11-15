@@ -267,7 +267,6 @@ class TestDreamingCompaction:
         assert mm.get_entry_meta("alpha", "old1.json") is None
         assert mm.get_entry_meta("alpha", "old2.json") is None
 
-        # Originals are archived, not deleted
         archive_dir = mm.team_path("alpha") / "archive"
         assert (archive_dir / "old1.json").exists()
         assert (archive_dir / "old2.json").exists()
@@ -308,7 +307,6 @@ class TestDreamingGC:
         assert "old.json" in deleted
         assert mm.get_entry_meta("alpha", "old.json") is None
 
-        # Archived, not deleted
         assert (mm.team_path("alpha") / "archive" / "old.json").exists()
         assert "old.json" in mm._read_archive_index("alpha")
 

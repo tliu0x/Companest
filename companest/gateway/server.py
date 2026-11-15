@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""
-Master Gateway for Companest
-
-Deploys on the master machine (e.g. AWS EC2). Provides:
-1. Telegram bot  users send messages here
-2. WebSocket server  Companest connects as a controller to receive tasks
-
-Supports:
-- Channel Adapter pattern: swap messaging platforms without touching core logic
-- Binding routing: static rules that bypass SmartRouter for known contexts
-
-Flow:
-    User -> Channel Adapter -> Gateway WS -> Companest -> Gateway WS -> Channel Adapter -> User
-
-Requirements (install on the gateway machine):
-    pip install websockets python-telegram-bot
-
-Usage:
-    export TELEGRAM_BOT_TOKEN="your-token"
-    python -m companest.gateway.server --port 19000
-
-    # With static routing bindings:
-    python -m companest.gateway.server --port 19000 --bindings bindings.json
-
-    # Then on the Companest machine:
-    python -m companest serve -c .companest/config.test.md
-"""
+"""Telegram gateway and WebSocket server for Companest controller connections."""
 
 import os
 import sys
@@ -51,18 +25,9 @@ logging.basicConfig(
 logger = logging.getLogger("master-gateway")
 
 
-# =============================================================================
-# Gateway WebSocket Server
-# =============================================================================
 
 class MasterGateway:
-    """
-    WebSocket server that Companest connects to as a controller.
-
-    When a user message arrives (via any ChannelAdapter), the gateway sends
-    an inbound request to Companest via the WebSocket, waits for the response,
-    and returns it. Supports progress frames for real-time status updates.
-    """
+    """Relay channel requests, results, progress and notifications over WebSocket."""
 
     def __init__(self, port: int = 19000, auth_token: Optional[str] = None):
         self.port = port
@@ -109,7 +74,6 @@ class MasterGateway:
             logger.warning(f"Expected connect request, got: {frame.get('method')}")
             return
 
-        # Verify auth token
         if self.auth_token:
             provided = frame.get("params", {}).get("auth")
             if provided != self.auth_token:
@@ -121,7 +85,6 @@ class MasterGateway:
                 }))
                 return
 
-        # Accept connection
         await ws.send(json.dumps({
             "type": "res",
             "id": frame["id"],
@@ -133,7 +96,6 @@ class MasterGateway:
         role = frame.get("params", {}).get("role", "unknown")
         logger.info(f"Companest connected (role={role})")
 
-        # Listen for response and progress frames from Companest
         try:
             async for raw_msg in ws:
                 try:
@@ -165,7 +127,6 @@ class MasterGateway:
             logger.warning(f"Controller disconnected: {e}")
         finally:
             self._controller_ws = None
-            # Fail all pending requests
             for f in self._pending.values():
                 if not f.done():
                     f.set_exception(ConnectionError("Companest disconnected"))
@@ -180,14 +141,7 @@ class MasterGateway:
         timeout: float = 300,
         on_progress: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None,
     ) -> dict:
-        """Send an inbound request to Companest and await the response.
-
-        Args:
-            method: RPC method name
-            params: Optional parameters
-            timeout: Request timeout in seconds
-            on_progress: Optional async callback invoked with progress messages
-        """
+        """Send an inbound request to Companest and await the response."""
         if not self._controller_ws:
             raise RuntimeError("Companest is not connected")
 
@@ -235,9 +189,6 @@ class MasterGateway:
             logger.warning(f"No notification handler registered, dropping notification for {chat_id}")
 
 
-# =============================================================================
-# Telegram Bot
-# =============================================================================
 
 async def run_telegram_bot(
     gateway: MasterGateway,
@@ -251,7 +202,6 @@ async def run_telegram_bot(
     app = Application.builder().token(token).build()
     adapter = TelegramAdapter(app.bot)
 
-    #  Commands (Telegram-specific, simple enough to stay here) 
 
     async def cmd_start(update: Update, context):
         status = "connected" if gateway.is_companest_connected else "NOT connected"
@@ -306,7 +256,6 @@ async def run_telegram_bot(
         except Exception as e:
             await update.message.reply_text(f"Error: {e}")
 
-    #  Core message handler (uses generic handle_incoming) 
 
     async def on_message(update: Update, context):
         text = update.message.text
@@ -329,7 +278,6 @@ async def run_telegram_bot(
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
-    # Register notification handler for push delivery (scheduled tasks, etc.)
     async def notification_handler(chat_id: str, channel: str, message: str):
         if channel == "telegram":
             await adapter.send_message(chat_id, message)
@@ -346,9 +294,6 @@ async def run_telegram_bot(
     return app
 
 
-# =============================================================================
-# Main
-# =============================================================================
 
 async def main(args):
     token = args.telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
@@ -361,15 +306,12 @@ async def main(args):
 
     auth_token = args.auth_token or os.getenv("COMPANEST_MASTER_TOKEN")
 
-    # Load static routing bindings
     bindings_path = args.bindings or os.getenv("COMPANEST_BINDINGS")
     bindings = load_bindings(bindings_path) if bindings_path else []
 
-    # Start gateway WS server
     gateway = MasterGateway(port=args.port, auth_token=auth_token)
     await gateway.start()
 
-    # Start Telegram bot
     bot_app = await run_telegram_bot(gateway, token, bindings)
 
     logger.info("=" * 55)

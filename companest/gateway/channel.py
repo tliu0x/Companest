@@ -1,13 +1,4 @@
-"""
-Channel Adapter Layer
-
-Abstracts messaging platforms behind a standard interface so the core
-message-handling logic (progress updates, response formatting, error
-handling) is written once and reused across Telegram, Discord, Slack, etc.
-
-Adding a new platform = implement ChannelAdapter (~100 lines) + wire it
-into companest.gateway.server.  Zero changes to Companest core.
-"""
+"""Messaging adapters and shared gateway request handling."""
 
 import asyncio
 import logging
@@ -18,15 +9,9 @@ from typing import Any, Callable, Coroutine, Optional
 logger = logging.getLogger("channel")
 
 
-#  Abstract Base 
 
 class ChannelAdapter(ABC):
-    """
-    Standard interface every messaging platform must implement.
-
-    The gateway calls these four methods; each adapter translates
-    them into platform-specific API calls.
-    """
+    """Messaging-platform interface for replies, edits, typing and limits."""
 
     @abstractmethod
     async def send_thinking(self, chat_id: str, text: str) -> Any:
@@ -56,7 +41,6 @@ class ChannelAdapter(ABC):
         return "unknown"
 
 
-#  Telegram Adapter 
 
 class TelegramAdapter(ChannelAdapter):
     """Adapter for python-telegram-bot v20+."""
@@ -92,15 +76,10 @@ class TelegramAdapter(ChannelAdapter):
         return text
 
 
-#  Binding (static routing rules) 
 
 @dataclass
 class Binding:
-    """A static routing rule that bypasses SmartRouter.
-
-    Any field set to None is treated as a wildcard (matches anything).
-    Rules are matched in priority order (highest first).
-    """
+    """Static routing hint; None fields are wildcards and higher priority wins."""
     team_id: str
     mode: str = "default"
     channel: Optional[str] = None   # "telegram" / "discord" / None
@@ -115,10 +94,7 @@ def match_binding(
     chat_id: str,
     user_id: str,
 ) -> Optional[Binding]:
-    """Find the highest-priority binding that matches the given context.
-
-    Returns None if no binding matches (caller should fall back to SmartRouter).
-    """
+    """Find the highest-priority binding that matches the given context."""
     candidates = []
     for b in bindings:
         if b.channel is not None and b.channel != channel:
@@ -136,15 +112,7 @@ def match_binding(
 
 
 def load_bindings(path: str) -> list[Binding]:
-    """Load bindings from a JSON file.
-
-    Expected format:
-        [
-          {"team_id": "philosophy", "mode": "council",
-           "channel": "telegram", "chat_id": "-100123456", "priority": 10},
-          ...
-        ]
-    """
+    """Load static routing hints from a JSON array of binding objects."""
     import json
     try:
         with open(path, "r") as f:
@@ -164,13 +132,9 @@ def load_bindings(path: str) -> list[Binding]:
         return []
 
 
-#  Response Formatting 
 
 def format_response(response: dict, elapsed: int) -> str:
-    """Format a Companest response into a user-facing message with footer.
-
-    Works for both task.auto and task.team responses.
-    """
+    """Format a Companest response into a user-facing message with footer."""
     if not response.get("ok"):
         msg = response.get("error", {}).get("message", "Unknown error")
         return f"Error: {msg}"
@@ -178,7 +142,6 @@ def format_response(response: dict, elapsed: int) -> str:
     payload = response.get("payload", {})
     result = payload.get("result", "No result")
 
-    # Build routing info footer
     team_ids = payload.get("team_ids", [])
     team_id = payload.get("team_id")
     teams_str = "+".join(team_ids) if team_ids else (team_id or "-")
@@ -203,7 +166,6 @@ def format_response(response: dict, elapsed: int) -> str:
     return f"{result}\n\n\u2014\n{footer}"
 
 
-#  Generic Message Handler 
 
 async def handle_incoming(
     gateway,
@@ -213,25 +175,7 @@ async def handle_incoming(
     user_id: str,
     binding: Optional[Binding] = None,
 ) -> None:
-    """Platform-agnostic core message handler.
-
-    All routing decisions are made on the Companest side (CompanyRegistry 
-    GlobalBinding  SmartRouter).  The gateway always sends task.auto
-    with the full user context; Companest resolves company, applies bindings,
-    and routes accordingly.
-
-    If a local *binding* is supplied it is included as a hint in the
-    request (``binding_team_id`` / ``binding_mode``) so Companest can honour
-    legacy static rules during the transition period.
-
-    Args:
-        gateway: MasterGateway instance (for send_request)
-        adapter: Platform-specific ChannelAdapter
-        text: User's message text
-        chat_id: Chat/channel ID
-        user_id: User ID
-        binding: Optional local Binding hint (legacy, Companest does its own resolve)
-    """
+    """Send task.auto with user context and optional local binding hints."""
     if not gateway.is_companest_connected:
         await adapter.send_message(chat_id, "Companest is not connected. Please wait...")
         return
@@ -239,7 +183,6 @@ async def handle_incoming(
     ref = await adapter.send_thinking(chat_id, "\U0001f914 Routing...")
     start_time = asyncio.get_running_loop().time()
 
-    # Rate-limited progress callback (min 1s between edits)
     _last_edit = 0.0
 
     async def on_progress(message: str):
@@ -251,7 +194,6 @@ async def handle_incoming(
         await adapter.edit_message(ref, message)
 
     try:
-        # Full user context  Companest resolves company + routing
         params: dict = {
             "task": text,
             "session_id": chat_id,
@@ -260,7 +202,6 @@ async def handle_incoming(
             "channel": adapter.channel_name,
         }
 
-        # Pass local binding as hint (Companest may override with its own resolve)
         if binding:
             params["binding_team_id"] = binding.team_id
             params["binding_mode"] = binding.mode
@@ -275,7 +216,6 @@ async def handle_incoming(
         elapsed = int(asyncio.get_running_loop().time() - start_time)
         full_text = format_response(response, elapsed)
 
-        # Truncate for platform limit
         limit = adapter.max_message_length() - 96
         if len(full_text) > limit:
             result = response.get("payload", {}).get("result", "")

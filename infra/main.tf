@@ -12,7 +12,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-#  Latest Ubuntu 24.04 ARM64 AMI 
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -28,12 +27,10 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-#  Security Group 
 resource "aws_security_group" "companest" {
   name        = "companest-sg"
   description = "Companest all-in-one: SSH only"
 
-  # SSH
   ingress {
     from_port   = 22
     to_port     = 22
@@ -42,7 +39,6 @@ resource "aws_security_group" "companest" {
     description = "SSH"
   }
 
-  # All outbound (apt, Docker Hub, Claude API, Telegram API)
   egress {
     from_port   = 0
     to_port     = 0
@@ -53,7 +49,6 @@ resource "aws_security_group" "companest" {
   tags = { Name = "companest-sg" }
 }
 
-#  EC2 Instance (Companest + LiteLLM) 
 resource "aws_instance" "companest" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -70,7 +65,6 @@ resource "aws_instance" "companest" {
   tags = { Name = "companest-all-in-one" }
 }
 
-#  Elastic IP (survives stop/start) 
 resource "aws_eip" "companest" {
   instance = aws_instance.companest.id
   tags     = { Name = "companest-eip" }

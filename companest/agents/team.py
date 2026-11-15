@@ -338,7 +338,6 @@ def _parse_pi_sections(text: str) -> List[PiConfig]:
     """Parse #### Pi: xxx sections from team.md."""
     pis = []
     sections = re.split(r"####\s+Pi:\s*(\S+)", text)
-    # sections = [preamble, pi_id1, pi_body1, pi_id2, pi_body2, ...]
     for i in range(1, len(sections), 2):
         pi_id = sections[i].strip()
         body = sections[i + 1]

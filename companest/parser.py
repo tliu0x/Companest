@@ -196,7 +196,6 @@ class MarkdownConfigParser:
             full_path = (base_path / include_path).resolve()
             base_resolved = base_path.resolve()
 
-            # Ensure resolved path is within base_path
             if not str(full_path).startswith(str(base_resolved) + os.sep) and full_path != base_resolved:
                 msg = f"Include path escapes base directory: {include_path}"
                 warnings.append(msg)

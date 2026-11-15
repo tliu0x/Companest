@@ -2,7 +2,6 @@ import asyncio
 from pathlib import Path
 from typing import List
 
-# Max output length to avoid flooding LLM context
 _MAX_OUTPUT = 8000
 
 
@@ -89,7 +88,6 @@ async def git_branch(
         return await _run_git(["branch", "-a", "--no-color"], cwd=workspace_path)
 
     if checkout:
-        # Try checkout existing, fallback to create new
         result = await _run_git(["checkout", name], cwd=workspace_path)
         if "error" in result.lower() and "did not match" in result.lower():
             result = await _run_git(

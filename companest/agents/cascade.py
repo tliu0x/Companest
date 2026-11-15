@@ -162,7 +162,6 @@ class CascadeStrategy:
 class CascadeMetrics:
     """Per-team cascade stats, stored in team memory as cascade-metrics.json."""
 
-    # model_id -> {attempts, successes, total_quality}
     model_stats: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def record(self, model: str, succeeded: bool, quality: float = 1.0) -> None:

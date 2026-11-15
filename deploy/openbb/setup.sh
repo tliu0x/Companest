@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-#
-# OpenBB API Server Setup
-#
-# Installs OpenBB and configures it as a systemd service.
-# Run this on the target EC2 instance (or call from companest-ctl.sh deploy).
-#
-# The OpenBB API server provides financial data (equity, crypto, economy, news)
-# via REST endpoints that Companest info-collection fetches from.
-#
 set -euo pipefail
 
 OPENBB_PORT="${OPENBB_PORT:-6900}"

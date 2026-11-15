@@ -1,22 +1,4 @@
-"""
-Companest Gateway WebSocket Client
-
-Async WebSocket client implementing the Gateway JSON-RPC protocol.
-
-Protocol: JSON frames over WebSocket
-- Request:  {type: "req", id, method, params}
-- Response: {type: "res", id, ok, payload|error}
-- Event:    {type: "event", event, payload, seq}
-
-Usage:
-    client = GatewayClient("ws://localhost:19000", auth_token="secret")
-    await client.connect()
-
-    result = await client.agent_task("Write a hello world in Python")
-    print(result)
-
-    await client.disconnect()
-"""
+"""Async Gateway client using req, res and event JSON frames over WebSocket."""
 
 import json
 import uuid
@@ -66,17 +48,7 @@ class PendingRequest:
 
 
 class GatewayClient:
-    """
-    Async WebSocket client for the Gateway JSON-RPC protocol.
-
-    Handles connection lifecycle, request/response correlation,
-    authentication, and automatic reconnection.
-
-    Example:
-        async with GatewayClient("ws://localhost:19000", auth_token="tk") as client:
-            result = await client.agent_task("Analyze this code")
-            print(result)
-    """
+    """Gateway connection, authentication, request correlation and reconnection."""
 
     def __init__(
         self,
@@ -110,7 +82,6 @@ class GatewayClient:
         self.on_event = on_event
         self.on_inbound_request = on_inbound_request
 
-        # Internal state
         self._ws = None
         self._state = ClientState.DISCONNECTED
         self._pending: Dict[str, PendingRequest] = {}
@@ -129,13 +100,7 @@ class GatewayClient:
         return self._state == ClientState.CONNECTED
 
     async def connect(self) -> None:
-        """
-        Connect to the gateway and authenticate.
-
-        Raises:
-            GatewayConnectionError: If connection fails
-            GatewayAuthError: If auth handshake fails
-        """
+        """Connect to the gateway and authenticate."""
         if self._state == ClientState.CONNECTED:
             return
 
@@ -166,7 +131,6 @@ class GatewayClient:
                 details={"url": self.ws_url},
             )
 
-        # Authenticate
         self._state = ClientState.AUTHENTICATING
         try:
             await self._authenticate()
@@ -178,7 +142,6 @@ class GatewayClient:
         self._state = ClientState.CONNECTED
         self._consecutive_failures = 0
 
-        # Start receive loop
         self._recv_task = asyncio.create_task(self._receive_loop())
 
         logger.info(f"Connected to gateway at {self.ws_url}")
@@ -203,7 +166,6 @@ class GatewayClient:
 
         await self._close_ws()
 
-        # Cancel all pending requests
         for req in self._pending.values():
             if not req.future.done():
                 req.future.set_exception(
@@ -219,21 +181,7 @@ class GatewayClient:
         params: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
     ) -> Any:
-        """
-        Send a request frame and await the response.
-
-        Args:
-            method: The RPC method name
-            params: Optional parameters
-            timeout: Override default request timeout
-
-        Returns:
-            Response payload
-
-        Raises:
-            GatewayError: On protocol error
-            ConnectionError: If not connected
-        """
+        """Send a request frame and await the response."""
         if not self.is_connected:
             raise GatewayConnectionError("Not connected to gateway")
 
@@ -248,7 +196,6 @@ class GatewayClient:
         if params:
             frame["params"] = params
 
-        # Create future for response
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         self._pending[request_id] = PendingRequest(
@@ -279,25 +226,7 @@ class GatewayClient:
         timeout: Optional[float] = None,
         session_id: str = "agent:main:main",
     ) -> str:
-        """
-        Submit a task via the 'agent' method and return the final result.
-
-        Gateway protocol:
-        1. Send agent request -> get {runId, status: "accepted"}
-        2. Stream events: {event: "agent", payload: {runId, stream, data}}
-           - stream "lifecycle" + data.phase "start"/"end"
-           - stream "assistant" + data.text (cumulative) / data.delta
-        3. Final res frame: {runId, status: "ok", result: {payloads: [{text}]}}
-
-        Args:
-            task: The task/prompt to execute
-            context: Optional context dict
-            timeout: Override default timeout
-            session_id: Gateway session key (default: "agent:main:main")
-
-        Returns:
-            The agent's response text
-        """
+        """Wait for agent acceptance, then streaming lifecycle completion or a final result."""
         timeout = timeout or self.request_timeout
 
         params = {
@@ -310,7 +239,6 @@ class GatewayClient:
 
         logger.info(f"Sending agent task (session={session_id})...")
 
-        # Phase 1: Send request and get acceptance
         response = await self.send_request(
             "agent",
             params=params,
@@ -320,7 +248,6 @@ class GatewayClient:
         run_id = None
         if isinstance(response, dict):
             run_id = response.get("runId")
-            # Check if result is already included (fast path)
             result_obj = response.get("result")
             if isinstance(result_obj, dict):
                 payloads = result_obj.get("payloads", [])
@@ -332,7 +259,6 @@ class GatewayClient:
 
         logger.info(f"Agent task accepted (runId={run_id[:8]}...), waiting for completion...")
 
-        # Phase 2: Listen for streaming events until lifecycle "end"
         last_text = ""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -404,12 +330,7 @@ class GatewayClient:
         return result if isinstance(result, dict) else {}
 
     async def health_check(self, timeout: Optional[float] = None) -> bool:
-        """
-        Perform a health check (ping) on the connection.
-
-        Returns:
-            True if healthy, False otherwise
-        """
+        """Perform a health check (ping) on the connection."""
         try:
             await self.send_request(
                 "ping",
@@ -419,19 +340,9 @@ class GatewayClient:
         except Exception:
             return False
 
-    # -------------------------------------------------------------------------
-    # Internal Protocol Handling
-    # -------------------------------------------------------------------------
 
     async def _authenticate(self) -> None:
-        """
-        Perform the authentication handshake.
-
-        Supports two protocols:
-        - Challenge-response gateway: receives challenge first
-        - Simple gateway: direct connect (client sends first)
-        """
-        # Try to receive a challenge (some gateways send one immediately)
+        """Authenticate through challenge-response or a direct connect handshake."""
         nonce = None
         try:
             raw = await asyncio.wait_for(self._ws.recv(), timeout=3.0)
@@ -442,16 +353,12 @@ class GatewayClient:
                 nonce = first_frame.get("payload", {}).get("nonce")
                 logger.debug(f"Received connect challenge (nonce={nonce[:8]}...)")
             else:
-                # Not a challenge  treat as unexpected response
                 self._handle_auth_response(first_frame)
                 return
         except asyncio.TimeoutError:
-            # No challenge received  use simple connect flow
             logger.debug("No challenge received, using simple connect flow")
 
-        # Build connect request
         if nonce:
-            # Challenge-response flow
             auth_params: Dict[str, Any] = {
                 "minProtocol": 3,
                 "maxProtocol": 3,
@@ -467,7 +374,6 @@ class GatewayClient:
             if self.auth_token:
                 auth_params["auth"] = {"token": self.auth_token}
         else:
-            # Simple connect flow (our master-gateway)
             auth_params = {
                 "protocol": self.protocol_version,
                 "role": self.role,
@@ -487,7 +393,6 @@ class GatewayClient:
 
         await self._send_frame(frame)
 
-        # Wait for connect response
         try:
             raw = await asyncio.wait_for(
                 self._ws.recv(),
@@ -586,14 +491,12 @@ class GatewayClient:
             seq=frame.get("seq", 0),
         )
 
-        # Call user callback if registered
         if self.on_event:
             try:
                 self.on_event(event)
             except Exception as e:
                 logger.error(f"Event callback error: {e}")
 
-        # Queue for async consumers
         try:
             self._event_queue.put_nowait(event)
         except asyncio.QueueFull:
@@ -616,15 +519,7 @@ class GatewayClient:
         payload: Optional[Dict[str, Any]] = None,
         error: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Send a response frame back to the remote end.
-
-        Args:
-            request_id: The id from the inbound request
-            ok: Whether the request succeeded
-            payload: Response payload (when ok=True)
-            error: Error details (when ok=False)
-        """
+        """Send a response frame back to the remote end."""
         frame = {
             "type": "res",
             "id": request_id,
@@ -644,18 +539,7 @@ class GatewayClient:
         user_id: str,
         message: str,
     ) -> None:
-        """
-        Send a notification frame to the gateway (push delivery).
-
-        Used for scheduled task results and other async notifications
-        that aren't tied to a specific request/response cycle.
-
-        Args:
-            chat_id: Target chat/channel ID
-            channel: Messaging platform ("telegram", etc.)
-            user_id: Originating user ID
-            message: Notification content
-        """
+        """Push a scheduled result or other notification outside a request-response cycle."""
         frame = {
             "type": "notification",
             "payload": {
@@ -669,16 +553,7 @@ class GatewayClient:
         logger.debug(f"Sent notification to {channel}/{chat_id}")
 
     async def send_progress(self, request_id: str, message: str) -> None:
-        """
-        Send a progress frame to the remote end.
-
-        Progress frames are fire-and-forget updates sent during request
-        processing (e.g. routing decisions, model selection, cascade steps).
-
-        Args:
-            request_id: The id of the in-flight request
-            message: Human-readable progress message
-        """
+        """Send a progress update without waiting for a response."""
         frame = {
             "type": "progress",
             "id": request_id,
@@ -724,7 +599,6 @@ class GatewayClient:
         if self._state == ClientState.RECONNECTING:
             logger.error("Max reconnection attempts reached")
             self._state = ClientState.DISCONNECTED
-            # Fail all pending requests
             for req in self._pending.values():
                 if not req.future.done():
                     req.future.set_exception(
@@ -752,9 +626,6 @@ class GatewayClient:
             except asyncio.TimeoutError:
                 continue
 
-    # -------------------------------------------------------------------------
-    # Context Manager
-    # -------------------------------------------------------------------------
 
     async def __aenter__(self) -> "GatewayClient":
         await self.connect()
