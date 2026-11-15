@@ -110,22 +110,6 @@ class TestWorkspaceRegistry:
         registry.load()
         assert registry.build_context("nope") == ""
 
-    def test_list_available(self, tmp_path):
-        config = {
-            "proj": {
-                "path": str(tmp_path),
-                "description": "Test",
-            }
-        }
-        (tmp_path / "workspaces.json").write_text(json.dumps(config))
-        registry = WorkspaceRegistry(str(tmp_path))
-        registry.load()
-
-        available = registry.list_available()
-        assert len(available) == 1
-        assert available[0]["id"] == "proj"
-        assert available[0]["exists"] is True
-
 
 class TestGitTools:
     """Test git tool functions with mocked subprocess."""

@@ -1,31 +1,23 @@
-"""Companest Workspace Registry"""
-
-import fnmatch
 import json
 import logging
 import os
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class Workspace:
-    """A registered project workspace."""
     id: str
     path: str           # absolute path to repo root
     repo: str = ""      # git remote URL (informational)
-    branch: str = "main"  # default branch
+    branch: str = "main"
     description: str = ""
 
     def exists(self) -> bool:
         return Path(self.path).is_dir()
-
-    def is_git_repo(self) -> bool:
-        return (Path(self.path) / ".git").exists()
 
     def validate_path(self, target: str) -> bool:
         """Check that target path is within this workspace (path traversal guard)."""
@@ -37,14 +29,12 @@ class Workspace:
             return False
 
     def resolve_path(self, relative_path: str) -> Optional[Path]:
-        """Resolve a relative path within this workspace. Returns None if invalid."""
         absolute = Path(self.path) / relative_path
         if not self.validate_path(str(absolute)):
             return None
         return absolute
 
     def read_file(self, relative_path: str, encoding: str = "utf-8") -> str:
-        """Read a file within the workspace."""
         resolved = self.resolve_path(relative_path)
         if resolved is None:
             raise ValueError(f"Path '{relative_path}' is outside workspace '{self.id}'")
@@ -53,7 +43,6 @@ class Workspace:
         return resolved.read_text(encoding=encoding)
 
     def write_file(self, relative_path: str, content: str, encoding: str = "utf-8") -> str:
-        """Write content to a file within the workspace."""
         resolved = self.resolve_path(relative_path)
         if resolved is None:
             raise ValueError(f"Path '{relative_path}' is outside workspace '{self.id}'")
@@ -62,7 +51,6 @@ class Workspace:
         return str(resolved)
 
     def list_files(self, glob_pattern: str = "**/*", max_results: int = 500) -> List[str]:
-        """List files in the workspace matching a glob pattern."""
         root = Path(self.path)
         if not root.is_dir():
             return []
@@ -75,40 +63,13 @@ class Workspace:
                     break
         return sorted(results)
 
-    def search_content(self, pattern: str, glob_filter: str = "**/*",
-                       max_results: int = 50) -> List[Dict[str, Any]]:
-        """Search file contents for a pattern (simple substring match)."""
-        root = Path(self.path)
-        if not root.is_dir():
-            return []
-        results = []
-        for file_path in root.glob(glob_filter):
-            if not file_path.is_file():
-                continue
-            if any(part.startswith(".git") for part in file_path.parts):
-                continue
-            try:
-                for line_num, line in enumerate(file_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-                    if pattern in line:
-                        rel = str(file_path.relative_to(root)).replace("\\", "/")
-                        results.append({"file": rel, "line": line_num, "text": line.strip()[:200]})
-                        if len(results) >= max_results:
-                            return results
-            except (OSError, UnicodeDecodeError):
-                continue
-        return results
-
 
 class WorkspaceRegistry:
-    """Load and manage project workspaces from .companest/workspaces.json."""
-
     def __init__(self, base_path: str):
-        self._base_path = Path(base_path)
-        self._config_path = self._base_path / "workspaces.json"
+        self._config_path = Path(base_path) / "workspaces.json"
         self._workspaces: Dict[str, Workspace] = {}
 
     def load(self) -> None:
-        """Load workspaces from config file."""
         if not self._config_path.exists():
             logger.info("No workspaces.json found, workspace features disabled")
             return
@@ -146,27 +107,10 @@ class WorkspaceRegistry:
             logger.info(f"Loaded workspace '{ws_id}': {ws.path}")
 
     def get(self, workspace_id: str) -> Optional[Workspace]:
-        """Get a workspace by ID."""
         return self._workspaces.get(workspace_id)
 
     def list_workspaces(self) -> List[str]:
-        """List all workspace IDs."""
         return list(self._workspaces.keys())
-
-    def list_available(self) -> List[Dict]:
-        """List workspaces with metadata (for tool output)."""
-        result = []
-        for ws in self._workspaces.values():
-            result.append({
-                "id": ws.id,
-                "path": ws.path,
-                "repo": ws.repo,
-                "branch": ws.branch,
-                "description": ws.description,
-                "exists": ws.exists(),
-                "is_git": ws.is_git_repo() if ws.exists() else False,
-            })
-        return result
 
     def build_context(self, workspace_id: str) -> str:
         """Build workspace context string for system prompt injection."""
@@ -189,47 +133,3 @@ class WorkspaceRegistry:
             "operate within this workspace. Use absolute paths based on the workspace path above."
         )
         return "\n".join(lines)
-
-    async def git_status(self, workspace_id: str) -> str:
-        """Run git status in a workspace."""
-        ws = self.get(workspace_id)
-        if not ws:
-            return f"Error: workspace '{workspace_id}' not found"
-        try:
-            from .git_tools import git_status
-            return await git_status(ws.path)
-        except ImportError:
-            return "Error: git_tools module not available"
-
-    async def git_diff(self, workspace_id: str, staged: bool = False) -> str:
-        """Run git diff in a workspace."""
-        ws = self.get(workspace_id)
-        if not ws:
-            return f"Error: workspace '{workspace_id}' not found"
-        try:
-            from .git_tools import git_diff
-            return await git_diff(ws.path, staged=staged)
-        except ImportError:
-            return "Error: git_tools module not available"
-
-    async def git_commit(self, workspace_id: str, message: str, files: str = "") -> str:
-        """Run git commit in a workspace."""
-        ws = self.get(workspace_id)
-        if not ws:
-            return f"Error: workspace '{workspace_id}' not found"
-        try:
-            from .git_tools import git_commit
-            return await git_commit(ws.path, message=message, files=files)
-        except ImportError:
-            return "Error: git_tools module not available"
-
-    async def git_log(self, workspace_id: str, count: int = 10) -> str:
-        """Run git log in a workspace."""
-        ws = self.get(workspace_id)
-        if not ws:
-            return f"Error: workspace '{workspace_id}' not found"
-        try:
-            from .git_tools import git_log
-            return await git_log(ws.path, count=count)
-        except ImportError:
-            return "Error: git_tools module not available"

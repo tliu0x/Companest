@@ -249,18 +249,6 @@ class TestTeamRegistry:
         assert "stock" in status["registered"]
         assert "finance" in status["meta"]
 
-    def test_registry_reload(self):
-        from companest.team import TeamRegistry
-        reg = TeamRegistry(str(self.base / "teams"), self.mm)
-        reg.scan_configs()
-        reg.get_or_create("stock")
-
-        reg.reload()
-        # After reload, on-demand instances cleared
-        assert "stock" not in reg._instances
-        # But configs re-scanned
-        assert "stock" in reg.list_teams()
-
 
 class TestCostGate:
     """Test three-tier cost approval logic."""

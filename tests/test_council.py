@@ -50,7 +50,7 @@ class TestCouncilFallback:
         team.pis["alpha"].run = AsyncMock(return_value="solo answer")
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("What is 2+2-")
+            CouncilMode().execute(team, "What is 2+2-")
         )
         assert result == "solo answer"
         # Should call run() once (fallback), not gather
@@ -77,7 +77,7 @@ class TestCouncilSynthesis:
         team.pis["beta"].run = AsyncMock(return_value="Beta perspective")
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("Evaluate X")
+            CouncilMode().execute(team, "Evaluate X")
         )
         assert result == "Synthesized answer"
 
@@ -111,7 +111,7 @@ class TestCouncilAllFail:
 
         with pytest.raises(TeamError, match="All .* Pis failed"):
             asyncio.get_event_loop().run_until_complete(
-                team.run_council("Impossible task")
+                CouncilMode().execute(team, "Impossible task")
             )
 
 
@@ -130,7 +130,7 @@ class TestCouncilPartialFailure:
         team.pis["beta"].run = AsyncMock(return_value="Beta solo answer")
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("Mixed task")
+            CouncilMode().execute(team, "Mixed task")
         )
         # Only 1 succeeded -direct return, no synthesis
         assert result == "Beta solo answer"
@@ -199,7 +199,7 @@ class TestCouncilArchetypeLabels:
         ])
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("What is consciousness-")
+            CouncilMode().execute(team, "What is consciousness-")
         )
         assert result == "Final synthesis"
 
@@ -221,7 +221,7 @@ class TestCouncilArchetypeLabels:
         team.pis["beta"].run = AsyncMock(return_value="Beta answer")
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("Simple question")
+            CouncilMode().execute(team, "Simple question")
         )
         assert result == "Synthesized"
 
@@ -475,7 +475,7 @@ class TestCouncilWithRubric:
         team.pis["gamma"].run = AsyncMock(return_value="Gamma perspective")
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("Evaluate X")
+            CouncilMode().execute(team, "Evaluate X")
         )
         assert result == "Final synthesis with judge context"
 
@@ -501,7 +501,7 @@ class TestCouncilWithRubric:
         team.pis["beta"].run = AsyncMock(return_value="Beta perspective")
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("Evaluate X")
+            CouncilMode().execute(team, "Evaluate X")
         )
         assert result == "Synthesized answer"
 
@@ -526,7 +526,7 @@ class TestCouncilWithRubric:
         team.pis["beta"].run = AsyncMock(return_value="Beta perspective")
 
         result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("Evaluate X")
+            CouncilMode().execute(team, "Evaluate X")
         )
         assert result == "Synthesized without judge"
 
@@ -583,7 +583,7 @@ def test_council_passes_memory_task_hint(tmp_path):
     team.pis["beta"].run = AsyncMock(return_value="Beta perspective")
 
     asyncio.get_event_loop().run_until_complete(
-        team.run_council("Evaluate launch readiness", user_context={"company_id": "acme"})
+        CouncilMode().execute(team, "Evaluate launch readiness", user_context={"company_id": "acme"})
     )
 
     beta_call = team.pis["beta"].run.call_args

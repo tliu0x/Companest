@@ -1,30 +1,16 @@
-"""Council execution mode -multi-perspective synthesis."""
-
 import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from . import ExecutionMode, ProgressCallback
+from . import ExecutionMode, ProgressCallback, _with_memory_task_hint
 from ..exceptions import PiError, TeamError
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..team import AgentTeam
 
 logger = logging.getLogger(__name__)
-
-
-def _with_memory_task_hint(
-    user_context: Optional[Dict[str, Any]],
-    task_hint: str,
-) -> Dict[str, Any]:
-    """Attach the original task so internal council prompts reuse the right memory."""
-    ctx = dict(user_context) if user_context else {}
-    if task_hint:
-        ctx["memory_task_hint"] = task_hint
-    return ctx
 
 
 class CouncilMode(ExecutionMode):
@@ -55,14 +41,11 @@ class CouncilMode(ExecutionMode):
         if on_progress:
             await on_progress(f"\U0001f3db\ufe0f Council: {pi_names}")
 
-        cascade = self._cascade
-
-        # Stage 1: All Pis answer independently in parallel
         async def _run_pi(pi_id: str) -> tuple:
             try:
                 result = await team.pis[pi_id].run(
                     task,
-                    cascade=cascade,
+                    cascade=self._cascade,
                     user_context=_with_memory_task_hint(user_context, task),
                 )
                 return pi_id, result, None
@@ -73,7 +56,6 @@ class CouncilMode(ExecutionMode):
             *[_run_pi(pid) for pid in team.pis],
         )
 
-        # Collect successful perspectives (with pi_id for archetype lookup)
         perspectives = []
         for pi_id, result, error in results:
             if error is None and result:
@@ -86,13 +68,11 @@ class CouncilMode(ExecutionMode):
                 f"All {len(team.pis)} Pis failed in council mode for team '{team.id}'",
             )
 
-        # Single success -> return directly, no synthesis needed
         if len(perspectives) == 1:
             return perspectives[0][1]
 
-        # Stage 2 (optional): Judge scoring when rubric is configured
         judge_scores = None
-        if team.rubric and len(perspectives) >= 2:
+        if team.rubric:
             if not team.lead_pi_id or team.lead_pi_id not in team.pis:
                 raise TeamError(
                     f"Team '{team.id}' has no valid lead_pi for council judge",
@@ -106,7 +86,6 @@ class CouncilMode(ExecutionMode):
         if on_progress:
             await on_progress("\u270d\ufe0f Synthesizing council perspectives...")
 
-        # Build perspective labels: use archetypes if available, else anonymous
         archetype_map = self._get_pi_archetypes(team)
         perspective_parts = []
         for i, (pi_id, result) in enumerate(perspectives):
@@ -119,12 +98,10 @@ class CouncilMode(ExecutionMode):
 
         perspective_block = "\n\n".join(perspective_parts)
 
-        # Build judge evaluation section for synthesis prompt
         judge_section = ""
         if judge_scores:
             judge_section = self._format_judge_section(judge_scores)
 
-        # Adjust synthesis instructions when archetypes are present
         has_archetypes = any(archetype_map.get(pid) for pid, _ in perspectives)
         if has_archetypes:
             synth_instructions = (
@@ -168,9 +145,7 @@ class CouncilMode(ExecutionMode):
             user_context=_with_memory_task_hint(user_context, task),
         )
 
-
     def _get_pi_archetypes(self, team: "AgentTeam") -> Dict[str, str]:
-        """Extract archetype tags from Pi soul.md files."""
         archetypes = {}
         for pi_id in team.pis:
             soul = team.memory.read_pi_soul(team.id, pi_id)
@@ -187,8 +162,6 @@ class CouncilMode(ExecutionMode):
         self, team: "AgentTeam", task: str, perspectives: List[Tuple[str, str]],
         user_context: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Ask lead Pi to score each perspective against the rubric."""
-        # Build criteria description for prompt
         criteria_lines = []
         for entry in team.rubric:
             criteria_lines.append(
@@ -196,7 +169,6 @@ class CouncilMode(ExecutionMode):
             )
         criteria_block = "\n".join(criteria_lines)
 
-        # Build perspectives block for judge
         persp_block_parts = []
         for pi_id, result in perspectives:
             persp_block_parts.append(f"### {pi_id}\n{result}")
@@ -219,7 +191,7 @@ class CouncilMode(ExecutionMode):
                 user_context=_with_memory_task_hint(user_context, task),
             )
             return _parse_judge_response(raw, team.rubric)
-        except (PiError, Exception) as e:
+        except Exception as e:
             logger.warning(f"[Team:{team.id}] Judge scoring failed: {e}")
             return None
 
@@ -229,33 +201,29 @@ class CouncilMode(ExecutionMode):
         perspectives: List[Tuple[str, str]],
         judge_scores: Dict[str, Any],
     ) -> List[Tuple[str, str]]:
-        """Filter out low-scoring perspectives."""
         scores = judge_scores.get("scores", {})
         if not scores:
             return perspectives
 
-        # Build (pi_id, weighted_score) pairs for perspectives we have scores for
         scored = []
         for pi_id, result in perspectives:
             pi_score = scores.get(pi_id)
             if pi_score and "weighted" in pi_score:
                 scored.append((pi_id, result, pi_score["weighted"]))
             else:
-                # No score -> keep by default (assign high score)
+                # Unscored perspectives are kept.
                 scored.append((pi_id, result, 10.0))
 
         if len(scored) <= 2:
             return [(pid, res) for pid, res, _ in scored]
 
-        # Calculate threshold
         weights = [s for _, _, s in scored]
         mean_score = sum(weights) / len(weights)
         threshold = mean_score * 0.7
 
-        # Filter
         filtered = [(pid, res) for pid, res, w in scored if w >= threshold]
 
-        # Ensure at least 2 remain (keep top 2 by score if over-filtered)
+        # At least 2 perspectives must remain.
         if len(filtered) < 2:
             scored.sort(key=lambda x: x[2], reverse=True)
             filtered = [(pid, res) for pid, res, _ in scored[:2]]
@@ -267,7 +235,6 @@ class CouncilMode(ExecutionMode):
         return filtered
 
     def _format_judge_section(self, judge_scores: Dict[str, Any]) -> str:
-        """Format judge scores as a section for the synthesis prompt."""
         scores = judge_scores.get("scores", {})
         if not scores:
             return ""
@@ -275,12 +242,11 @@ class CouncilMode(ExecutionMode):
         lines = ["## Judge Evaluation"]
         for pi_id, pi_scores in scores.items():
             weighted = pi_scores.get("weighted", 0)
-            # Build criterion summary
             details = []
             for key, val in pi_scores.items():
                 if key != "weighted":
                     details.append(f"{key}={val}")
-            detail_str = ", ".join(details) if details else ""
+            detail_str = ", ".join(details)
             lines.append(f"- {pi_id}: {weighted:.1f}/10 ({detail_str})")
 
         notes = judge_scores.get("notes", "")
@@ -293,21 +259,18 @@ class CouncilMode(ExecutionMode):
 def _parse_judge_response(
     raw: str, rubric: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """Parse judge LLM output into scores dict. Recalculates weighted scores."""
-    # Try direct JSON parse
     parsed = None
     try:
         parsed = json.loads(raw.strip())
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         pass
 
-    # Try extracting from markdown code block
     if parsed is None:
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if match:
             try:
                 parsed = json.loads(match.group())
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 pass
 
     if not parsed or not isinstance(parsed, dict) or "scores" not in parsed:
@@ -317,7 +280,7 @@ def _parse_judge_response(
     if not isinstance(scores, dict):
         return None
 
-    # Recalculate weighted scores from rubric weights (don't trust LLM math)
+    # Weighted scores are recomputed from the rubric; the LLM's own math is not trusted.
     for pi_id, pi_scores in scores.items():
         if not isinstance(pi_scores, dict):
             continue
@@ -333,5 +296,3 @@ def _parse_judge_response(
         pi_scores["weighted"] = round(weighted, 2)
 
     return {"scores": scores, "notes": parsed.get("notes", "")}
-
-

@@ -1,9 +1,6 @@
 import asyncio
-import logging
 from pathlib import Path
-from typing import Dict, List, Optional
-
-logger = logging.getLogger(__name__)
+from typing import List
 
 # Max output length to avoid flooding LLM context
 _MAX_OUTPUT = 8000
@@ -49,7 +46,6 @@ async def _run_git(
 
 
 async def git_status(workspace_path: str) -> str:
-    """Show working tree status: branch, staged, modified, untracked files."""
     return await _run_git(
         ["status", "--short", "--branch"], cwd=workspace_path,
     )
@@ -58,15 +54,12 @@ async def git_status(workspace_path: str) -> str:
 async def git_diff(
     workspace_path: str, file_path: str = "", staged: bool = False,
 ) -> str:
-    """Show file changes."""
     args = ["diff"]
     if staged:
         args.append("--cached")
     args.append("--stat")
-    # First show the summary
     summary = await _run_git(args, cwd=workspace_path)
 
-    # Then show the actual diff (possibly for a specific file)
     detail_args = ["diff"]
     if staged:
         detail_args.append("--cached")
@@ -79,7 +72,6 @@ async def git_diff(
 
 
 async def git_log(workspace_path: str, count: int = 10) -> str:
-    """Show recent commit log."""
     n = min(max(count, 1), 50)
     return await _run_git(
         ["log", f"-{n}", "--oneline", "--decorate", "--graph"],
@@ -117,7 +109,6 @@ async def git_commit(
     if not message:
         return "Error: commit message is required"
 
-    # Stage files
     if files:
         file_list = [f.strip() for f in files.split(",") if f.strip()]
         stage_result = await _run_git(["add"] + file_list, cwd=workspace_path)
@@ -127,12 +118,10 @@ async def git_commit(
     if stage_result.startswith("Error"):
         return f"Staging failed: {stage_result}"
 
-    # Check there's something to commit
     status = await _run_git(["status", "--porcelain"], cwd=workspace_path)
-    if not status.strip() or status == "(no output)" or status.startswith("Error"):
+    if status == "(no output)" or status.startswith("Error"):
         return "Nothing to commit (working tree clean)"
 
-    # Commit
     return await _run_git(["commit", "-m", message], cwd=workspace_path)
 
 
@@ -142,7 +131,6 @@ async def git_push(
     branch: str = "",
     set_upstream: bool = True,
 ) -> str:
-    """Push commits to remote."""
     args = ["push"]
     if set_upstream:
         args.append("-u")

@@ -314,8 +314,6 @@ class CompanestOrchestrator:
             proxy_config=self.config.proxy if self.config.proxy.enabled else None,
             event_bus=self.events,
         )
-        # Invalidate router cache when teams are reloaded
-        self.team_registry.set_reload_callback(self._smart_router.invalidate_cache)
 
         # Flush any teams registered before init_teams()
         for config, ao in getattr(self, "_pending_teams", []):

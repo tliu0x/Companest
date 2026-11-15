@@ -176,60 +176,6 @@ class TestDefaultModeExecution:
             )
 
 
-class TestBackwardCompat:
-    """AgentTeam methods still work as thin delegators."""
-
-    def setup_method(self):
-        self.tmpdir = tempfile.mkdtemp()
-
-    def teardown_method(self):
-        shutil.rmtree(self.tmpdir)
-
-    def test_team_run_delegates(self):
-        team = _make_team(self.tmpdir, ["alpha"])
-        team.pis["alpha"].run = AsyncMock(return_value="result")
-
-        result = asyncio.get_event_loop().run_until_complete(
-            team.run("task")
-        )
-        assert result == "result"
-
-    def test_team_run_with_cascade(self):
-        team = _make_team(self.tmpdir, ["alpha"])
-        team.pis["alpha"].run = AsyncMock(return_value="cascade result")
-
-        result = asyncio.get_event_loop().run_until_complete(
-            team.run("task", cascade=True)
-        )
-        assert result == "cascade result"
-
-    def test_team_run_council_delegates(self):
-        team = _make_team(self.tmpdir, ["alpha", "beta"])
-        team.pis["alpha"].run = AsyncMock(side_effect=[
-            "Alpha perspective",
-            "Synthesized",
-        ])
-        team.pis["beta"].run = AsyncMock(return_value="Beta perspective")
-
-        result = asyncio.get_event_loop().run_until_complete(
-            team.run_council("task")
-        )
-        assert result == "Synthesized"
-
-    def test_team_run_collaborative_delegates(self):
-        team = _make_team(self.tmpdir, ["alpha", "beta"])
-        team.pis["alpha"].run = AsyncMock(return_value="step1 output")
-        team.pis["beta"].run = AsyncMock(return_value="final output")
-
-        result = asyncio.get_event_loop().run_until_complete(
-            team.run_collaborative("input task")
-        )
-        assert result == "final output"
-        # Alpha gets the original task, Beta gets Alpha's output
-        team.pis["alpha"].run.assert_called_once()
-        team.pis["beta"].run.assert_called_once()
-
-
 class TestModeImports:
     """Verify imports work from the Companest public API."""
 
