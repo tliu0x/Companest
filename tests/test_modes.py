@@ -1,12 +1,4 @@
-"""
-Execution Modes Unit Tests
-
-Tests for the companest/modes/ package:
-1. ModeRegistry  register, get, list
-2. ExecutionMode interface  all built-in modes implement it
-3. DefaultMode  delegates to lead Pi
-4. Backward compat  AgentTeam.run/run_loop/run_council/run_collaborative still work
-"""
+"""Execution Modes Unit Tests"""
 
 import asyncio
 import tempfile
@@ -52,11 +44,7 @@ def _make_team(tmpdir: str, pi_ids: list[str]) -> AgentTeam:
     return AgentTeam(config, mm)
 
 
-#  ModeRegistry Tests 
-
 class TestModeRegistry:
-    """Tests for ModeRegistry class."""
-
     def test_build_default_registry(self):
         registry = build_default_registry()
         modes = registry.list_modes()
@@ -113,8 +101,6 @@ class TestModeRegistry:
         assert "council" in VALID_MODES
 
 
-#  Mode Interface Tests 
-
 class TestModeInterface:
     """All built-in modes implement ExecutionMode correctly."""
 
@@ -143,7 +129,6 @@ class TestModeInterface:
         assert mode.name == "collaborative"
         assert isinstance(mode, ExecutionMode)
 
-#  DefaultMode Execution Tests 
 
 class TestDefaultModeExecution:
     """Test DefaultMode.execute() delegates correctly."""
@@ -190,8 +175,6 @@ class TestDefaultModeExecution:
                 mode.execute(team, "task")
             )
 
-
-#  Backward Compatibility Tests 
 
 class TestBackwardCompat:
     """AgentTeam methods still work as thin delegators."""
@@ -246,8 +229,6 @@ class TestBackwardCompat:
         team.pis["alpha"].run.assert_called_once()
         team.pis["beta"].run.assert_called_once()
 
-
-#  Mode Imports 
 
 class TestModeImports:
     """Verify imports work from the Companest public API."""

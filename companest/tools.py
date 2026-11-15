@@ -1,19 +1,3 @@
-"""
-Companest Tools
-
-Tools for Pi agents. Each tool is defined once as a ToolDefinition and
-adapted to a LangChain tool for the agent runtime.
-
-This module defines:
-- ToolDefinition: define a tool once (name, description, params, handler)
-- definitions_to_langchain(): the adapter to LangChain tools
-- Definition builders: create_*_tool_defs() for each tool group
-- ToolRegistry: providers, presets, skills and external MCP servers
-- Tool preset mappings for different Pi roles
-
-Built-in file, shell and web tools live in companest/builtin_tools.py.
-"""
-
 import inspect
 import json
 import logging
@@ -26,7 +10,6 @@ from .memory import MemoryManager, MemoryBackend, FileBackend, MemorySearchServi
 
 logger = logging.getLogger(__name__)
 
-# -- Tool presets (referenced by name in team.md configs) --------
 
 TOOL_PRESETS = {
     "pi-core": ["Read", "Write", "Edit", "Glob", "Grep"],
@@ -98,9 +81,6 @@ ORCHESTRATOR_TOOL_NAMES = {"run_team", "run_auto"}
 GIT_TOOL_NAMES = {"git_status", "git_diff", "git_log", "git_branch", "git_commit", "git_push"}
 
 
-# -- Skills ----------------------------------------------------
-
-
 @dataclass
 class SkillDefinition:
     """A global skill loaded from .companest/skills/{name}/skill.md."""
@@ -111,19 +91,7 @@ class SkillDefinition:
 
 
 def load_skills(base_path: str) -> Dict[str, SkillDefinition]:
-    """
-    Scan .companest/skills/ directory, parse each skill.md into a SkillDefinition.
-
-    Expected format of skill.md:
-        # Skill: web-research
-        - tools: WebSearch, WebFetch, memory_write
-        - description: Comprehensive web research with source tracking
-
-        ## Instructions
-        When performing web research:
-        1. Search multiple sources for breadth
-        ...
-    """
+    """Scan .companest/skills/ directory, parse each skill.md into a SkillDefinition."""
     skills_dir = Path(base_path) / "skills"
     if not skills_dir.exists():
         return {}
@@ -160,18 +128,9 @@ def load_skills(base_path: str) -> Dict[str, SkillDefinition]:
     return skills
 
 
-# -- ToolDefinition + Adapters ---------------------------------
-
-
 @dataclass
 class ToolDefinition:
-    """
-    Define a tool once; definitions_to_langchain adapts it for the agent runtime.
-
-    Parameters dict maps param_name -> spec:
-        {"key": {"type": "string", "description": "...", "optional": True}}
-    Handler signature: async (args_dict) -> str
-    """
+    """Define a tool once; definitions_to_langchain adapts it for the agent runtime."""
     name: str
     description: str
     parameters: Dict[str, dict]
@@ -208,9 +167,6 @@ def definitions_to_langchain(defs: List[ToolDefinition]) -> list:
             args_schema=_to_json_schema(d.parameters),
         ))
     return tools
-
-
-# -- Tool Definition Builders ----------------------------------
 
 
 def create_memory_tool_defs(
@@ -659,11 +615,7 @@ def create_sessions_tool_defs(
 
 
 def create_git_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
-    """Create ToolDefinitions for git operations.
-
-    Requires ctx.extra to contain:
-    - workspace_path: str -absolute path to the git repo root
-    """
+    """Create ToolDefinitions for git operations."""
     from . import git_tools
 
     workspace_path = ctx.extra.get("workspace_path", "")
@@ -795,12 +747,7 @@ def create_git_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
 
 
 def create_orchestrator_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
-    """Create ToolDefinitions for CEO Agent orchestrator tools (run_team, run_auto).
-
-    Requires ctx.extra to contain:
-    - run_team_fn: async (task, team_id, mode, user_context) -> str
-    - run_auto_fn: async (task, mode, user_context) -> (str, RoutingDecision)
-    """
+    """Create ToolDefinitions for CEO Agent orchestrator tools (run_team, run_auto)."""
     run_team_fn = ctx.extra.get("run_team_fn")
     run_auto_fn = ctx.extra.get("run_auto_fn")
     company_id = ctx.extra.get("company_id")
@@ -874,9 +821,6 @@ def create_orchestrator_tool_defs(ctx: "ToolContext") -> List[ToolDefinition]:
     ]
 
 
-# -- Tool Registry --------------------------------------------
-
-
 @dataclass
 class ToolContext:
     """Execution context passed to tool factories."""
@@ -903,11 +847,7 @@ class ToolProvider:
 
 
 def _requires(names: Set[str], presets: tuple = (), prerequisite: Optional[Callable[[ToolContext], bool]] = None):
-    """Build a provider `requires` check.
-
-    The provider is active when its prerequisite holds and either the Pi is in
-    default-all mode or its tools_config names one of the tools or presets.
-    """
+    """Build a provider `requires` check."""
     def check(ctx: ToolContext, default_all: bool = False) -> bool:
         if prerequisite is not None and not prerequisite(ctx):
             return False
@@ -950,12 +890,7 @@ def _public_knowledge_enabled(ctx: ToolContext) -> bool:
 
 
 class ToolRegistry:
-    """
-    Pluggable tool registry.
-
-    Manages built-in and custom tool providers. External projects
-    register providers to inject custom tools into Pi agents.
-    """
+    """Pluggable tool registry."""
 
     def __init__(self):
         self._providers: Dict[str, ToolProvider] = {}
@@ -1032,11 +967,7 @@ class ToolRegistry:
         self._company_mcp_names.setdefault(company_id, set()).add(scoped_name)
 
     def get_external_mcp_servers(self, company_id: Optional[str] = None) -> Dict[str, dict]:
-        """Return external MCP server configs.
-
-        If company_id is given, returns global + that company's scoped servers.
-        Otherwise returns only global (non-scoped) servers.
-        """
+        """Return external MCP server configs."""
         result = {}
         for name, cfg in self._external_mcp_configs.items():
             if "/" not in name:
@@ -1052,11 +983,7 @@ class ToolRegistry:
             self._external_mcp_configs.pop(name, None)
 
     def get_skill_instructions(self, tools_config: List[str]) -> str:
-        """Return combined instructions for all active skills.
-
-        In default-all mode (empty tools_config), all skills are active.
-        Otherwise, only skills whose name or tools appear in tools_config.
-        """
+        """Return combined instructions for all active skills."""
         parts = []
         for skill in self._skills.values():
             if not skill.instructions:
@@ -1122,11 +1049,7 @@ class ToolRegistry:
         return definitions_to_langchain(self.get_tool_defs(ctx))
 
     async def get_external_mcp_tools(self, company_id: Optional[str] = None, tools_deny: Optional[Set[str]] = None) -> list:
-        """Load tools from the external MCP servers visible to this company.
-
-        A server that fails to connect is logged and skipped so it cannot
-        take the whole run down.
-        """
+        """Load tools from the external MCP servers visible to this company."""
         configs = self.get_external_mcp_servers(company_id=company_id)
         if not configs:
             return []
@@ -1219,18 +1142,8 @@ def _to_mcp_connection(cfg: dict) -> dict:
     return conn
 
 
-# -- Tool name resolution -------------------------------------
-
-
 def resolve_tool_names(tools_config: List[str], _seen: Optional[set] = None) -> List[str]:
-    """
-    Resolve tool config strings to actual tool names.
-    Handles both individual names and preset references.
-
-    Example:
-        resolve_tool_names(["web_search", "memory_read"])
-        -["WebSearch", "mcp__mem__memory_read"]
-    """
+    """Resolve tool config strings to actual tool names."""
     if _seen is None:
         _seen = set()
     resolved = []

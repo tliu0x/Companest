@@ -1,32 +1,8 @@
-"""
-Companest Framework Exceptions
-
-Hierarchical exception structure for the Companest framework:
-
-CompanestError (base)
- ConfigurationError - Invalid configuration
- OrchestratorError - Orchestration failures
- GatewayError - Gateway WebSocket protocol errors
-    GatewayConnectionError - WebSocket connection failures
-    GatewayAuthError - Auth handshake failures
- MasterError - Master connection failures
- JobError - Job management failures
- PiError - Pi agent execution failures
- TeamError - Team-related failures
- CostGateError - Cost gate failures
- ArchiverError - Memory archiver failures
- SchedulerError - Scheduler failures
- CompanyError - Company registry failures
-"""
+"""Companest Framework Exceptions"""
 
 
 class CompanestError(Exception):
-    """
-    Base exception for all Companest framework errors.
-
-    All Companest-specific exceptions inherit from this class,
-    allowing for easy exception handling at the framework level.
-    """
+    """Base exception for all Companest framework errors."""
 
     def __init__(self, message: str, details: dict = None):
         super().__init__(message)
@@ -40,94 +16,39 @@ class CompanestError(Exception):
 
 
 class ConfigurationError(CompanestError):
-    """
-    Raised when Companest configuration is invalid.
-
-    Examples:
-    - Missing required fields
-    - Invalid server configuration
-    - Invalid routing rules
-    """
+    """Raised when Companest configuration is invalid."""
     pass
 
 
 class OrchestratorError(CompanestError):
-    """
-    Raised when orchestration fails.
-
-    Examples:
-    - Failed to route task to team
-    - All servers failed
-    - Timeout during orchestration
-    - Invalid task state
-    """
+    """Raised when orchestration fails."""
     pass
 
 
 class GatewayError(CompanestError):
-    """
-    Gateway WebSocket protocol errors.
-
-    Examples:
-    - Invalid frame format
-    - Unexpected message type
-    - Protocol version mismatch
-    """
+    """Gateway WebSocket protocol errors."""
     pass
 
 
 class GatewayConnectionError(GatewayError):
-    """
-    Raised when WebSocket connection to the gateway fails.
-
-    Examples:
-    - Connection refused
-    - DNS resolution failure
-    - TLS handshake failure
-    - Connection timeout
-    """
+    """Raised when WebSocket connection to the gateway fails."""
     pass
 
 
 class GatewayAuthError(GatewayError):
-    """
-    Raised when authentication to the gateway fails.
-
-    Examples:
-    - Invalid auth token
-    - Invalid password
-    - Insufficient scopes
-    - Auth handshake timeout
-    """
+    """Raised when authentication to the gateway fails."""
     pass
 
 
 class MasterError(CompanestError):
-    """
-    Raised for master connection failures.
-
-    Examples:
-    - Master connection lost
-    - Task processing failure
-    - Inbound request handling error
-    """
+    """Raised for master connection failures."""
     pass
 
 
 class JobError(CompanestError):
-    """
-    Raised for job management failures.
-
-    Examples:
-    - Job not found
-    - Job already completed
-    - Job queue full
-    - Persistence failure
-    """
+    """Raised for job management failures."""
     pass
 
-
-#  Pi Agent Team exceptions 
 
 class PiError(CompanestError):
     """Raised for Pi agent execution failures."""

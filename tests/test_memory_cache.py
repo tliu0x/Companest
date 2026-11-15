@@ -1,10 +1,4 @@
-"""
-MemoryManager Three-Layer Cache Tests
-
-Layer 1: _read_file / _read_json mtime+size cache
-Layer 2: build_system_prompt dependency-tracking cache
-Layer 3: list_team_memory directory mtime cache
-"""
+"""MemoryManager Three-Layer Cache Tests"""
 
 import json
 import os
@@ -48,9 +42,6 @@ def mem_dir(tmp_path):
 @pytest.fixture
 def mm(mem_dir):
     return MemoryManager(str(mem_dir))
-
-
-#  Layer 1: File Cache 
 
 
 class TestFileCache:
@@ -139,9 +130,6 @@ class TestFileCache:
         assert mm._file_cache[resolved].is_json
 
 
-#  Layer 2: Prompt Cache 
-
-
 class TestPromptCache:
 
     def test_prompt_cache_hit(self, mm, mem_dir):
@@ -191,8 +179,7 @@ class TestPromptCache:
         assert ("alpha", "lead") not in mm._prompt_cache
 
     def test_prompt_cache_cross_team_enrichment(self, mm, mem_dir):
-        """Writing to research team memory invalidates alpha's prompt cache
-        because research is an enrichment source for alpha."""
+        """Writing to research team memory invalidates alpha's prompt cache because research is an enrichment source for alpha."""
         # Write initial briefing
         mm.write_team_memory("research", "briefing.json", {
             "items": [{"headline": "Test news", "category": "test"}],
@@ -231,9 +218,6 @@ class TestPromptCache:
         assert "notes.json" in prompt
 
 
-#  Layer 3: Directory Cache 
-
-
 class TestDirCache:
 
     def test_dir_cache_hit(self, mm, mem_dir):
@@ -270,9 +254,6 @@ class TestDirCache:
         assert result == []
 
 
-#  Integration: clear_cache 
-
-
 class TestClearCache:
 
     def test_clear_cache_empties_all_layers(self, mm, mem_dir):
@@ -299,9 +280,6 @@ class TestClearCache:
         mm.clear_cache()
         p2 = mm.build_system_prompt("alpha", "lead")
         assert p1 == p2
-
-
-#  Edge cases 
 
 
 class TestCacheEdgeCases:
@@ -348,9 +326,6 @@ class TestCacheEdgeCases:
         mm.write_shared("common.json", {"version": 2})
         result2 = mm.read_shared("common.json")
         assert result2 == {"version": 2}
-
-
-#  Index integration with cache 
 
 
 class TestIndexCache:

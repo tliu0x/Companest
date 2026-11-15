@@ -1,21 +1,4 @@
-"""
-Companest Memory Search Service
-
-Unified search across active memory and archive with multiple modes:
-- auto: rule-based mode selection (no LLM)
-- exact: keyword matching with weighted scoring
-- semantic: vector similarity when a backend truly supports it
-- hybrid: combine exact + semantic results when available
-
-Until a real semantic backend exists, semantic/hybrid requests degrade
-to exact search instead of pretending the feature is implemented.
-
-Scoring weights for exact mode:
-- Key name match:  0.95
-- Tag match:       0.85
-- Summary match:   0.70
-- Importance overlay: result score *= (0.5 + 0.5 * importance)
-"""
+"""Companest Memory Search Service"""
 
 import json
 import logging
@@ -80,14 +63,7 @@ class SearchResult:
 
 
 class MemorySearchService:
-    """
-    Search service that operates against a MemoryBackend.
-
-    Usage::
-
-        svc = MemorySearchService(backend)
-        results = svc.search("alpha", "market analysis", mode="auto")
-    """
+    """Search service that operates against a MemoryBackend."""
 
     def __init__(self, backend: MemoryBackend) -> None:
         self._backend = backend
@@ -102,20 +78,7 @@ class MemorySearchService:
         include_archive: bool = True,
         explain: bool = False,
     ) -> List[dict]:
-        """
-        Search team memory. Returns list of result dicts.
-
-        Args:
-            team_id: Team to search.
-            query: Search query string.
-            mode: Search mode - "auto", "exact", "semantic", "hybrid".
-            limit: Maximum results to return.
-            include_archive: Whether to include archive results.
-            explain: If True, include _score and _mode in each result.
-
-        Returns:
-            List of result dicts sorted by score descending.
-        """
+        """Search team memory. Returns list of result dicts."""
         resolved_mode = self._choose_mode(mode, query)
         logger.debug(
             "memory_search team=%s query=%r mode=%s->%s limit=%d",
@@ -154,13 +117,7 @@ class MemorySearchService:
         budget_chars: int = 2400,
         include_archive: bool = False,
     ) -> List[dict]:
-        """
-        Select prompt-ready memory snippets relevant to the current task.
-
-        This reuses the existing exact/semantic/hybrid search path, then adds
-        exact matches for meaningful query terms so file-backed memory remains
-        useful for natural-language tasks.
-        """
+        """Select prompt-ready memory snippets relevant to the current task."""
         task = task.strip()
         if not task or limit <= 0 or budget_chars <= 0:
             return []
@@ -244,16 +201,7 @@ class MemorySearchService:
         return selected
 
     def _choose_mode(self, requested: str, query: str) -> str:
-        """
-        Resolve 'auto' to a concrete mode based on backend capabilities
-        and query characteristics.
-
-        Rules:
-        - If backend supports semantic search and query is multi-word
-          natural language -> "hybrid"
-        - If backend supports semantic search and query is short -> "semantic"
-        - Otherwise -> "exact"
-        """
+        """Resolve 'auto' to a concrete mode based on backend capabilities and query characteristics."""
         if requested not in _VALID_MODES:
             logger.warning(
                 "Unknown memory search mode %r, falling back to exact",
@@ -352,12 +300,7 @@ class MemorySearchService:
         return results
 
     def _score_entry(self, query_lower: str, key: str, meta: dict) -> float:
-        """
-        Score a single index entry against a lowercased query.
-
-        Returns 0.0 if no match, otherwise a weighted score with
-        importance overlay.
-        """
+        """Score a single index entry against a lowercased query."""
         base = 0.0
 
         key_lower = key.lower()
@@ -497,10 +440,7 @@ class MemorySearchService:
         *,
         include_archive: bool = True,
     ) -> List[SearchResult]:
-        """
-        Vector similarity search. Delegates to backend if it supports
-        semantic search; otherwise returns empty.
-        """
+        """Vector similarity search."""
         if not self._backend.supports_semantic_search:
             logger.debug(
                 "Backend %s does not support semantic search, skipping",

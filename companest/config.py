@@ -1,17 +1,4 @@
-"""
-Companest Configuration Module
-
-Defines all configuration structures for the Companest framework:
-- APIConfig: FastAPI server configuration
-- MasterConfig: Master connection configuration
-- ProxyConfig: LiteLLM proxy configuration
-- CompanestConfig: Root configuration combining all components
-
-Configuration can be loaded from:
-- Markdown files with JSON/YAML code blocks (.companest/config.md)
-- Direct Python dictionaries
-- Environment variables (for sensitive data like auth tokens)
-"""
+"""Companest Configuration Module"""
 
 import os
 import json
@@ -26,22 +13,10 @@ from .exceptions import ConfigurationError
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
 # Configuration Models
-# =============================================================================
 
 class APIConfig(BaseModel):
-    """
-    Configuration for the Companest FastAPI server.
-
-    Attributes:
-        host: Bind address
-        port: Listen port
-        enable_webhooks: Enable webhook endpoints (for n8n)
-        enable_websocket_events: Enable WebSocket event stream
-        auth_token: Bearer token for API authentication (env: COMPANEST_API_TOKEN)
-        allowed_origins: CORS allowed origins (empty = no CORS)
-    """
+    """Configuration for the Companest FastAPI server."""
     host: str = Field(default="0.0.0.0", description="API bind address")
     port: int = Field(default=8000, ge=1, le=65535, description="API listen port")
     enable_webhooks: bool = Field(default=True, description="Enable webhook endpoints")
@@ -60,24 +35,7 @@ class APIConfig(BaseModel):
 
 
 class MasterConfig(BaseModel):
-    """
-    Configuration for connecting to a master gateway.
-
-    When enabled, Companest connects TO the master as a controller and
-    receives inbound task requests from it. The master is the
-    user-facing gateway (Telegram, web chat, etc.).
-
-    Attributes:
-        enabled: Whether master connection is active
-        host: Master gateway host address
-        port: Master gateway port
-        auth_token: Auth token (resolved from COMPANEST_MASTER_TOKEN env var if not set)
-        auth_password: Optional password authentication
-        max_concurrent_tasks: Max tasks to process concurrently
-        task_timeout: Timeout for individual task processing (seconds)
-        reconnect: Auto-reconnect on disconnection
-        max_reconnect_attempts: Max reconnection attempts
-    """
+    """Configuration for connecting to a master gateway."""
     enabled: bool = Field(default=False, description="Enable master connection")
     host: str = Field(default="", description="Master host address")
     port: int = Field(default=18789, ge=1, le=65535, description="Master gateway port")
@@ -104,18 +62,7 @@ class MasterConfig(BaseModel):
 
 
 class ProxyConfig(BaseModel):
-    """
-    Configuration for LiteLLM proxy -key isolation + cost tracking.
-
-    When enabled, Pi agents route all LLM calls through the proxy
-    using virtual keys instead of real API keys.
-
-    Attributes:
-        enabled: Whether proxy routing is active
-        base_url: LiteLLM proxy URL (e.g. http://litellm-host:4000)
-        master_key: LiteLLM admin key for management API (env: LITELLM_MASTER_KEY)
-        default_key: Default virtual key for Pi agents (env: LITELLM_DEFAULT_KEY)
-    """
+    """Configuration for LiteLLM proxy -key isolation + cost tracking."""
     enabled: bool = Field(default=False, description="Enable LiteLLM proxy routing")
     base_url: str = Field(default="http://localhost:4000", description="LiteLLM proxy URL")
     master_key: Optional[str] = Field(None, repr=False, description="LiteLLM admin key (env: LITELLM_MASTER_KEY)")
@@ -181,22 +128,7 @@ class MCPServerConfig(BaseModel):
 
 
 class CompanestConfig(BaseModel):
-    """
-    Root Companest configuration.
-
-    This is the main configuration object that combines all Companest components:
-    - api: FastAPI server configuration
-    - master: Master connection configuration
-    - proxy: LiteLLM proxy configuration
-
-    Configuration can be loaded from:
-    - Markdown files (.companest/config.md)
-    - JSON/YAML files
-    - Python dictionaries
-
-    Example:
-        config = CompanestConfig.from_markdown(".companest/config.md")
-    """
+    """Root Companest configuration."""
     api: APIConfig = Field(
         default_factory=APIConfig,
         description="API server configuration"
@@ -249,18 +181,7 @@ class CompanestConfig(BaseModel):
 
     @classmethod
     def from_markdown(cls, path: Union[str, Path]) -> "CompanestConfig":
-        """
-        Load configuration from a Markdown file.
-
-        Args:
-            path: Path to the Markdown file
-
-        Returns:
-            CompanestConfig instance
-
-        Raises:
-            ConfigurationError: If file not found or invalid format
-        """
+        """Load configuration from a Markdown file."""
         from .parser import MarkdownConfigParser
 
         path = Path(path)
@@ -273,17 +194,7 @@ class CompanestConfig(BaseModel):
 
     @classmethod
     def from_markdown_content(cls, content: str) -> "CompanestConfig":
-        """
-        Parse configuration from Markdown content.
-
-        Supports JSON, YAML code blocks and YAML frontmatter.
-
-        Args:
-            content: Markdown content string
-
-        Returns:
-            CompanestConfig instance
-        """
+        """Parse configuration from Markdown content."""
         from .parser import MarkdownConfigParser
 
         parser = MarkdownConfigParser(allow_env_interpolation=True)
@@ -305,21 +216,7 @@ class CompanestConfig(BaseModel):
 
     @classmethod
     def discover_config(cls, base_path: Union[str, Path] = ".") -> Optional["CompanestConfig"]:
-        """
-        Discover and load configuration from standard locations.
-
-        Search order:
-        1. .companest/config.md
-        2. .companest/config.json
-        3. companest.config.md
-        4. companest.config.json
-
-        Args:
-            base_path: Base directory to search from
-
-        Returns:
-            CompanestConfig if found, None otherwise
-        """
+        """Discover and load configuration from standard locations."""
         base = Path(base_path)
         search_paths = [
             base / ".companest" / "config.md",

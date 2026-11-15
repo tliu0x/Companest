@@ -1,9 +1,4 @@
-"""
-Unit tests for companest/knowledge/feeds.py - mock-based (no network).
-
-Tests rate limiting, caching, each fetcher's parsing logic,
-and the multi-source aggregation function.
-"""
+"""Unit tests for companest/knowledge/feeds.py - mock-based (no network)."""
 
 import asyncio
 import json
@@ -44,8 +39,6 @@ def clear_caches():
     _last_request_time.clear()
 
 
-#  Cache Tests 
-
 class TestCache:
     def test_cache_key_deterministic(self):
         k1 = _cache_key("f", "a", "b", x=1)
@@ -71,8 +64,6 @@ class TestCache:
         assert "expired" not in _cache  # cleaned up
 
 
-#  Rate Limiting Tests 
-
 class TestRateLimit:
     @pytest.mark.asyncio
     async def test_rate_limit_first_call_immediate(self):
@@ -90,8 +81,6 @@ class TestRateLimit:
         elapsed = time.monotonic() - start
         assert elapsed >= 0.15  # should wait ~0.2s
 
-
-#  Brave Search Tests 
 
 class TestBraveSearch:
     @pytest.mark.asyncio
@@ -153,8 +142,6 @@ class TestBraveSearch:
         assert "Connection refused" in items[0]["error"]
 
 
-#  Reddit Tests 
-
 class TestFetchReddit:
     @pytest.mark.asyncio
     async def test_successful_fetch(self):
@@ -199,8 +186,6 @@ class TestFetchReddit:
         assert "error" in items[0]
 
 
-#  Hacker News Tests 
-
 class TestFetchHN:
     @pytest.mark.asyncio
     async def test_successful_fetch(self):
@@ -243,8 +228,6 @@ class TestFetchHN:
         assert len(items) == 1
         assert "error" in items[0]
 
-
-#  RSS Tests 
 
 class TestFetchRSS:
     RSS_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -318,8 +301,6 @@ class TestFetchRSS:
         assert "error" in items[0]
 
 
-#  X/Twitter Tests 
-
 class TestFetchX:
     @pytest.mark.asyncio
     async def test_no_bearer_token(self):
@@ -352,8 +333,6 @@ class TestFetchX:
         assert items[0]["source"] == "x/@testuser"
         assert "Hello world" in items[0]["snippet"]
 
-
-#  OpenBB Tests 
 
 class TestFetchOpenBB:
     @pytest.mark.asyncio
@@ -556,8 +535,6 @@ class TestFetchMultiSource:
         assert items[0]["source"] == "brave"
         assert "error" in items[1]
 
-
-#  Close Client Tests 
 
 class TestCloseClient:
     @pytest.mark.asyncio

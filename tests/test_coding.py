@@ -1,12 +1,4 @@
-"""
-Tests for the coding team system.
-
-Tests:
-1. Workspace registry (load, validate, context)
-2. Git tool functions (mocked subprocess)
-3. Tool resolution (coder/code-reviewer presets)
-4. Coding team config validation
-"""
+"""Tests for the coding team system."""
 
 import asyncio
 import json
@@ -23,8 +15,6 @@ from companest.tools import (
     resolve_tool_names,
 )
 
-
-#  1. Workspace Registry 
 
 class TestWorkspace:
     """Test the Workspace dataclass."""
@@ -136,8 +126,6 @@ class TestWorkspaceRegistry:
         assert available[0]["id"] == "proj"
         assert available[0]["exists"] is True
 
-
-#  2. Git Tools (mocked) 
 
 class TestGitTools:
     """Test git tool functions with mocked subprocess."""
@@ -265,8 +253,6 @@ class TestGitTools:
             assert "up-to-date" in result
 
 
-#  3. Tool Resolution 
-
 class TestCoderToolResolution:
     """Test coder and code-reviewer preset resolution."""
 
@@ -328,8 +314,6 @@ class TestCoderToolResolution:
         }
 
 
-#  4. Team Config 
-
 class TestCodingTeamConfig:
     """Test the coding team config files."""
 
@@ -359,8 +343,6 @@ class TestCodingTeamConfig:
         assert "security" in content.lower()
 
 
-#  5. Workspaces Config 
-
 class TestWorkspacesConfig:
     """Test the workspaces.json file."""
 
@@ -372,8 +354,6 @@ class TestWorkspacesConfig:
         assert "companest" in data
         assert "path" in data["companest"]
 
-
-#  6. Integration 
 
 class TestWorkspaceOrchestratorIntegration:
     """Test workspace injection into orchestrator run_team."""

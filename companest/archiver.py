@@ -1,15 +1,4 @@
-"""
-Companest Memory Archiver
-
-Backs up all team memory to S3 on a periodic schedule.
-Managed by the Memory meta-team's archivist Pi.
-
-Features:
-- Full snapshot of .companest/ directory  S3
-- Incremental change detection (only upload changed files)
-- Configurable schedule (default: every 4 hours)
-- Cleanup old backups (retention policy)
-"""
+"""Companest Memory Archiver"""
 
 import hashlib
 import json
@@ -28,13 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryArchiver:
-    """
-    Archives .companest/ memory to S3.
-
-    Two modes:
-    - snapshot: tar.gz the entire .companest/ directory
-    - incremental: track file hashes, only upload changed files
-    """
+    """Archives .companest/ memory to S3."""
 
     def __init__(
         self,
@@ -114,11 +97,7 @@ class MemoryArchiver:
         return changed
 
     async def backup_snapshot(self) -> Dict[str, Any]:
-        """
-        Create a full tar.gz snapshot and upload to S3.
-
-        Returns metadata about the backup.
-        """
+        """Create a full tar.gz snapshot and upload to S3."""
         s3 = self._get_s3()
         base = self.memory.base_path
         now = datetime.now(timezone.utc)
@@ -160,11 +139,7 @@ class MemoryArchiver:
                 os.unlink(tmp_path)
 
     async def backup_incremental(self) -> Dict[str, Any]:
-        """
-        Upload only changed files since last backup.
-
-        Returns metadata about the backup.
-        """
+        """Upload only changed files since last backup."""
         s3 = self._get_s3()
         changed = self.get_changed_files()
         now = datetime.now(timezone.utc)
@@ -205,11 +180,7 @@ class MemoryArchiver:
         return metadata
 
     async def cleanup_old_backups(self) -> int:
-        """
-        Delete S3 snapshots older than retention_days.
-
-        Returns number of objects deleted.
-        """
+        """Delete S3 snapshots older than retention_days."""
         s3 = self._get_s3()
         prefix = f"{self.prefix}/snapshots/"
         cutoff = datetime.now(timezone.utc).timestamp() - (self.retention_days * 86400)

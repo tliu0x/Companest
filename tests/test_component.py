@@ -14,9 +14,6 @@ from companest.memory.manager import MemoryManager
 from companest.team import TeamConfig
 
 
-#  Test CompanyComponent protocol conformance 
-
-
 @dataclass
 class DummyComponent:
     """A minimal CompanyComponent implementation for testing."""
@@ -65,9 +62,6 @@ def test_component_properties():
     assert comp.config.id == "acme"
     assert comp.teams() == []
     assert comp.schedules() == []
-
-
-#  Test CompanyMemoryNamespace 
 
 
 @pytest.fixture
@@ -155,9 +149,6 @@ def test_namespace_isolation(manager, memory_dir):
 
     assert ns_acme.read_shared("secret.json") == {"acme": True}
     assert ns_beta.read_shared("secret.json") == {"beta": True}
-
-
-#  Test CompanyRegistry.register_component 
 
 
 def test_registry_register_component():

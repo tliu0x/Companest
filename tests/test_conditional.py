@@ -161,7 +161,6 @@ class TestConditionalExecution:
         assert result == "step1 result"
 
 
-
 def test_conditional_passes_memory_task_hint(tmp_path):
     team = _make_team(str(tmp_path), ["lead"])
     team.pis["lead"].run = AsyncMock(side_effect=[

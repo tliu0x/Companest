@@ -1,20 +1,4 @@
-"""
-Companest Job Manager
-
-Manages the lifecycle of jobs submitted to the Companest control panel.
-Jobs flow through the pipeline: PENDING  QUEUED  DISPATCHED  RUNNING  COMPLETED/FAILED/CANCELLED
-
-Persistence via aiosqlite to .companest/jobs.db.
-
-Usage:
-    manager = JobManager(orchestrator)
-    await manager.start()
-
-    job_id = await manager.submit("Analyze this codebase")
-    job = await manager.get_job(job_id)
-
-    await manager.stop()
-"""
+"""Companest Job Manager"""
 
 import uuid
 import asyncio
@@ -58,22 +42,7 @@ VALID_TRANSITIONS: Dict[JobStatus, frozenset] = {
 
 @dataclass
 class Job:
-    """
-    Represents a job submitted to the Companest control panel.
-
-    Attributes:
-        id: Unique job identifier
-        task: The task description/prompt
-        status: Current job status
-        context: Additional context for the task
-        subtasks: List of subtask dicts (from orchestrator)
-        result: Final result text
-        error: Error message if failed
-        created_at: When the job was submitted
-        started_at: When execution began
-        completed_at: When execution finished
-        submitted_by: Who submitted the job (e.g., "n8n", "cli", "api")
-    """
+    """Represents a job submitted to the Companest control panel."""
     id: str
     task: str
     status: JobStatus = JobStatus.PENDING
@@ -116,36 +85,12 @@ class Job:
 
 
 class JobManager:
-    """
-    Manages the lifecycle of jobs in the Companest control panel.
-
-    Features:
-    - Async job queue with configurable worker count
-    - Job persistence to SQLite via aiosqlite
-    - Job cancellation support
-    - Status tracking and querying
-
-    Example:
-        manager = JobManager(orchestrator, data_dir=Path(".companest"))
-        await manager.start(num_workers=3)
-
-        job_id = await manager.submit("Generate unit tests for auth module")
-        job = await manager.get_job(job_id)
-
-        jobs = await manager.list_jobs(status=JobStatus.COMPLETED)
-        await manager.stop()
-    """
+    """Manages the lifecycle of jobs in the Companest control panel."""
 
     MAX_IN_MEMORY_JOBS = 500
 
     def __init__(self, orchestrator=None, data_dir: Optional[Path] = None):
-        """
-        Initialize the JobManager.
-
-        Args:
-            orchestrator: CompanestOrchestrator instance for executing jobs
-            data_dir: Directory for job database
-        """
+        """Initialize the JobManager."""
         self.orchestrator = orchestrator
         self._data_dir = data_dir or Path(".companest")
         self._jobs: Dict[str, Job] = {}
@@ -170,12 +115,7 @@ class JobManager:
         logger.info(f"[JobManager] Job {job.id}: {old.value}  {new_status.value}")
 
     async def start(self, num_workers: int = 2) -> None:
-        """
-        Start the job manager with worker tasks.
-
-        Args:
-            num_workers: Number of concurrent worker tasks
-        """
+        """Start the job manager with worker tasks."""
         if self._running:
             return
 
@@ -241,17 +181,7 @@ class JobManager:
         submitted_by: str = "api",
         company_id: Optional[str] = None,
     ) -> str:
-        """
-        Submit a new job.
-
-        Args:
-            task: The task description/prompt
-            context: Optional context dict
-            submitted_by: Source identifier
-
-        Returns:
-            Job ID
-        """
+        """Submit a new job."""
         ctx = dict(context or {})
         # Resolve company_id: explicit param takes priority, then context
         effective_company_id = company_id or ctx.get("company_id")
@@ -292,14 +222,7 @@ class JobManager:
         offset: int = 0,
         company_id: Optional[str] = None,
     ) -> List[Job]:
-        """
-        List jobs, optionally filtered by status.
-
-        Args:
-            status: Filter by job status
-            limit: Max results to return
-            offset: Pagination offset
-        """
+        """List jobs, optionally filtered by status."""
         jobs = list(self._jobs.values())
 
         if status:
@@ -375,16 +298,7 @@ class JobManager:
         return snapshot
 
     async def pause_for_approval(self, job_id: str, reason: str) -> bool:
-        """
-        Pause a running job to wait for human approval.
-
-        Args:
-            job_id: Job ID to pause
-            reason: Why approval is needed
-
-        Returns:
-            True if paused successfully
-        """
+        """Pause a running job to wait for human approval."""
         job = self._jobs.get(job_id)
         if not job:
             raise JobError(f"Job not found: {job_id}")
@@ -397,17 +311,7 @@ class JobManager:
         return True
 
     async def resume_job(self, job_id: str, approved: bool, feedback: Optional[str] = None) -> bool:
-        """
-        Resume a job that is waiting for approval.
-
-        Args:
-            job_id: Job ID to resume
-            approved: Whether the job is approved to continue
-            feedback: Optional feedback to inject into job context
-
-        Returns:
-            True if resumed/cancelled successfully
-        """
+        """Resume a job that is waiting for approval."""
         job = self._jobs.get(job_id)
         if not job:
             raise JobError(f"Job not found: {job_id}")
@@ -437,15 +341,7 @@ class JobManager:
         return True
 
     async def cancel_job(self, job_id: str) -> bool:
-        """
-        Cancel a pending or running job.
-
-        Args:
-            job_id: Job ID to cancel
-
-        Returns:
-            True if cancelled, False if not cancellable
-        """
+        """Cancel a pending or running job."""
         job = self._jobs.get(job_id)
         if not job:
             raise JobError(f"Job not found: {job_id}")
@@ -545,9 +441,7 @@ class JobManager:
         await self._persist_job(job)
         self._evict_completed_jobs()
 
-    # -------------------------------------------------------------------------
     # Persistence (aiosqlite)
-    # -------------------------------------------------------------------------
 
     async def _init_db(self) -> None:
         """Initialize the SQLite database."""

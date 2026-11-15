@@ -1,17 +1,4 @@
-"""
-Companest Qdrant Backend  Vector Store Memory Backend
-
-Wraps a FileBackend for durable read/write and layers Qdrant on top for
-semantic search. Every write/append/delete synchronizes the vector index.
-
-Requires:
-- qdrant-client >= 1.9.0
-- A running Qdrant instance (or uses in-memory/local for dev)
-
-The backend embeds memory entry summaries + key names using a lightweight
-embedding model via Qdrant's built-in FastEmbed integration, so no separate
-embedding service is needed.
-"""
+"""Companest Qdrant Backend  Vector Store Memory Backend"""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -28,15 +15,7 @@ _VECTOR_SIZE = 384  # bge-small-en-v1.5 output dimension
 
 
 class QdrantBackend(MemoryBackend):
-    """
-    Hybrid memory backend: FileBackend for storage + Qdrant for semantic search.
-
-    Data flow:
-    - read/write/append/delete  delegated to FileBackend (files remain source of truth)
-    - write/append/delete also update the Qdrant vector index
-    - semantic_search  Qdrant similarity query
-    - exact search (get_index, search_archive)  delegated to FileBackend
-    """
+    """Hybrid memory backend: FileBackend for storage + Qdrant for semantic search."""
 
     def __init__(
         self,
@@ -173,7 +152,6 @@ class QdrantBackend(MemoryBackend):
         import uuid
         return str(uuid.UUID(hashlib.md5(key.encode()).hexdigest()))
 
-    #  Capability flags 
 
     @property
     def supports_semantic_search(self) -> bool:
@@ -187,7 +165,6 @@ class QdrantBackend(MemoryBackend):
     def supports_native_compaction(self) -> bool:
         return False
 
-    #  Required operations (delegate to FileBackend, sync index) 
 
     def read(self, team_id: str, key: str) -> Any:
         return self._file_backend.read(team_id, key)
@@ -244,7 +221,6 @@ class QdrantBackend(MemoryBackend):
     def get_all_stats(self) -> Dict[str, Any]:
         return self._file_backend.get_all_stats()
 
-    #  Snapshot (delegate to FileBackend) 
 
     def export_snapshot(self, team_id: str) -> Dict[str, Any]:
         return self._file_backend.export_snapshot(team_id)
@@ -264,7 +240,6 @@ class QdrantBackend(MemoryBackend):
         except Exception as e:
             logger.warning("Failed to re-index team %s after restore: %s", team_id, e)
 
-    #  Semantic search 
 
     def semantic_search(
         self,
@@ -274,11 +249,7 @@ class QdrantBackend(MemoryBackend):
         limit: int = 20,
         include_archive: bool = True,
     ) -> List[Dict[str, Any]]:
-        """
-        Vector similarity search over team memory entries.
-
-        Returns list of dicts with 'key', 'score', 'source', and metadata.
-        """
+        """Vector similarity search over team memory entries."""
         self._ensure_collection(team_id)
         client = self._get_client()
         name = self._collection_name(team_id)
@@ -305,7 +276,6 @@ class QdrantBackend(MemoryBackend):
 
         return results
 
-    #  Helpers 
 
     @property
     def manager(self) -> MemoryManager:
@@ -313,12 +283,7 @@ class QdrantBackend(MemoryBackend):
         return self._file_backend.manager
 
     def reindex_team(self, team_id: str) -> int:
-        """
-        Full reindex of a team's memory into Qdrant.
-
-        Useful after bulk import or if the index is out of sync.
-        Returns the number of entries indexed.
-        """
+        """Full reindex of a team's memory into Qdrant."""
         self._ensure_collection(team_id)
         index = self._file_backend.get_index(team_id)
         if not index:

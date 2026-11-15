@@ -1,15 +1,4 @@
-"""
-Companest Dreamer  OS-Inspired Memory Consolidation Engine
-
-Borrows from OS memory management concepts:
-- LSM-style compaction: score  compact  promote  GC
-- CoW snapshots: snapshot index before destructive ops, restore on failure
-- Page daemon GC: evict low-importance expired short-tier entries
-- Spotlight indexing: generate one-line summaries for semantic search readiness
-
-Nightly dream: score importance  compact related  promote to long-tier  GC.
-Weekly deep dream: merge long-tier entries into denser summaries.
-"""
+"""Companest Dreamer  OS-Inspired Memory Consolidation Engine"""
 
 import copy
 import json
@@ -84,13 +73,7 @@ class DreamerError(CompanestError):
 
 
 class Dreamer:
-    """
-    OS-inspired memory consolidation engine.
-
-    Nightly dream: score importance  compact related  promote to long-tier  GC.
-    Weekly deep dream: merge long-tier entries into denser summaries.
-    CoW snapshot before any destructive operation.
-    """
+    """OS-inspired memory consolidation engine."""
 
     SCORE_BATCH_SIZE = 15   # Max entries per LLM scoring call
     COMPACT_BATCH_SIZE = 10  # Max entries per compaction call
@@ -111,14 +94,9 @@ class Dreamer:
         self.min_importance_to_keep = min_importance_to_keep
         self.max_access_for_gc = max_access_for_gc
 
-    #  Public API 
 
     async def run_all_dreams(self, dry_run: bool = False) -> Dict[str, Any]:
-        """Nightly: iterate all teams, run dream for each. Returns stats.
-
-        Args:
-            dry_run: If True, return what would be done without modifying data.
-        """
+        """Nightly: iterate all teams, run dream for each. Returns stats."""
         stats: Dict[str, Any] = {}
         for team_id in self.memory.list_teams():
             try:
@@ -134,17 +112,7 @@ class Dreamer:
         return stats
 
     async def run_team_dream(self, team_id: str, dry_run: bool = False) -> Dict[str, Any]:
-        """
-        Dream for one team:
-        1. Snapshot index (CoW)
-        2. Score importance for unscored short-tier entries
-        3. Compact related short-tier entries into long-tier summaries
-        4. GC: delete low-importance expired short-tier entries
-        5. On failure: restore snapshot
-
-        Args:
-            dry_run: If True, return plan without executing.
-        """
+        """Dream for one team: 1."""
         index = self.memory.get_memory_index(team_id)
         short_entries = {
             k: v for k, v in index.items()
@@ -289,7 +257,6 @@ class Dreamer:
                 stats[team_id] = {"error": str(e)}
         return stats
 
-    #  CoW Snapshot 
 
     def _snapshot_index(self, team_id: str) -> Dict[str, dict]:
         """Copy current index as snapshot."""
@@ -300,16 +267,11 @@ class Dreamer:
         logger.warning(f"[Dreamer] Restoring index snapshot for {team_id}")
         self.memory._write_index(team_id, snapshot)
 
-    #  Importance Scoring 
 
     async def _score_importance(
         self, team_id: str, entries: Dict[str, Any],
     ) -> Dict[str, float]:
-        """
-        Call LLM to score importance and generate summaries.
-        Updates index with scores and summaries.
-        Returns {key: importance_float}.
-        """
+        """Call LLM to score importance and generate summaries."""
         entries_json = json.dumps(
             {k: _truncate_content(v) for k, v in entries.items()},
             ensure_ascii=False, indent=2,
@@ -341,15 +303,11 @@ class Dreamer:
 
         return result
 
-    #  Compaction 
 
     async def _compact_entries(
         self, team_id: str, entries: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        """
-        Compact related short-tier entries into consolidated long-tier entries.
-        Writes the new entry, promotes to long-tier, and removes originals.
-        """
+        """Compact related short-tier entries into consolidated long-tier entries."""
         entries_json = json.dumps(
             {k: _truncate_content(v) for k, v in entries.items()},
             ensure_ascii=False, indent=2,
@@ -423,16 +381,9 @@ class Dreamer:
 
         return [compacted]
 
-    #  GC (Page Daemon eviction) 
 
     def _gc_expired(self, team_id: str) -> List[str]:
-        """
-        Archive short-tier entries that are:
-        - older than short_tier_max_age_hours AND
-        - importance < min_importance_to_keep AND
-        - access_count < max_access_for_gc
-        Returns list of archived keys.
-        """
+        """Archive short-tier entries that are:"""
         index = self.memory.get_memory_index(team_id)
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=self.short_tier_max_age_hours)
@@ -456,7 +407,6 @@ class Dreamer:
 
         return deleted
 
-    #  Overview Generation 
 
     async def _generate_overview(self, team_id: str) -> Optional[str]:
         """Generate team-level overview from long-tier summaries."""
@@ -483,7 +433,6 @@ class Dreamer:
         self.memory._invalidate_prompt_cache_for_team(team_id)
         return overview
 
-    #  Dream Log 
 
     def _write_dream_log(self, stats: Dict[str, Any]) -> None:
         """Persist dream run stats to .companest/dream_log.json (append-only)."""
@@ -512,7 +461,6 @@ class Dreamer:
         except Exception as e:
             logger.warning(f"[Dreamer] Failed to write dream log: {e}")
 
-    #  LLM Helper 
 
     @staticmethod
     def _detect_provider(model: str, proxy_enabled: bool = False) -> str:
@@ -520,10 +468,7 @@ class Dreamer:
         return detect_provider(model, proxy_enabled)
 
     async def _call_llm(self, prompt: str) -> str:
-        """
-        Minimal LLM call. Routes to Anthropic or OpenAI-compatible SDK
-        based on the model name.
-        """
+        """Minimal LLM call. Routes to Anthropic or OpenAI-compatible SDK based on the model name."""
         proxy_enabled = bool(self.proxy_config and self.proxy_config.enabled)
         provider = self._detect_provider(self.model, proxy_enabled)
 

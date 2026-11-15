@@ -1,12 +1,4 @@
-"""
-Companest Workspace Registry
-
-Manages project workspaces  each workspace points to a local git repo
-that coding agents can operate on. Provides path isolation, file operations,
-and context injection for Pi agents.
-
-Config file: .companest/workspaces.json
-"""
+"""Companest Workspace Registry"""
 
 import fnmatch
 import json
@@ -52,19 +44,7 @@ class Workspace:
         return absolute
 
     def read_file(self, relative_path: str, encoding: str = "utf-8") -> str:
-        """Read a file within the workspace.
-
-        Args:
-            relative_path: Path relative to workspace root.
-            encoding: File encoding (default utf-8).
-
-        Returns:
-            File contents as string.
-
-        Raises:
-            ValueError: If path is outside workspace.
-            FileNotFoundError: If file doesn't exist.
-        """
+        """Read a file within the workspace."""
         resolved = self.resolve_path(relative_path)
         if resolved is None:
             raise ValueError(f"Path '{relative_path}' is outside workspace '{self.id}'")
@@ -73,21 +53,7 @@ class Workspace:
         return resolved.read_text(encoding=encoding)
 
     def write_file(self, relative_path: str, content: str, encoding: str = "utf-8") -> str:
-        """Write content to a file within the workspace.
-
-        Creates parent directories if needed.
-
-        Args:
-            relative_path: Path relative to workspace root.
-            content: File content to write.
-            encoding: File encoding (default utf-8).
-
-        Returns:
-            Absolute path of the written file.
-
-        Raises:
-            ValueError: If path is outside workspace.
-        """
+        """Write content to a file within the workspace."""
         resolved = self.resolve_path(relative_path)
         if resolved is None:
             raise ValueError(f"Path '{relative_path}' is outside workspace '{self.id}'")
@@ -96,15 +62,7 @@ class Workspace:
         return str(resolved)
 
     def list_files(self, glob_pattern: str = "**/*", max_results: int = 500) -> List[str]:
-        """List files in the workspace matching a glob pattern.
-
-        Args:
-            glob_pattern: Glob pattern relative to workspace root.
-            max_results: Maximum number of results.
-
-        Returns:
-            List of relative paths matching the pattern.
-        """
+        """List files in the workspace matching a glob pattern."""
         root = Path(self.path)
         if not root.is_dir():
             return []
@@ -119,16 +77,7 @@ class Workspace:
 
     def search_content(self, pattern: str, glob_filter: str = "**/*",
                        max_results: int = 50) -> List[Dict[str, Any]]:
-        """Search file contents for a pattern (simple substring match).
-
-        Args:
-            pattern: Text pattern to search for.
-            glob_filter: Glob pattern to filter files.
-            max_results: Maximum number of matching lines to return.
-
-        Returns:
-            List of {"file": relative_path, "line": line_number, "text": line_content}.
-        """
+        """Search file contents for a pattern (simple substring match)."""
         root = Path(self.path)
         if not root.is_dir():
             return []
@@ -151,15 +100,7 @@ class Workspace:
 
 
 class WorkspaceRegistry:
-    """
-    Load and manage project workspaces from .companest/workspaces.json.
-
-    Usage:
-        registry = WorkspaceRegistry("/path/to/.companest")
-        registry.load()
-        ws = registry.get("companest")
-        ws.path  # "/home/ubuntu/Companest"
-    """
+    """Load and manage project workspaces from .companest/workspaces.json."""
 
     def __init__(self, base_path: str):
         self._base_path = Path(base_path)

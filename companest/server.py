@@ -1,15 +1,4 @@
-"""
-Companest FastAPI Control Panel Server
-
-Provides HTTP API endpoints for managing Pi Agent Teams,
-submitting jobs, and monitoring system health.
-
-Designed to be consumed by n8n via webhooks and HTTP requests.
-
-Usage:
-    server = CompanestAPIServer(config, job_manager, orchestrator)
-    app = server.create_app()
-"""
+"""Companest FastAPI Control Panel Server"""
 
 import logging
 import asyncio
@@ -29,19 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class CompanestAPIServer:
-    """
-    FastAPI-based control panel server for Companest.
-
-    Endpoints:
-    - POST    /api/jobs              - Submit job
-    - GET     /api/jobs/{id}         - Job status
-    - GET     /api/jobs              - List jobs
-    - POST    /api/jobs/{id}/cancel  - Cancel job
-    - GET     /api/fleet/status      - Fleet overview
-    - WS      /ws/events             - Real-time event stream
-    - POST    /api/webhooks/n8n      - n8n webhook trigger
-    - GET     /health                - API health check
-    """
+    """FastAPI-based control panel server for Companest."""
 
     def __init__(
         self,
@@ -322,7 +299,6 @@ class CompanestAPIServer:
                 "This is allowed only because debug mode is enabled."
             )
 
-        # --- Request/Response Models ---
 
         class SubmitJobRequest(BaseModel):
             task: str = Field(..., min_length=1, max_length=50000)
@@ -335,7 +311,6 @@ class CompanestAPIServer:
             context: Optional[Dict[str, Any]] = None
             callback_url: Optional[str] = Field(default=None, max_length=2000)
 
-        # --- Health ---
 
         @app.get("/health")
         async def health_check():
@@ -355,7 +330,6 @@ class CompanestAPIServer:
                 "capabilities": self._get_api_capabilities(),
             }
 
-        # --- Job Management ---
 
         @app.post("/api/jobs")
         async def submit_job(req: SubmitJobRequest):
@@ -437,7 +411,6 @@ class CompanestAPIServer:
             except JobError as e:
                 raise HTTPException(status_code=404, detail=str(e))
 
-        # --- Fleet ---
 
         @app.get("/api/fleet/status")
         async def fleet_status():
@@ -467,7 +440,6 @@ class CompanestAPIServer:
                 status["companies"] = companies
             return status
 
-        # --- WebSocket Events ---
 
         if self.config.api.enable_websocket_events:
 
@@ -532,7 +504,6 @@ class CompanestAPIServer:
                     except ValueError:
                         pass
 
-        # --- n8n Webhook ---
 
         if self.config.api.enable_webhooks:
 
@@ -562,7 +533,6 @@ class CompanestAPIServer:
                     logger.error(f"n8n webhook failed: {e}")
                     raise HTTPException(status_code=500, detail="Internal server error")
 
-        # --- v2: Pi Agent Team endpoints ---
 
         from .modes import VALID_MODES as _VALID_MODES
         _modes_pattern = r"^(" + "|".join(_VALID_MODES) + r")$"
@@ -763,7 +733,6 @@ class CompanestAPIServer:
                 return {"note": "Orchestrator not available"}
             return self.orchestrator.get_teams_status()
 
-        # --- Company Management ---
 
         class CompanyCreateRequest(BaseModel):
             id: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -1061,7 +1030,6 @@ class CompanestAPIServer:
             })
             return {"status": "binding_added", "id": company_id, "bindings_count": len(updated.bindings)}
 
-        # --- Global Bindings ---
 
         @app.get("/api/bindings")
         async def get_global_bindings():
@@ -1079,7 +1047,6 @@ class CompanestAPIServer:
             self.orchestrator.company_registry.save_global_bindings(parsed)
             return {"status": "saved", "count": len(parsed)}
 
-        # --- Public Knowledge & Digest Routers (v1) ---
         import os
         if os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true"):
             from .knowledge.public import create_public_knowledge_router

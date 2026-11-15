@@ -1,18 +1,4 @@
-"""
-Council Mode Unit Tests
-
-Tests for AgentTeam.run_council():
-1. Single Pi -fallback to default run()
-2. Two Pis -independent answers -synthesis
-3. All Pis fail -TeamError
-4. One Pi fails, one succeeds -direct return (no synthesis needed)
-5. Archetype labels in council synthesis
-6. No archetype -anonymous perspective labels (backward compat)
-7. Rubric parsing (string -list[dict])
-8. Judge prompt construction
-9. Filter logic (mock Pi returns JSON scores)
-10. No rubric -backward compatible (no judge step)
-"""
+"""Council Mode Unit Tests"""
 
 import asyncio
 import json
@@ -175,8 +161,6 @@ def _make_team_with_archetypes(tmpdir: str) -> AgentTeam:
 
 
 class TestPiArchetypes:
-    """Tests for _get_pi_archetypes() helper."""
-
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
 
@@ -250,8 +234,6 @@ class TestCouncilArchetypeLabels:
         assert "three dimensions" not in prompt
         assert "different analysts" in prompt
 
-
-# -- Rubric Parsing Tests ----------------------------------------
 
 class TestRubricParsing:
     """Test _parse_rubric() helper."""
@@ -352,8 +334,6 @@ class TestJudgeResponseParsing:
         assert result["scores"]["a"]["weighted"] == 10.0
 
 
-# -- Filter Logic Tests ------------------------------------------
-
 class TestFilterPerspectives:
     """Test AgentTeam._filter_perspectives()."""
 
@@ -440,8 +420,6 @@ class TestFilterPerspectives:
         filtered = CouncilMode()._filter_perspectives(team, perspectives, judge_scores)
         assert len(filtered) == 3  # No scores -> no filtering
 
-
-# -- Council with Rubric Integration Tests -----------------------
 
 class TestCouncilWithRubric:
     """Test full council flow with judge scoring."""
@@ -558,8 +536,6 @@ class TestCouncilWithRubric:
         assert "Judge Evaluation" not in synthesis_prompt
 
 
-# -- TeamConfig.from_markdown Rubric Tests -----------------------
-
 class TestTeamConfigRubric:
     """Test rubric parsing in TeamConfig.from_markdown()."""
 
@@ -596,7 +572,6 @@ class TestTeamConfigRubric:
         )
         config = TeamConfig.from_markdown(self.team_dir / "team.md")
         assert config.rubric is None
-
 
 
 def test_council_passes_memory_task_hint(tmp_path):

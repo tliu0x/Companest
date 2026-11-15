@@ -1,14 +1,3 @@
-"""
-Companest CEO Engine
-
-Structured operating cycle for company CEO agents.
-Replaces the one-line cycle_prompt with a 4-step operational loop:
-1. Status check (read memory)
-2. Analysis & decision
-3. Execute (dispatch to teams)
-4. Record (write back to memory)
-"""
-
 import logging
 from typing import Dict, List, Optional
 

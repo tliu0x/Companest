@@ -1,10 +1,4 @@
-"""
-Built-in agent tools: workspace file access, shell, and web.
-
-File and shell tools operate only inside the workspace attached to the run
-(ToolContext.extra["workspace_path"]); without a workspace they are not
-offered at all. Bash stays in DEFAULT_TOOLS_DENY unless a Pi opts in.
-"""
+"""Built-in agent tools: workspace file access, shell, and web."""
 
 import asyncio
 import ipaddress

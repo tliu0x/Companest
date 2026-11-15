@@ -1,10 +1,4 @@
-"""
-Companest Model Routing — Unified provider/endpoint resolution
-
-Single source of truth for mapping model names to providers, base URLs,
-and API key environment variables. Used by both Pi and Dreamer to avoid
-duplicated prefix tables and inconsistent fallback logic.
-"""
+"""Companest Model Routing — Unified provider/endpoint resolution"""
 
 import os
 import logging
@@ -66,14 +60,10 @@ def resolve_model_endpoint(
     model: str,
     proxy_config: Optional["ProxyConfig"] = None,
 ) -> ResolvedEndpoint:
-    """Resolve provider, base_url, api_key, and wrapper need for a model.
-
-    Raises ConfigurationError when a required API key is missing.
-    """
+    """Resolve provider, base_url, api_key, and wrapper need for a model."""
     proxy_enabled = bool(proxy_config and proxy_config.enabled)
     provider = detect_provider(model, proxy_enabled)
 
-    # -- Anthropic models --------------------------------------------------
     if provider == PROVIDER_ANTHROPIC:
         if not proxy_enabled:
             return ResolvedEndpoint(
@@ -89,7 +79,6 @@ def resolve_model_endpoint(
             needs_chat_completions_wrapper=False,
         )
 
-    # -- OpenAI-protocol models --------------------------------------------
     if proxy_enabled:
         # Proxy handles routing; SDK reads OPENAI_BASE_URL / OPENAI_API_KEY
         # set once at startup by Pi.configure_proxy().
@@ -100,7 +89,6 @@ def resolve_model_endpoint(
             needs_chat_completions_wrapper=False,
         )
 
-    # Direct connection (no proxy) -----------------------------------------
 
     # Native OpenAI models — use SDK defaults (OPENAI_API_KEY)
     if model.startswith(_NATIVE_OPENAI_PREFIXES):
@@ -148,13 +136,7 @@ def resolve_model_endpoint(
 
 
 def build_chat_model(model: str, proxy_config: Optional["ProxyConfig"] = None):
-    """Build the LangChain chat model for a model name.
-
-    Claude models use ChatAnthropic; everything else speaks the OpenAI chat
-    completions protocol through ChatOpenAI. With the LiteLLM proxy enabled,
-    both point at the proxy. Raises ConfigurationError for missing keys or
-    models with no reachable endpoint.
-    """
+    """Build the LangChain chat model for a model name."""
     endpoint = resolve_model_endpoint(model, proxy_config)
     kwargs = {"model": model}
     proxy_enabled = bool(proxy_config and proxy_config.enabled)

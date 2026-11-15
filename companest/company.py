@@ -1,17 +1,4 @@
-"""
-Companest Company Registry
-
-Multi-tenant company layer  each company is an autonomous business unit
-with its own CEO Agent, bindings, budget, and schedules.
-
-Company configs live in /data/companest/companies/{id}/company.yaml (sensitive, not in git).
-Global bindings live in /data/companest/bindings.yaml.
-
-Resolve priority:
-1. CompanyBinding  route to company's CEO Agent
-2. GlobalBinding  route directly to a specific team
-3. SmartRouter auto-route (no match)
-"""
+"""Companest Company Registry"""
 
 import logging
 import os
@@ -26,8 +13,6 @@ from .exceptions import CompanyError, CompanestError
 
 logger = logging.getLogger(__name__)
 
-
-#  Path validation 
 
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
@@ -51,9 +36,6 @@ def _atomic_write_text(path: Path, text: str) -> None:
     tmp_path = path.with_name(f".{path.name}.tmp")
     tmp_path.write_text(text, encoding="utf-8")
     os.replace(tmp_path, path)
-
-
-#  Data Models 
 
 
 class CompanyBinding(BaseModel):
@@ -145,9 +127,6 @@ class CompanyConfig(BaseModel):
         return _validate_company_id(v)
 
 
-#  Resolve Result 
-
-
 class ResolveResult:
     """Result of CompanyRegistry.resolve()  either company or global binding."""
     __slots__ = ("company", "global_binding")
@@ -165,14 +144,8 @@ class ResolveResult:
         return self.company is not None or self.global_binding is not None
 
 
-#  Company Registry 
-
-
 class CompanyRegistry:
-    """
-    Scans /data/companest/companies/ for company.yaml files and manages
-    company lifecycle. Also loads global bindings from /data/companest/bindings.yaml.
-    """
+    """Scans /data/companest/companies/ for company.yaml files and manages company lifecycle."""
 
     def __init__(self, data_dir: str):
         self._data_dir = Path(data_dir)
@@ -184,14 +157,9 @@ class CompanyRegistry:
         self._bindings_mtime: float = 0.0
         self._components: Dict[str, Any] = {}  # company_id -> CompanyComponent
 
-    #  Component registration 
 
     def register_component(self, component: Any) -> None:
-        """Register a CompanyComponent.
-
-        The component's config is stored alongside YAML-loaded configs.
-        Components take precedence over YAML files with the same id.
-        """
+        """Register a CompanyComponent."""
         cid = component.company_id
         self._configs[cid] = component.config
         self._components[cid] = component
@@ -290,13 +258,7 @@ class CompanyRegistry:
         chat_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> ResolveResult:
-        """
-        Resolve an incoming request to a company or global binding.
-
-        Priority:
-        1. Company bindings (first match wins)
-        2. Global bindings (first match wins, sorted by priority desc)
-        """
+        """Resolve an incoming request to a company or global binding."""
         # 1. Check company bindings
         for config in self._configs.values():
             if not config.enabled:
@@ -361,10 +323,7 @@ class CompanyRegistry:
         return [c for c in self._configs.values() if c.enabled]
 
     def check_for_changes(self) -> bool:
-        """Check if any company.yaml files have changed since last scan.
-
-        Returns True if changes detected (caller should reload).
-        """
+        """Check if any company.yaml files have changed since last scan."""
         changed = False
 
         # Check existing companies for mtime changes
@@ -415,5 +374,4 @@ class CompanyRegistry:
         logger.info(f"[CompanyRegistry] Saved {len(bindings)} global bindings")
 
     def get_global_bindings(self) -> List[GlobalBinding]:
-        """Return current global bindings."""
         return list(self._global_bindings)

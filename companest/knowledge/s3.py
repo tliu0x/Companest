@@ -8,12 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class S3JsonStore:
-    """
-    Minimal S3 object store with a lazily created boto3 client.
-
-    boto3 is imported on first use so the module loads without the s3 extra;
-    tests inject a mock client by assigning `_s3`.
-    """
+    """Minimal S3 object store with a lazily created boto3 client."""
 
     def __init__(
         self,

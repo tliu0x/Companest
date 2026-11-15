@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""
-Companest Configuration & Control Panel CLI Tool
-
-Command-line interface for Companest configuration management and fleet operations.
-
-Commands:
-- init: Initialize Companest  check API keys, dependencies, write .env
-- validate: Validate a configuration file
-- generate: Generate a new configuration template
-- show: Display parsed configuration
-- lint: Lint configuration for best practices
-- serve: Start the control panel API server
-- fleet status: Show fleet overview
-- job submit/status/list: Job management
-
-Usage:
-    python -m companest init
-    python -m companest validate .companest/config.md
-    python -m companest serve
-    python -m companest fleet status
-    python -m companest job submit "Analyze this codebase"
-"""
+"""Companest Configuration & Control Panel CLI Tool"""
 
 import sys
 import json
@@ -114,9 +93,7 @@ def _handle_api_error(e: Exception) -> int:
     return ExitCode.ERROR
 
 
-# =============================================================================
 # CLI Commands
-# =============================================================================
 
 # Required/optional API keys and their descriptions
 ENV_KEYS = [
@@ -788,7 +765,6 @@ def cmd_fleet_status(args) -> int:
 
 
 def cmd_job_submit(args) -> int:
-    """Submit a job"""
     api_url = args.api_url.rstrip("/")
     headers = _api_auth_headers()
 
@@ -823,7 +799,6 @@ def cmd_job_submit(args) -> int:
 
 
 def cmd_job_status(args) -> int:
-    """Get job status"""
     api_url = args.api_url.rstrip("/")
     headers = _api_auth_headers()
 
@@ -868,7 +843,6 @@ def cmd_job_status(args) -> int:
 
 
 def cmd_job_list(args) -> int:
-    """List jobs"""
     api_url = args.api_url.rstrip("/")
     headers = _api_auth_headers()
 
@@ -926,9 +900,7 @@ def cmd_job_list(args) -> int:
         return ExitCode.ERROR
 
 
-# =============================================================================
 # Company Commands
-# =============================================================================
 
 
 def _get_company_registry(data_dir: str = ".companest"):
@@ -1175,9 +1147,7 @@ def cmd_company_destroy(args) -> int:
     return ExitCode.SUCCESS
 
 
-# =============================================================================
 # Main
-# =============================================================================
 
 def main():
     """Main entry point"""

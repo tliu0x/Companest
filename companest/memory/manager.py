@@ -1,17 +1,4 @@
-"""
-Companest Memory Manager
-
-Hierarchical memory system for Pi Agent Teams:
-- Master level: soul.md, identity.md, user.md, global memory/
-- Shared level: shared/ (read-only for all teams)
-- Team level: teams/{id}/memory/ (shared within team)
-- Pi level: teams/{id}/pis/{pi_id}/ (soul.md per pi)
-
-Responsibilities:
-- Read/write memory files (JSON, Markdown)
-- Build system prompts by composing soul + memory + context
-- Provide MCP server for Pi memory tools
-"""
+"""Companest Memory Manager"""
 
 import copy
 import json
@@ -82,12 +69,7 @@ class MemoryEntryMeta:
 
 @dataclass
 class EnrichmentSource:
-    """
-    A data source that enriches system prompts.
-
-    External projects can register custom enrichment sources
-    to inject domain-specific context into Pi system prompts.
-    """
+    """A data source that enriches system prompts."""
     source_team_id: str
     memory_key: str
     section_title: str
@@ -97,21 +79,7 @@ class EnrichmentSource:
 
 
 class MemoryManager:
-    """
-    Hierarchical memory manager for Companest.
-
-    Directory layout:
-        base_path/
-         soul.md
-         identity.md
-         user.md
-         memory/
-         shared/
-         teams/{team_id}/
-             soul.md
-             memory/
-             pis/{pi_id}/soul.md
-    """
+    """Hierarchical memory manager for Companest."""
 
     # Allowed characters for path components (team_id, pi_id, key)
     _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_./-]*$")
@@ -177,7 +145,6 @@ class MemoryManager:
         self._write_json(path, data)
         self._file_cache.pop(path.resolve(), None)
 
-    #  Path validation 
 
     def _validate_path_component(self, value: str, label: str) -> str:
         """Validate a path component to prevent path traversal."""
@@ -197,7 +164,6 @@ class MemoryManager:
             raise MemoryError(f"Path escapes base directory: {path}")
         return resolved
 
-    #  Shared level (read-only for teams) 
 
     def read_shared(self, key: str) -> Any:
         self._validate_path_component(key, "key")
@@ -209,7 +175,6 @@ class MemoryManager:
         self._write_json(path, data)
         self._file_cache.pop(path.resolve(), None)
 
-    #  Company shared memory 
 
     def company_shared_path(self, company_id: str) -> Path:
         """Path to a company's shared memory directory."""
@@ -321,7 +286,6 @@ class MemoryManager:
             if d.is_dir() and (d / "team.md").exists()
         ]
 
-    #  Index management (inode-like metadata) 
 
     def _index_path(self, team_id: str) -> Path:
         """Return path to teams/{team_id}/memory/.index.json."""
@@ -424,7 +388,6 @@ class MemoryManager:
             del index[key]
             self._write_index(team_id, index)
 
-    #  Public index API 
 
     def get_memory_index(self, team_id: str) -> Dict[str, dict]:
         """Return the full memory index for a team."""
@@ -519,7 +482,6 @@ class MemoryManager:
         index[key].update(fields)
         self._write_index(team_id, index)
 
-    #  Pi level 
 
     def read_pi_soul(self, team_id: str, pi_id: str) -> str:
         self._validate_path_component(pi_id, "pi_id")
@@ -527,23 +489,11 @@ class MemoryManager:
             self.team_path(team_id) / "pis" / pi_id / "soul.md"
         )
 
-    #  System prompt builder 
 
     def build_system_prompt(
         self, team_id: str, pi_id: str, company_context: Optional[str] = None,
     ) -> str:
-        """
-        Compose a system prompt for a Pi by layering:
-        1. Pi's own soul.md
-        2. Team's soul.md
-        3. Company context (if provided  domain knowledge from CompanyConfig)
-        4. Master's user.md (user context)
-        5. Research briefing (if available, skipped for research team itself)
-        6. Team memory summary (key names)
-
-        Uses Layer 2 prompt cache: stat-checks all dependency files,
-        returns cached prompt if none have changed.
-        """
+        """Compose a system prompt for a Pi by layering: 1."""
         # Include company_context in cache key to differentiate prompts
         cache_key = (team_id, pi_id)
         current_stats = self._collect_prompt_dependency_stats(team_id, pi_id)
@@ -642,7 +592,6 @@ class MemoryManager:
         )
         return prompt
 
-    #  Enrichment formatters 
 
     _MAX_BRIEFING_ITEMS = 15
 
@@ -715,7 +664,6 @@ class MemoryManager:
             + "\n".join(lines)
         )
 
-    #  Scan all teams for archiver 
 
     def get_all_memory_stats(self) -> Dict[str, Any]:
         """Get memory stats for all teams (used by archiver)."""
@@ -735,7 +683,6 @@ class MemoryManager:
                 }
         return stats
 
-    #  Cache management 
 
     def clear_cache(self) -> None:
         """Clear all three cache layers. Called on hot-reload and registry reload."""
@@ -753,11 +700,7 @@ class MemoryManager:
     def _collect_prompt_dependency_stats(
         self, team_id: str, pi_id: str,
     ) -> Dict[str, float]:
-        """Stat all files that build_system_prompt depends on.
-
-        Returns {resolved_path_str: mtime} for cache comparison.
-        Missing files get mtime 0.0 so their appearance triggers invalidation.
-        """
+        """Stat all files that build_system_prompt depends on."""
         paths: List[Path] = []
 
         # Pi soul, team soul, user.md
@@ -789,12 +732,7 @@ class MemoryManager:
         return stats
 
     def _invalidate_prompt_cache_for_team(self, team_id: str) -> None:
-        """Invalidate prompt cache entries affected by a team's memory write.
-
-        Direct: invalidates all prompt cache entries for this team.
-        Indirect: if this team is an enrichment source for other teams,
-        invalidates those consuming teams' prompt caches too.
-        """
+        """Invalidate prompt cache entries affected by a team's memory write."""
         # Direct: remove all entries for this team_id
         keys_to_remove = [k for k in self._prompt_cache if k[0] == team_id]
 
@@ -812,7 +750,6 @@ class MemoryManager:
         for k in set(keys_to_remove):
             self._prompt_cache.pop(k, None)
 
-    #  Internal helpers 
 
     def _read_file(self, path: Path) -> str:
         resolved = path.resolve()
@@ -870,11 +807,7 @@ class MemoryManager:
         self._atomic_write(path, content)
 
     def _atomic_write(self, path: Path, content: str) -> None:
-        """Write content to path atomically via temp file + os.replace().
-
-        Ensures that concurrent readers never see a partially-written file.
-        os.replace() is atomic on POSIX (same filesystem).
-        """
+        """Write content to path atomically via temp file + os.replace()."""
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             fd, tmp_path = tempfile.mkstemp(

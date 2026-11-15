@@ -1,15 +1,4 @@
-"""
-Shared public knowledge.
-
-Documents are stored in S3 as docs/{doc_id}.json, with a JSONL index at
-index/latest.jsonl (every field except the summary) so searches need a single
-read. The index is capped at INDEX_CAP entries and drops expired documents on
-every write.
-
-HTTP API and agent tools are enabled by ENABLE_PUBLIC_KNOWLEDGE_V1 and
-configured through the PK_S3_* environment variables. The JSON schema in
-contracts/public_knowledge_doc.schema.json mirrors PublicKnowledgeDoc.
-"""
+"""Shared public knowledge."""
 
 import json
 import logging
@@ -26,9 +15,6 @@ logger = logging.getLogger(__name__)
 
 INDEX_CAP = 10_000
 DEFAULT_PREFIX = "companest-public-knowledge/"
-
-
-# -- Models --
 
 
 class PublicKnowledgeDoc(BaseModel):
@@ -106,9 +92,6 @@ class SearchQuery(BaseModel):
     fresh_only: bool = Field(default=False, description="Only return docs where fresh_until > now")
     keyword: Optional[str] = Field(default=None, description="Case-insensitive title search")
     limit: int = Field(default=20, ge=1, le=200, description="Max results to return")
-
-
-# -- Storage --
 
 
 def _is_fresh(entry: "PublicKnowledgeIndexEntry", now: datetime) -> bool:
@@ -207,25 +190,11 @@ class PublicKnowledgePublisher:
         self._index_store.remove_entry(doc_id)
 
 
-# -- Search --
-
-
 def search(
     query: SearchQuery,
     index: List[PublicKnowledgeIndexEntry],
 ) -> List[PublicKnowledgeIndexEntry]:
-    """
-    Filter and sort index entries based on the search query.
-
-    Filters:
-    - tags: any match (entry has at least one of the query tags)
-    - source_type: exact match
-    - fresh_only: fresh_until > now
-    - keyword: case-insensitive substring match on title
-
-    Sort: published_at descending
-    Limit: query.limit (default 20)
-    """
+    """Filter and sort index entries based on the search query."""
     results = list(index)
 
     # Filter by tags (any match)
@@ -256,9 +225,6 @@ def search(
     results = results[: query.limit]
 
     return results
-
-
-# -- HTTP API --
 
 
 def create_public_knowledge_router():
@@ -300,9 +266,6 @@ def create_public_knowledge_router():
         return doc.model_dump(mode="json")
 
     return router
-
-
-# -- Agent tools --
 
 
 def create_public_knowledge_tool_defs(

@@ -1,15 +1,4 @@
-"""
-Company-private digest ingestion.
-
-External trader systems push structured digests (market snapshots, positions,
-PnL, risk, settlements, approval queues). Each digest is validated, deduplicated
-by (company_id, digest_type, idempotency_key) and stored per company in S3:
-
-    {prefix}{company_id}/{digest_type}/{idempotency_key}.json
-    {prefix}{company_id}/{digest_type}/latest.json
-
-The JSON schemas in contracts/digests/ mirror the models below.
-"""
+"""Company-private digest ingestion."""
 
 import json
 import logging
@@ -23,9 +12,6 @@ from ..company import _SAFE_ID_RE
 from .s3 import S3JsonStore
 
 logger = logging.getLogger(__name__)
-
-
-# -- Envelope (shared fields) --
 
 
 class DigestEnvelope(BaseModel):
@@ -42,9 +28,6 @@ class DigestEnvelope(BaseModel):
     )
 
     model_config = {"extra": "forbid"}
-
-
-# -- Nested item models --
 
 
 class MarketItem(BaseModel):
@@ -100,9 +83,6 @@ class ApprovalItem(BaseModel):
     created_at: datetime
 
     model_config = {"extra": "forbid"}
-
-
-# -- Digest models --
 
 
 class MarketSnapshotDigest(DigestEnvelope):
@@ -185,8 +165,6 @@ class ApprovalQueueDigest(DigestEnvelope):
     pending_approvals: List[ApprovalItem]
 
 
-# -- Type map --
-
 DIGEST_TYPE_MAP: Dict[str, Type[DigestEnvelope]] = {
     "market_snapshot": MarketSnapshotDigest,
     "positions": PositionsDigest,
@@ -195,9 +173,6 @@ DIGEST_TYPE_MAP: Dict[str, Type[DigestEnvelope]] = {
     "settlement": SettlementDigest,
     "approval_queue": ApprovalQueueDigest,
 }
-
-
-# -- Storage --
 
 
 class DigestS3Store(S3JsonStore):
@@ -221,9 +196,6 @@ class DigestS3Store(S3JsonStore):
         return self._get_json(f"{company_id}/{digest_type}/latest.json")
 
 
-# -- Ingestion --
-
-
 @dataclass
 class IngestResult:
     """Result of a digest ingestion attempt."""
@@ -235,12 +207,7 @@ class IngestResult:
 
 
 class DigestIngestor:
-    """
-    Validates, deduplicates and stores digests.
-
-    Idempotency is tracked in memory (single instance): a repeated
-    (company_id, digest_type, idempotency_key) is accepted without re-uploading.
-    """
+    """Validates, deduplicates and stores digests."""
 
     def __init__(self, s3_store: DigestS3Store) -> None:
         self._s3_store = s3_store
@@ -271,9 +238,6 @@ class DigestIngestor:
 
         self._seen_keys.add(dedup_key)
         return result(True, "accepted")
-
-
-# -- HTTP API --
 
 
 def create_digest_router(s3_store: DigestS3Store):

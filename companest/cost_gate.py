@@ -1,17 +1,4 @@
-"""
-Companest CostGate  Finance Department Approval System
-
-Two operating modes:
-1. **post_hoc** (default)  approve everything, reconcile with LiteLLM actuals,
-   circuit breaker trips on anomalous velocity.
-2. **approval**  original three-tier approval:
-   a. < auto_approve_threshold  auto approve (silent)
-   b. < escalation_threshold  auto approve + notify user
-   c. >= escalation_threshold  escalate to user via Telegram, wait for approval
-
-Priority multipliers scale thresholds (critical=bypass, high=3x, normal=1x, low=0.5x).
-Per-team budgets with overflow pool. Rolling window replaces daily cutoff.
-"""
+"""Companest CostGate  Finance Department Approval System"""
 
 import asyncio
 import json
@@ -81,10 +68,7 @@ class CostDecision:
 
 
 class CircuitBreaker:
-    """
-    In-memory velocity tracker. Trips when spend within window_minutes
-    exceeds threshold_pct of daily_limit. Auto-resets after cooldown_minutes.
-    """
+    """In-memory velocity tracker."""
 
     def __init__(
         self,
@@ -168,16 +152,7 @@ class CircuitBreaker:
 
 
 class CostGate:
-    """
-    Cost approval gate with two operating modes:
-
-    - **post_hoc** (default): approve everything, reconcile later, circuit breaker
-      trips on anomalous velocity.
-    - **approval**: three-tier approval (cheap=silent, medium=notify, expensive=escalate).
-
-    Per-team budgets with overflow pool. Priority multipliers scale thresholds.
-    Rolling window replaces daily cutoff.
-    """
+    """Cost approval gate with two operating modes:"""
 
     def __init__(
         self,
@@ -307,10 +282,7 @@ class CostGate:
         return total
 
     def _get_overflow_usage(self, budget: dict, hours: float) -> float:
-        """Calculate how much overflow pool has been consumed.
-
-        Overflow = sum of per-team overspend beyond their individual budgets.
-        """
+        """Calculate how much overflow pool has been consumed."""
         team_budgets = budget.get("team_budgets", {})
         if not team_budgets:
             return 0.0
@@ -368,19 +340,7 @@ class CostGate:
         company_id: Optional[str] = None,
         company_budget_hourly: Optional[float] = None,
     ) -> CostDecision:
-        """
-        Evaluate a task and return approval decision.
-
-        Modes:
-        - **post_hoc**: default approve, circuit breaker can override.
-        - **approval**: three-tier (auto/notify/escalate).
-
-        Priority "critical" always bypasses all checks.
-
-        Args:
-            company_id: If set, check company-level hourly budget.
-            company_budget_hourly: Company's hourly budget cap (from CompanyPreferences).
-        """
+        """Evaluate a task and return approval decision."""
         async with self._budget_lock:
             return await self._evaluate_locked(
                 task, target_team_id, target_model, priority,
@@ -796,18 +756,7 @@ class CostGate:
 
 
 class UserNotifier:
-    """
-    Sends approval requests and notifications to the user.
-
-    Supports two delivery modes:
-    1. Callback function (for integration with MasterConnection or Telegram)
-    2. Logging fallback (when no callback is configured)
-
-    Usage:
-        notifier = UserNotifier()
-        # Later, when master connection is ready:
-        notifier.send_fn = async_send_callback  # async (str) -> None
-    """
+    """Sends approval requests and notifications to the user."""
 
     def __init__(self, send_fn: Optional[Callable] = None):
         self.send_fn = send_fn

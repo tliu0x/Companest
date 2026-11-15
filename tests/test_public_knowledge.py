@@ -18,9 +18,7 @@ from companest.knowledge.public import PublicKnowledgePublisher
 from companest.knowledge.public import PublicKnowledgeS3Store
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 NOW = datetime.now(timezone.utc)
 FUTURE = NOW + timedelta(days=7)
@@ -48,9 +46,7 @@ def _make_index_entry(doc_id=None, **kwargs):
     return PublicKnowledgeIndexEntry.from_doc(doc)
 
 
-# ---------------------------------------------------------------------------
 # Model tests
-# ---------------------------------------------------------------------------
 
 class TestPublicKnowledgeDoc:
     def test_valid_doc(self):
@@ -90,9 +86,7 @@ class TestIndexEntry:
         assert entry.title == doc.title
 
 
-# ---------------------------------------------------------------------------
 # Search tests
-# ---------------------------------------------------------------------------
 
 class TestSearch:
     # Stable UUIDs for deterministic assertions
@@ -153,9 +147,7 @@ class TestSearch:
             assert results[i].published_at >= results[i + 1].published_at
 
 
-# ---------------------------------------------------------------------------
 # Index eviction tests
-# ---------------------------------------------------------------------------
 
 class TestIndexEviction:
     def test_expired_entries_evicted_on_save(self):
@@ -194,9 +186,7 @@ class TestIndexEviction:
         assert len(lines) == INDEX_CAP
 
 
-# ---------------------------------------------------------------------------
 # Publisher tests
-# ---------------------------------------------------------------------------
 
 class TestPublisher:
     def test_publish_writes_doc_and_index(self):

@@ -1,14 +1,4 @@
-"""
-Companest Cascade Engine Tests
-
-Comprehensive tests for the dynamic cascade system:
-1. ModelTier & auto-chain derivation
-2. CascadeStrategy  complexity estimation & tier selection
-3. CascadeMetrics  recording, success rates, skip logic
-4. AdequacyChecker  heuristic quality gate
-5. CascadeEngine  integration tests
-6. get_downgrade()  replaces DOWNGRADE_MAP
-"""
+"""Companest Cascade Engine Tests"""
 
 import tempfile
 import shutil
@@ -33,8 +23,6 @@ from companest.cascade import (
 )
 from companest.cost_gate import MODEL_PRICES
 
-
-#  1. ModelTier & Chain Derivation 
 
 class TestModelTier:
     """Test ModelTier construction and chain derivation."""
@@ -177,8 +165,6 @@ class TestGetDowngrade:
         assert result == "deepseek-chat"
 
 
-#  2. CascadeStrategy 
-
 class TestCascadeStrategy:
     """Test complexity estimation and tier selection."""
 
@@ -251,8 +237,6 @@ class TestCascadeStrategy:
         start = self.strategy.pick_start_tier("hi", chain, metrics=metrics)
         assert start >= 1
 
-
-#  3. CascadeMetrics 
 
 class TestCascadeMetrics:
     """Test metric recording, success rates, and persistence."""
@@ -338,8 +322,6 @@ class TestCascadeMetrics:
             shutil.rmtree(tmpdir)
 
 
-#  4. AdequacyChecker 
-
 class TestAdequacyChecker:
     """Test heuristic quality gate."""
 
@@ -403,8 +385,6 @@ class TestAdequacyChecker:
         assert HEDGING_PATTERNS.search("I don't have access to that")
         assert not HEDGING_PATTERNS.search("Here is the definitive answer")
 
-
-#  5. CascadeEngine Integration 
 
 class TestCascadeEngine:
     """Integration tests for CascadeEngine."""
@@ -514,8 +494,6 @@ class TestCascadeEngine:
         assert engine.adequacy is checker
 
 
-#  6. Backward Compatibility 
-
 class TestBackwardCompatibility:
     """Verify the cascade engine produces equivalent chains to old CASCADE_CHAINS."""
 
@@ -575,8 +553,6 @@ class TestBackwardCompatibility:
             assert result is not None, f"No downgrade for {model}"
             assert check(result), f"Unexpected downgrade for {model}: {result}"
 
-
-#  7. Language Detection 
 
 class TestDetectLanguage:
     """Test Unicode-based language detection."""
@@ -640,8 +616,6 @@ class TestLangPenalty:
         penalty = _lang_penalty("claude-opus-4-6", "zh")
         assert penalty == pytest.approx(1.025)
 
-
-#  9. Language-Aware Cascade 
 
 class TestLanguageAwareCascade:
     """Test that cascade chain ordering changes based on task language."""

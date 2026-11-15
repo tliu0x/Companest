@@ -1,15 +1,3 @@
-"""
-Companest Git Tools
-
-Async git operations for coding agents. Each function takes a workspace_path
-and executes git commands within that directory.
-
-All functions validate that the workspace path exists and is a git repo.
-Path traversal is prevented by the Workspace.validate_path() check.
-
-These are exposed as MCP tools via the ToolRegistry.
-"""
-
 import asyncio
 import logging
 from pathlib import Path
@@ -70,14 +58,7 @@ async def git_status(workspace_path: str) -> str:
 async def git_diff(
     workspace_path: str, file_path: str = "", staged: bool = False,
 ) -> str:
-    """
-    Show file changes.
-
-    Args:
-        workspace_path: Root path of the git repo.
-        file_path: Optional specific file to diff (relative to repo root).
-        staged: If True, show staged changes (--cached).
-    """
+    """Show file changes."""
     args = ["diff"]
     if staged:
         args.append("--cached")
@@ -111,14 +92,7 @@ async def git_branch(
     name: str = "",
     checkout: bool = False,
 ) -> str:
-    """
-    List, create, or switch branches.
-
-    Args:
-        workspace_path: Root path of the git repo.
-        name: Branch name. Empty = list all branches.
-        checkout: If True and name is given, switch to (or create) that branch.
-    """
+    """List, create, or switch branches."""
     if not name:
         return await _run_git(["branch", "-a", "--no-color"], cwd=workspace_path)
 
@@ -139,14 +113,7 @@ async def git_commit(
     message: str,
     files: str = "",
 ) -> str:
-    """
-    Stage files and create a commit.
-
-    Args:
-        workspace_path: Root path of the git repo.
-        message: Commit message.
-        files: Comma-separated file paths to stage. Empty = stage all modified.
-    """
+    """Stage files and create a commit."""
     if not message:
         return "Error: commit message is required"
 
@@ -175,15 +142,7 @@ async def git_push(
     branch: str = "",
     set_upstream: bool = True,
 ) -> str:
-    """
-    Push commits to remote.
-
-    Args:
-        workspace_path: Root path of the git repo.
-        remote: Remote name (default: origin).
-        branch: Branch to push. Empty = current branch.
-        set_upstream: If True, set upstream tracking (-u).
-    """
+    """Push commits to remote."""
     args = ["push"]
     if set_upstream:
         args.append("-u")

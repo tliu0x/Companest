@@ -1,12 +1,4 @@
-"""
-Collaborative execution mode -multi-Pi pipeline.
-
-Output of Pi A feeds into Pi B, etc. Useful for multi-stage
-processing (e.g. research -> analyze -> summarize).
-
-Each Pi in the pipeline receives structured context including the
-original task, its position in the pipeline, and the previous stage output.
-"""
+"""Collaborative execution mode -multi-Pi pipeline."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -33,14 +25,7 @@ def _with_memory_task_hint(
 
 
 class CollaborativeMode(ExecutionMode):
-    """Multi-Pi pipeline: output of Pi A -> input of Pi B.
-
-    Args:
-        pipeline: Ordered list of Pi IDs. Defaults to all Pis in team order.
-        cascade: Whether to use cascade model selection for each stage.
-        stop_on_failure: If True (default), abort pipeline on first failure.
-            If False, skip the failed stage and pass previous output forward.
-    """
+    """Multi-Pi pipeline: output of Pi A -> input of Pi B."""
 
     def __init__(
         self,

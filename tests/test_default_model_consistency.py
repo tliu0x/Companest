@@ -1,8 +1,4 @@
-"""Verify all default model configurations converge on deepseek-chat.
-
-After the cost-reduction PR, every component that picks a default model
-should agree on 'deepseek-chat' (not a mix of Claude and DeepSeek).
-"""
+"""Verify all default model configurations converge on deepseek-chat."""
 
 from companest.company import CompanyCEOConfig
 from companest.pi import PiConfig

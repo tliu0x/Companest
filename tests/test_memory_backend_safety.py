@@ -221,8 +221,7 @@ def test_qdrant_backend_delegates_read_write_to_file(tmp_path):
 
 
 def test_qdrant_backend_search_service_uses_semantic_mode(tmp_path):
-    """When QdrantBackend is used, MemorySearchService should resolve
-    'auto' to 'semantic' or 'hybrid' instead of always 'exact'."""
+    """When QdrantBackend is used, MemorySearchService should resolve"""
     memory = _make_memory(tmp_path)
     backend = QdrantBackend(manager=memory, in_memory=True)
     service = MemorySearchService(backend)

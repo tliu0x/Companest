@@ -1,9 +1,4 @@
-"""
-Conditional execution mode -lead Pi evaluates -branch decision -execute.
-
-ConditionalMode: lead Pi receives the task and decides which team/mode
-to route to. Optionally loops back for multi-step decisions.
-"""
+"""Conditional execution mode -lead Pi evaluates -branch decision -execute."""
 
 import logging
 from typing import Any, Callable, Coroutine, Dict, List, Optional
@@ -34,13 +29,7 @@ RunTeamFn = Callable[..., Coroutine[Any, Any, str]]
 
 
 class ConditionalMode(ExecutionMode):
-    """Conditional branching: lead Pi evaluates task -picks branch team -executes.
-
-    Flow:
-        1. Lead Pi evaluates task -returns branch decision (JSON)
-        2. Based on decision, call run_team_fn(branch_team, ...)
-        3. Optional: loop back to lead Pi for next-step decision (max_steps)
-    """
+    """Conditional branching: lead Pi evaluates task -picks branch team -executes."""
 
     def __init__(self, run_team_fn: RunTeamFn, max_steps: int = 5):
         self._run_team_fn = run_team_fn

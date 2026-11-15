@@ -1,13 +1,4 @@
-"""
-Companest Event Bus
-
-Simple async pub/sub event system for lifecycle events.
-
-Usage:
-    bus = EventBus()
-    bus.on(EventType.TASK_STARTED, my_callback)
-    await bus.emit(EventType.TASK_STARTED, {"team_id": "stock", "task": "..."})
-"""
+"""Companest Event Bus"""
 
 import asyncio
 import logging
@@ -46,11 +37,7 @@ class Event:
 
 
 class EventBus:
-    """
-    Async pub/sub event bus.
-
-    Subscribers receive Event objects. Errors in callbacks are logged, not raised.
-    """
+    """Async pub/sub event bus."""
 
     def __init__(self):
         self._listeners: Dict[EventType, List[EventCallback]] = {}

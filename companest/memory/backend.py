@@ -1,11 +1,4 @@
-"""
-Companest Memory Backend  Abstract Contract
-
-Defines the MemoryBackend ABC that all storage implementations must satisfy.
-The default FileBackend wraps the existing MemoryManager via delegation,
-preserving backward compatibility while enabling future backends
-(vector store, S3-backed, etc.).
-"""
+"""Companest Memory Backend  Abstract Contract"""
 
 import logging
 from abc import ABC, abstractmethod
@@ -17,15 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryBackend(ABC):
-    """
-    Abstract contract for memory storage backends.
+    """Abstract contract for memory storage backends."""
 
-    Required methods mirror the MemoryManager's team-level API.
-    Optional capabilities are declared via property flags so callers
-    can adapt behavior without isinstance() checks.
-    """
-
-    #  Required operations 
 
     @abstractmethod
     def read(self, team_id: str, key: str) -> Any:
@@ -84,7 +70,6 @@ class MemoryBackend(ABC):
         """Get memory stats across all teams."""
         ...
 
-    #  Optional capability flags 
 
     @property
     def supports_semantic_search(self) -> bool:
@@ -121,28 +106,14 @@ class MemoryBackend(ABC):
         limit: int = 20,
         include_archive: bool = True,
     ) -> List[Dict[str, Any]]:
-        """
-        Vector similarity search over memory entries.
-
-        Only callable when supports_semantic_search is True.
-        Each result dict must contain at least 'key', 'score', and 'source'.
-
-        Raises:
-            NotImplementedError: If the backend does not support semantic search.
-        """
+        """Vector similarity search over memory entries."""
         raise NotImplementedError(
             f"{type(self).__name__} does not support semantic search"
         )
 
 
 class FileBackend(MemoryBackend):
-    """
-    Thin adapter that delegates to the existing MemoryManager.
-
-    This is the default backend. It does NOT extract code from manager.py;
-    it simply wraps it so that higher-level services can program against
-    the MemoryBackend interface.
-    """
+    """Thin adapter that delegates to the existing MemoryManager."""
 
     def __init__(self, manager: MemoryManager) -> None:
         self._mgr = manager
@@ -152,7 +123,6 @@ class FileBackend(MemoryBackend):
         """Access the underlying MemoryManager (e.g. for prompt building)."""
         return self._mgr
 
-    #  Required operations (pure delegation) 
 
     def read(self, team_id: str, key: str) -> Any:
         return self._mgr.read_team_memory(team_id, key)
@@ -189,7 +159,6 @@ class FileBackend(MemoryBackend):
     def get_all_stats(self) -> Dict[str, Any]:
         return self._mgr.get_all_memory_stats()
 
-    #  Optional capabilities 
 
     @property
     def supports_snapshot(self) -> bool:

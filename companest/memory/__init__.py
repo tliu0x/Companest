@@ -1,14 +1,4 @@
-"""
-Companest Memory Subsystem
-
-Hierarchical memory manager with OS-inspired consolidation:
-- MemoryManager: file-based memory with inode index and three-layer cache
-- Dreamer: scheduled importance scoring, compaction, GC, CoW snapshots
-- MemoryBackend / FileBackend: pluggable storage abstraction
-- QdrantBackend: hybrid file + vector search backend
-- MemorySearchService: exact-first search with capability-aware semantic fallback
-- S3Sync: team-level snapshot sync to S3
-"""
+"""Companest Memory Subsystem"""
 
 from .manager import (
     MemoryManager,

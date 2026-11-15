@@ -1,27 +1,4 @@
-"""
-Companest Markdown Configuration Parser
-
-A robust parser for loading Companest configuration from Markdown files.
-
-Features:
-- Parse JSON/YAML code blocks from Markdown
-- Support YAML frontmatter
-- Multiple code block handling (merge or select)
-- Detailed error messages with line numbers
-- Include/reference support for modular configs
-- Schema validation
-- Environment variable interpolation
-
-Usage:
-    parser = MarkdownConfigParser()
-    config = parser.parse_file(".companest/config.md")
-
-    # Or with options
-    parser = MarkdownConfigParser(
-        allow_env_interpolation=True,
-        merge_code_blocks=True
-    )
-"""
+"""Companest Markdown Configuration Parser"""
 
 import os
 import re
@@ -47,17 +24,7 @@ class CodeBlockType(str, Enum):
 
 @dataclass
 class CodeBlock:
-    """
-    Represents a parsed code block from Markdown.
-
-    Attributes:
-        content: Raw content of the code block
-        block_type: Type (json, yaml, etc.)
-        line_start: Starting line number in source file
-        line_end: Ending line number
-        label: Optional label/identifier for the block
-        parsed: Parsed content as dict (after parsing)
-    """
+    """Represents a parsed code block from Markdown."""
     content: str
     block_type: CodeBlockType
     line_start: int
@@ -71,17 +38,7 @@ class CodeBlock:
 
 @dataclass
 class ParseResult:
-    """
-    Result of parsing a Markdown configuration file.
-
-    Attributes:
-        config: The parsed configuration dictionary
-        code_blocks: All code blocks found
-        frontmatter: YAML frontmatter if present
-        source_path: Path to the source file
-        warnings: Non-fatal warnings during parsing
-        metadata: Additional metadata extracted
-    """
+    """Result of parsing a Markdown configuration file."""
     config: Dict[str, Any]
     code_blocks: List[CodeBlock] = field(default_factory=list)
     frontmatter: Optional[Dict[str, Any]] = None
@@ -91,33 +48,7 @@ class ParseResult:
 
 
 class MarkdownConfigParser:
-    """
-    Robust Markdown configuration parser for Companest.
-
-    Parses Markdown files containing configuration in code blocks (JSON/YAML).
-
-    Features:
-    - JSON and YAML code block support
-    - YAML frontmatter support
-    - Environment variable interpolation (${VAR_NAME} or $VAR_NAME)
-    - Multiple code block merging
-    - Include directive support
-    - Detailed error reporting with line numbers
-
-    Example:
-        parser = MarkdownConfigParser()
-
-        # Parse a file
-        result = parser.parse_file(".companest/config.md")
-        config = result.config
-
-        # Parse content directly
-        result = parser.parse_content(markdown_string)
-
-        # With environment interpolation
-        parser = MarkdownConfigParser(allow_env_interpolation=True)
-        result = parser.parse_file("config.md")
-    """
+    """Robust Markdown configuration parser for Companest."""
 
     # Regex patterns
     FRONTMATTER_PATTERN = re.compile(
@@ -146,33 +77,14 @@ class MarkdownConfigParser:
         strict_mode: bool = False,
         base_path: Optional[Path] = None
     ):
-        """
-        Initialize the parser.
-
-        Args:
-            allow_env_interpolation: Replace ${VAR} with environment values
-            merge_code_blocks: Merge multiple code blocks (vs. use first)
-            strict_mode: Raise errors on warnings
-            base_path: Base path for resolving includes
-        """
+        """Initialize the parser."""
         self.allow_env_interpolation = allow_env_interpolation
         self.merge_code_blocks = merge_code_blocks
         self.strict_mode = strict_mode
         self.base_path = base_path or Path.cwd()
 
     def parse_file(self, path: Union[str, Path]) -> ParseResult:
-        """
-        Parse a Markdown configuration file.
-
-        Args:
-            path: Path to the Markdown file
-
-        Returns:
-            ParseResult with config and metadata
-
-        Raises:
-            ConfigurationError: If file not found or parsing fails
-        """
+        """Parse a Markdown configuration file."""
         path = Path(path)
         if not path.exists():
             raise ConfigurationError(
@@ -206,18 +118,7 @@ class MarkdownConfigParser:
             self.base_path = old_base
 
     def parse_content(self, content: str) -> ParseResult:
-        """
-        Parse Markdown content containing configuration.
-
-        Args:
-            content: Markdown content string
-
-        Returns:
-            ParseResult with config and metadata
-
-        Raises:
-            ConfigurationError: If parsing fails
-        """
+        """Parse Markdown content containing configuration."""
         warnings: List[str] = []
         code_blocks: List[CodeBlock] = []
 
@@ -421,14 +322,7 @@ class MarkdownConfigParser:
         return result
 
     def _interpolate_env_vars(self, config: Any) -> Any:
-        """
-        Recursively interpolate environment variables in config.
-
-        Supports:
-        - ${VAR_NAME} - Required, errors if not set
-        - ${VAR_NAME:-default} - With default value
-        - $VAR_NAME - Simple form
-        """
+        """Recursively interpolate environment variables in config."""
         if isinstance(config, str):
             return self._interpolate_string(config)
         elif isinstance(config, dict):
@@ -438,11 +332,7 @@ class MarkdownConfigParser:
         return config
 
     def _interpolate_string(self, value: str) -> str:
-        """Interpolate environment variables in a string.
-
-        In strict mode, raises ConfigurationError for unset variables
-        without defaults instead of keeping the literal string.
-        """
+        """Interpolate environment variables in a string."""
         strict = self.strict_mode
 
         # Pattern for ${VAR:-default} syntax
@@ -485,14 +375,7 @@ class MarkdownConfigParser:
         return simple_pattern.sub(simple_replacer, result)
 
     def _process_includes(self, content: str, warnings: List[str]) -> str:
-        """
-        Process @include directives in Markdown.
-
-        Syntax: # @include "path/to/file.md"
-
-        Include paths are validated to stay within base_path to prevent
-        reading arbitrary files via path traversal (e.g. "../../etc/passwd").
-        """
+        """Process @include directives in Markdown."""
         def include_replacer(match):
             include_path = match.group(1).strip()
 
@@ -545,47 +428,24 @@ class MarkdownConfigParser:
         return '\n'.join(result)
 
     def validate_config(self, config: Dict[str, Any]) -> List[str]:
-        """
-        Validate a configuration dictionary.
-
-        Returns list of validation errors (empty if valid).
-        """
+        """Validate a configuration dictionary."""
         return []
 
 
-# =============================================================================
 # Convenience Functions
-# =============================================================================
 
 def parse_markdown_config(
     path: Union[str, Path],
     allow_env: bool = True
 ) -> Dict[str, Any]:
-    """
-    Convenience function to parse a Markdown config file.
-
-    Args:
-        path: Path to config file
-        allow_env: Allow environment variable interpolation
-
-    Returns:
-        Parsed configuration dictionary
-    """
+    """Convenience function to parse a Markdown config file."""
     parser = MarkdownConfigParser(allow_env_interpolation=allow_env)
     result = parser.parse_file(path)
     return result.config
 
 
 def validate_config_file(path: Union[str, Path]) -> Tuple[bool, List[str]]:
-    """
-    Validate a configuration file.
-
-    Args:
-        path: Path to config file
-
-    Returns:
-        Tuple of (is_valid, error_messages)
-    """
+    """Validate a configuration file."""
     parser = MarkdownConfigParser()
     try:
         result = parser.parse_file(path)
@@ -599,13 +459,7 @@ def generate_config_template(
     output_path: Union[str, Path],
     format: str = "json",
 ) -> None:
-    """
-    Generate a configuration template file.
-
-    Args:
-        output_path: Where to write the template
-        format: 'json' or 'yaml'
-    """
+    """Generate a configuration template file."""
     template = {
         "name": "my-companest-config",
         "version": "1.0",

@@ -1,17 +1,4 @@
-"""
-Companest Execution Modes
-
-Pluggable execution strategies for Pi Agent Teams.
-Each mode implements the ExecutionMode ABC and is auto-registered
-in ModeRegistry for dispatch by the orchestrator.
-
-Modes:
-- default: Single Pi, no cascade
-- cascade: Single Pi with model cascade (cheap first, escalate)
-- loop: Decompose  iterate with fresh context  synthesize
-- council: All Pis answer independently  lead Pi synthesizes
-- collaborative: Pipeline  output of Pi A  input of Pi B
-"""
+"""Companest Execution Modes"""
 
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
@@ -43,17 +30,7 @@ class ExecutionMode(ABC):
         on_progress: ProgressCallback = None,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Execute the task using this mode's strategy.
-
-        Args:
-            team: The AgentTeam to execute with.
-            task: The task/prompt.
-            on_progress: Optional async callback for progress updates.
-            user_context: Optional user context dict.
-
-        Returns:
-            Result string.
-        """
+        """Execute the task using this mode's strategy."""
         ...
 
 
@@ -83,12 +60,7 @@ class ModeRegistry:
 
 
 def build_default_registry(run_team_fn=None) -> ModeRegistry:
-    """Build a ModeRegistry with all built-in modes pre-registered.
-
-    Args:
-        run_team_fn: Optional async callable for ConditionalMode routing.
-            If None, ConditionalMode is not registered (requires orchestrator).
-    """
+    """Build a ModeRegistry with all built-in modes pre-registered."""
     from .default import DefaultMode
     from .loop import LoopMode
     from .council import CouncilMode

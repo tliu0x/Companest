@@ -1,17 +1,4 @@
-"""
-Companest Team Auto-Router
-
-Maps inbound task content to the most appropriate team(s).
-Two routing layers:
-1. SmartRouter  LLM-powered routing (reads team soul.md, returns structured JSON)
-2. TeamRouter  keyword regex fallback (used when LLM is unavailable)
-
-Routing priority:
-1. Explicit team tag (e.g. "@stock ...", "#engineering ...")
-2. LLM routing via SmartRouter (Haiku, ~$0.001)
-3. Keyword pattern matching (fallback)
-4. Decline (no default team)
-"""
+"""Companest Team Auto-Router"""
 
 import asyncio
 import hashlib
@@ -76,8 +63,6 @@ META_TEAM_ROLES = {"cost_gate", "memory", "scheduler", "research"}
 from .modes import VALID_MODES
 
 
-#  Data Models 
-
 @dataclass
 class RoutingBinding:
     """A deterministic regex binding rule for fast routing (before LLM call)."""
@@ -109,17 +94,8 @@ class RoutingDecision:
     task_priority: str = "normal" # "critical" | "high" | "normal" | "low"
 
 
-#  Keyword Router (fallback) 
-
 class TeamRouter:
-    """
-    Auto-routes tasks to teams based on keyword pattern matching.
-
-    Usage:
-        router = TeamRouter(available_teams=["stock", "bizdev", ...])
-        team_id = router.route("Analyze TSLA recent trends")
-        #  "stock"
-    """
+    """Auto-routes tasks to teams based on keyword pattern matching."""
 
     def __init__(
         self,
@@ -142,12 +118,7 @@ class TeamRouter:
         self._routes.sort(key=lambda x: x[2], reverse=True)
 
     def route(self, task: str) -> Optional[str]:
-        """
-        Determine the best team for a task.
-
-        Returns:
-            team_id string, or None if default_team is None and nothing matched.
-        """
+        """Determine the best team for a task."""
         # 1. Check explicit team tag: @team_name or #team_name
         explicit = self._check_explicit_tag(task)
         if explicit:
@@ -187,18 +158,7 @@ class TeamRouter:
         return None
 
     def route_with_confidence(self, task: str) -> Tuple[Optional[str], float]:
-        """
-        Route with confidence score (0.0-1.0).
-
-        Confidence reflects how strongly the task matches a team:
-        - 1.0: explicit @team tag
-        - 0.7-0.9: multiple keyword matches with clear winner
-        - 0.3-0.6: single match or weak signal
-        - 0.0: no matches (default fallback)
-
-        Returns:
-            (team_id, confidence)  team_id may be None if no default
-        """
+        """Route with confidence score (0.0-1.0)."""
         explicit = self._check_explicit_tag(task)
         if explicit:
             return explicit, 1.0
@@ -234,8 +194,6 @@ class TeamRouter:
 
         return best_team, confidence
 
-
-#  SmartRouter (LLM-powered) 
 
 _ROUTING_SYSTEM_PROMPT_TEMPLATE = """\
 You are a ROUTING ENGINE (not an assistant). You do NOT answer user questions. You ONLY output a JSON routing decision.
@@ -285,13 +243,7 @@ Return ONLY valid JSON, no markdown fencing:
 
 
 class SmartRouter:
-    """
-    LLM-powered team router. Uses a cheap Kimi K2.5 call to analyze tasks
-    and decide which team(s) should handle them.
-
-    Falls back to keyword routing when LLM is unavailable.
-    Explicitly declines when no team fits (no random defaults).
-    """
+    """LLM-powered team router."""
 
     # Routing LLM config
     ROUTING_MODEL = "kimi-k2.5"
@@ -331,10 +283,7 @@ class SmartRouter:
         self, pattern: str, team_id: str, mode: str = "cascade", priority: int = 1,
         owner_company_id: Optional[str] = None,
     ) -> None:
-        """Add a deterministic regex binding rule for fast routing.
-
-        Bindings are checked before the LLM call. First match wins.
-        """
+        """Add a deterministic regex binding rule for fast routing."""
         compiled = re.compile(pattern, re.IGNORECASE)
         self._bindings.append(RoutingBinding(
             pattern=compiled, team_id=team_id, mode=mode, priority=priority,
@@ -355,13 +304,7 @@ class SmartRouter:
         self, company_id: Optional[str] = None,
         shared_teams: Optional[List[str]] = None,
     ) -> List[str]:
-        """Return teams accessible by a company.
-
-        - Global teams (no '/'): if company_id given, only include if in shared_teams whitelist
-        - Private teams ('{owner}/'): included only if owner == company_id
-        - No company_id: global teams only
-        - shared_teams=None (not passed): backward compat, include all global teams
-        """
+        """Return teams accessible by a company."""
         all_teams = self._registry.list_teams()
         meta = set(self._registry.list_meta_teams())
         result = []
@@ -385,20 +328,7 @@ class SmartRouter:
         company_id: Optional[str] = None,
         shared_teams: Optional[List[str]] = None,
     ) -> RoutingDecision:
-        """
-        Route a task to the best team(s).
-
-        Priority:
-        1. Explicit @team / #team tag  single team, confidence=1.0
-        2. LLM routing (Haiku)  RoutingDecision
-        3. Keyword fallback  RoutingDecision
-        4. No match  declined=True
-
-        Args:
-            task: The user's task/prompt.
-            preferred_teams: Optional hint from company preferences (not forced).
-            company_id: Restricts routing to global + this company's private teams.
-        """
+        """Route a task to the best team(s)."""
         # Build the set of teams this caller is allowed to use.
         # When company_id is None, restrict to global teams only (no private teams).
         allowed_teams = set(self.get_available_teams(company_id, shared_teams=shared_teams))
@@ -575,11 +505,7 @@ class SmartRouter:
         return self._cached_prompt
 
     def _parse_response(self, raw: str) -> Optional[RoutingDecision]:
-        """Parse LLM JSON response into RoutingDecision.
-
-        Handles: raw JSON, markdown-fenced JSON, and malformed output.
-        Validates team_ids against registry.
-        """
+        """Parse LLM JSON response into RoutingDecision."""
         # Try to extract JSON
         json_str = raw.strip()
 

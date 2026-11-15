@@ -1,9 +1,4 @@
-"""
-Default execution mode  single Pi, optional cascade.
-
-DefaultMode(cascade=False)  "default" mode
-DefaultMode(cascade=True)   registered as "cascade" mode
-"""
+"""Default execution mode  single Pi, optional cascade."""
 
 from typing import Any, Dict, Optional
 

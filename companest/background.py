@@ -1,24 +1,4 @@
-"""
-Companest Background Manager
-
-Manages scheduled background tasks: team eviction, daily reports,
-enrichment cycles, on-demand info refresh, and user-scheduled job execution.
-Extracted from CompanestOrchestrator to keep orchestrator slim.
-
-Usage:
-    bg = BackgroundManager(
-        run_team_fn=orchestrator.run_team,
-        run_auto_fn=orchestrator.run_auto,
-        team_registry=orchestrator.team_registry,
-        cost_gate=orchestrator.cost_gate,
-        events=orchestrator.events,
-        scheduler=orchestrator.scheduler,
-        user_scheduler=orchestrator.user_scheduler,
-        enrichment_cycles=orchestrator._enrichment_cycles,
-        info_refresh_team=orchestrator._info_refresh_team,
-    )
-    bg.setup_schedules()
-"""
+"""Companest Background Manager"""
 
 from __future__ import annotations
 
@@ -34,12 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class BackgroundManager:
-    """
-    Manages all scheduled background tasks for the orchestrator.
-
-    Receives dependencies via constructor injection rather than
-    accessing orchestrator attributes directly.
-    """
+    """Manages all scheduled background tasks for the orchestrator."""
 
     def __init__(
         self,
@@ -153,10 +128,7 @@ class BackgroundManager:
             logger.warning(f"[{team_id}] On-demand refresh failed: {e}")
 
     async def execute_scheduled_job(self, job: ScheduledJob) -> str:
-        """
-        Execution callback for UserScheduler  runs the scheduled task
-        through the orchestrator pipeline.
-        """
+        """Execution callback for UserScheduler  runs the scheduled task through the orchestrator pipeline."""
         user_context = {
             "user_id": job.user_id,
             "chat_id": job.chat_id,

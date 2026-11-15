@@ -1,9 +1,4 @@
-"""
-Persistent event history for the operator console.
-
-Stores lifecycle and operator events in SQLite via aiosqlite so the console can
-query recent history and recover after reconnects or restarts.
-"""
+"""Persistent event history for the operator console."""
 
 from __future__ import annotations
 

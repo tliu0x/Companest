@@ -1,17 +1,4 @@
-"""
-Companest Cascade Engine  Dynamic Model Cascade System
-
-Replaces the hardcoded CASCADE_CHAINS in pi.py with a dynamic, configurable,
-learning cascade engine.
-
-Components:
-- ModelTier: (model_id, provider, cost_rank) derived from MODEL_PRICES
-- build_cascade_chain(): auto-derive cascade chain for any target model
-- CascadeStrategy: task complexity  starting tier selection
-- CascadeMetrics: per-(team, model) success/fail/escalation rates
-- AdequacyChecker: pluggable quality gate (heuristic  semantic)
-- CascadeEngine: orchestrates everything
-"""
+"""Companest Cascade Engine  Dynamic Model Cascade System"""
 
 import json
 import logging
@@ -27,13 +14,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-#  Language Detection & Affinity 
-
 def detect_language(text: str) -> str:
-    """Detect dominant language from Unicode ranges. Samples first 200 chars.
-
-    Returns: "zh", "ja", "ko", "en", or "multi" (mixed CJK + Latin).
-    """
+    """Detect dominant language from Unicode ranges. Samples first 200 chars."""
     sample = text[:200]
     if not sample.strip():
         return "en"
@@ -80,14 +62,7 @@ def detect_language(text: str) -> str:
 
 
 def _lang_penalty(model_id: str, lang: str) -> float:
-    """Language affinity penalty multiplier (>= 1.0).
-
-    - lang == "en"  always 1.0 (backward compatible)
-    - Model has exact lang match with strength s  1.0 + (1-s) * 0.5
-    - Model has "multi" tag  use multi strength as fallback
-    - No tag at all  1.5
-    - Complete mismatch  2.0
-    """
+    """Language affinity penalty multiplier (>= 1.0)."""
     if lang == "en":
         return 1.0
 
@@ -112,8 +87,6 @@ def _lang_penalty(model_id: str, lang: str) -> float:
     # No match at all
     return 2.0
 
-
-#  ModelTier & auto-derived chains 
 
 @dataclass
 class ModelTier:
@@ -159,13 +132,7 @@ def build_cascade_chain(
     same_provider_only: bool = True,
     lang: str = "en",
 ) -> List[str]:
-    """Auto-derive cascade chain for a target model.
-
-    Returns models from cheapest to target, filtered to same provider.
-    With same_provider_only=False, allows cross-provider mixing.
-    When lang != "en", models are sorted by cost_rank * lang_penalty
-    so language-matching models rank cheaper (earlier in the chain).
-    """
+    """Auto-derive cascade chain for a target model."""
     # Find target tier
     target_tier = None
     for t in tiers:
@@ -235,8 +202,6 @@ def get_downgrade(model_id: str, tiers: Optional[List[ModelTier]] = None) -> Opt
     return best.model_id if best else None
 
 
-#  CascadeStrategy 
-
 @dataclass
 class CascadeStrategy:
     """Decides which tier to start from based on task analysis."""
@@ -278,13 +243,7 @@ class CascadeStrategy:
         chain: List[str],
         metrics: Optional["CascadeMetrics"] = None,
     ) -> int:
-        """Return index into chain to start from.
-
-        - complexity < 0.2  start at index 0 (cheapest)
-        - complexity 0.2-0.5  start at index 0
-        - complexity > 0.5  skip to index 1+ (skip cheapest)
-        - If metrics show cheapest always fails  skip it
-        """
+        """Return index into chain to start from."""
         if len(chain) <= 1:
             return 0
 
@@ -300,8 +259,6 @@ class CascadeStrategy:
 
         return start
 
-
-#  CascadeMetrics 
 
 @dataclass
 class CascadeMetrics:
@@ -329,10 +286,7 @@ class CascadeMetrics:
         return stats["successes"] / stats["attempts"]
 
     def should_skip(self, model: str, threshold: float = 0.15) -> bool:
-        """Skip model if success rate < threshold (historically inadequate).
-
-        Requires at least 5 attempts before skipping to avoid premature decisions.
-        """
+        """Skip model if success rate < threshold (historically inadequate)."""
         stats = self.model_stats.get(model)
         if not stats or stats["attempts"] < 5:
             return False
@@ -352,8 +306,6 @@ class CascadeMetrics:
             "model_stats": self.model_stats,
         })
 
-
-#  AdequacyChecker 
 
 # Patterns that indicate the model refused or punted on the task.
 REFUSAL_PATTERNS = re.compile(
@@ -421,15 +373,8 @@ class AdequacyChecker:
         return is_adequate, round(quality, 2)
 
 
-#  CascadeEngine 
-
 class CascadeEngine:
-    """Replaces the cascade logic previously embedded in Pi.run().
-
-    Auto-derives cascade chains from MODEL_PRICES (single source of truth).
-    Supports task complexity estimation, historical learning, and pluggable
-    adequacy checking.
-    """
+    """Replaces the cascade logic previously embedded in Pi.run()."""
 
     def __init__(
         self,
@@ -458,10 +403,7 @@ class CascadeEngine:
         skip_models: Optional[List[str]] = None,
         lang: Optional[str] = None,
     ) -> List[str]:
-        """Chain with complexity-based start + historically-bad models skipped.
-
-        If lang is None, auto-detects from task text.
-        """
+        """Chain with complexity-based start + historically-bad models skipped."""
         if lang is None:
             lang = detect_language(task)
         chain = self.get_chain(target_model, lang=lang)
@@ -493,12 +435,7 @@ class CascadeEngine:
         metrics: Optional[CascadeMetrics] = None,
         lang: Optional[str] = None,
     ) -> float:
-        """Estimate expected cost across cascade chain.
-
-        Uses success rates from metrics to weight expected cost per tier.
-        Without metrics, assumes each tier has 50% chance of adequacy
-        (except the last tier which always runs if reached).
-        """
+        """Estimate expected cost across cascade chain."""
         chain = self.get_effective_chain(target_model, task, metrics, lang=lang)
         if not chain:
             return 0.0

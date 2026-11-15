@@ -1,15 +1,3 @@
-"""
-Companest Scheduler
-
-Lightweight periodic task runner for background jobs:
-- Memory backup to S3 (every 4 hours)
-- Idle team eviction (every 5 minutes)
-- Spending report (daily)
-- Custom scheduled tasks
-
-Uses asyncio  no external scheduler dependency.
-"""
-
 import asyncio
 import logging
 from dataclasses import dataclass, field
@@ -40,17 +28,7 @@ class ScheduledTask:
 
 
 class Scheduler:
-    """
-    Async periodic task scheduler.
-
-    Usage:
-        scheduler = Scheduler()
-        scheduler.add("backup", archiver.backup_snapshot, interval=14400)
-        scheduler.add("evict", registry.evict_idle, interval=300)
-        await scheduler.start()
-        # ... later ...
-        await scheduler.stop()
-    """
+    """Async periodic task scheduler."""
 
     def __init__(self):
         self._tasks: Dict[str, ScheduledTask] = {}

@@ -1,13 +1,4 @@
-"""
-Tests for model routing, provider resolution, and the fixes from the
-DeepSeek/Kimi call-chain PR review.
-
-Covers:
-- Shared resolve_model_endpoint() for proxy/direct/missing-key/unsupported
-- Pi._run_openai wrapper and max_turns propagation
-- Dreamer empty-choices handling
-- CostGate downgrade UX when suggested_downgrade is None
-"""
+"""Tests for model routing, provider resolution, and the fixes from the DeepSeek/Kimi call-chain PR review."""
 
 import asyncio
 import os
@@ -27,9 +18,7 @@ from companest.model_routing import (
 from companest.exceptions import ConfigurationError
 
 
-# ---------------------------------------------------------------------------
 # detect_provider
-# ---------------------------------------------------------------------------
 
 class TestDetectProvider:
     def test_claude_models(self):
@@ -57,9 +46,7 @@ class TestDetectProvider:
         assert detect_provider("some-unknown-model", proxy_enabled=True) == PROVIDER_OPENAI
 
 
-# ---------------------------------------------------------------------------
 # resolve_model_endpoint
-# ---------------------------------------------------------------------------
 
 def _make_proxy(enabled=True, base_url="http://proxy:4000", key="sk-proxy"):
     return SimpleNamespace(
@@ -147,9 +134,7 @@ class TestResolveModelEndpoint:
             ep = resolve_model_endpoint(model, proxy)
             assert ep.provider in (PROVIDER_ANTHROPIC, PROVIDER_OPENAI)
 
-# ---------------------------------------------------------------------------
 # Removed config validation
-# ---------------------------------------------------------------------------
 
 class TestRemovedProxyConfig:
     def test_subscription_mode_is_rejected(self):
@@ -157,9 +142,7 @@ class TestRemovedProxyConfig:
             CompanestConfig(proxy={"enabled": True, "subscription_mode": True})
 
 
-# ---------------------------------------------------------------------------
 # build_chat_model: endpoint selection for the agent runtime
-# ---------------------------------------------------------------------------
 
 class TestBuildChatModel:
     """build_chat_model picks the right LangChain model class and endpoint."""
@@ -203,9 +186,7 @@ class TestBuildChatModel:
                 build_chat_model("deepseek-chat")
 
 
-# ---------------------------------------------------------------------------
 # Dreamer: empty choices
-# ---------------------------------------------------------------------------
 
 class TestDreamerEmptyChoices:
     """Dreamer._call_llm_openai must handle empty choices gracefully."""
@@ -293,9 +274,7 @@ class TestDreamerEmptyChoices:
             assert result == "result"
 
 
-# ---------------------------------------------------------------------------
 # CostGate: downgrade UX
-# ---------------------------------------------------------------------------
 
 class TestCostGateDowngradeUX:
     """Downgrade option should not appear when suggested_downgrade is None."""

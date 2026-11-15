@@ -1,20 +1,4 @@
-"""
-Companest Data Feed Fetchers
-
-Pure async functions for fetching data from external sources.
-No LLM calls  just HTTP fetches + parsing.
-
-Supported sources:
-- Brave Search (requires BRAVE_API_KEY)
-- RSS / Atom feeds
-- Reddit public JSON API
-- Hacker News API
-- X / Twitter (requires X_BEARER_TOKEN)
-- OpenBB (requires local OpenBB API server, OPENBB_API_URL env var)
-
-All functions return List[Dict] with normalized item format:
-    {"title": ..., "url": ..., "source": ..., "snippet": ..., "timestamp": ...}
-"""
+"""Companest Data Feed Fetchers"""
 
 import asyncio
 import logging
@@ -51,8 +35,6 @@ async def close_client() -> None:
         _client = None
 
 
-#  Rate Limiting 
-
 # Per-source minimum interval (seconds) between requests
 _RATE_LIMITS: Dict[str, float] = {
     "brave": 1.0,
@@ -77,8 +59,6 @@ async def _rate_limit(source: str) -> None:
         await asyncio.sleep(min_interval - elapsed)
     _last_request_time[source] = time.monotonic()
 
-
-#  Result Cache 
 
 _CACHE_TTL = 300  # 5 minutes
 _cache: Dict[str, Any] = {}  # key -> (timestamp, result)
@@ -108,26 +88,13 @@ def _cache_set(key: str, result: List[Dict]) -> None:
     _cache[key] = (time.monotonic(), result)
 
 
-#  Brave Search 
-
 async def brave_search(
     query: str,
     count: int = 10,
     freshness: str = "",
     api_key: Optional[str] = None,
 ) -> List[Dict]:
-    """
-    Search via Brave Search API.
-
-    Args:
-        query: Search query string
-        count: Number of results (max 20)
-        freshness: Time filter  "" (any), "pd" (past day), "pw" (past week), "pm" (past month)
-        api_key: Brave API key (falls back to BRAVE_API_KEY env var)
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp"}
-    """
+    """Search via Brave Search API."""
     key = api_key or os.getenv("BRAVE_API_KEY", "")
     if not key:
         return [{"error": "BRAVE_API_KEY not set"}]
@@ -171,19 +138,8 @@ async def brave_search(
     return items
 
 
-#  RSS / Atom 
-
 async def fetch_rss(url: str, limit: int = 15) -> List[Dict]:
-    """
-    Fetch and parse an RSS or Atom feed.
-
-    Args:
-        url: Feed URL (RSS 2.0 or Atom)
-        limit: Max items to return
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp"}
-    """
+    """Fetch and parse an RSS or Atom feed."""
     ck = _cache_key("fetch_rss", url, limit)
     cached = _cache_get(ck)
     if cached is not None:
@@ -246,24 +202,12 @@ def _xml_text(
     return text
 
 
-#  Reddit 
-
 async def fetch_reddit(
     subreddit: str,
     sort: str = "hot",
     limit: int = 10,
 ) -> List[Dict]:
-    """
-    Fetch Reddit posts via public JSON API (no auth required).
-
-    Args:
-        subreddit: Subreddit name (without r/ prefix)
-        sort: "hot", "new", "top", "rising"
-        limit: Number of posts (max 25)
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp", "score", "comments"}
-    """
+    """Fetch Reddit posts via public JSON API (no auth required)."""
     ck = _cache_key("fetch_reddit", subreddit, sort, limit)
     cached = _cache_get(ck)
     if cached is not None:
@@ -303,22 +247,11 @@ async def fetch_reddit(
     return items
 
 
-#  Hacker News 
-
 async def fetch_hn(
     story_type: str = "top",
     limit: int = 15,
 ) -> List[Dict]:
-    """
-    Fetch Hacker News stories via official API.
-
-    Args:
-        story_type: "top", "new", "best", "ask", "show"
-        limit: Number of stories to fetch (max 30)
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp", "score", "comments"}
-    """
+    """Fetch Hacker News stories via official API."""
     ck = _cache_key("fetch_hn", story_type, limit)
     cached = _cache_get(ck)
     if cached is not None:
@@ -363,27 +296,12 @@ async def fetch_hn(
     return items
 
 
-#  X / Twitter 
-
 async def fetch_x(
     username: str,
     limit: int = 10,
     bearer_token: Optional[str] = None,
 ) -> List[Dict]:
-    """
-    Fetch X/Twitter user timeline via API v2.
-
-    Requires X_BEARER_TOKEN env var or explicit bearer_token.
-    Returns empty list with error message if not configured.
-
-    Args:
-        username: X handle (without @)
-        limit: Number of tweets (max 100)
-        bearer_token: Bearer token (falls back to X_BEARER_TOKEN env var)
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp"}
-    """
+    """Fetch X/Twitter user timeline via API v2."""
     token = bearer_token or os.getenv("X_BEARER_TOKEN", "")
     if not token:
         return [{"error": "X_BEARER_TOKEN not set  X feed disabled"}]
@@ -438,8 +356,6 @@ async def fetch_x(
     return items
 
 
-#  OpenBB 
-
 _OPENBB_ENDPOINTS = {
     "quote": "/api/v1/equity/price/quote",
     "historical": "/api/v1/equity/price/historical",
@@ -455,21 +371,7 @@ async def fetch_openbb(
     provider: str = "yfinance",
     base_url: Optional[str] = None,
 ) -> List[Dict]:
-    """
-    Fetch financial data from a local OpenBB API server.
-
-    Requires a running OpenBB API (``openbb-api`` or uvicorn).
-    Server URL defaults to OPENBB_API_URL env var or http://127.0.0.1:6900.
-
-    Args:
-        symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,NVDA")
-        data_type: One of "quote", "historical", "news", "economy", "crypto"
-        provider: Data provider backend (default "yfinance")
-        base_url: Override server URL
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp", ...}
-    """
+    """Fetch financial data from a local OpenBB API server."""
     url = base_url or os.getenv("OPENBB_API_URL", "http://127.0.0.1:6900")
     endpoint = _OPENBB_ENDPOINTS.get(data_type)
     if not endpoint:
@@ -598,17 +500,7 @@ async def fetch_polymarket(
     limit: int = 10,
     active_only: bool = True,
 ) -> List[Dict]:
-    """
-    Fetch prediction markets from Polymarket CLOB API.
-
-    Args:
-        query: Search query to filter markets
-        limit: Number of markets to return (max 50)
-        active_only: Only return active/open markets
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp", ...}
-    """
+    """Fetch prediction markets from Polymarket CLOB API."""
     ck = _cache_key("fetch_polymarket", query, limit, active_only)
     cached = _cache_get(ck)
     if cached is not None:
@@ -661,17 +553,7 @@ async def fetch_kalshi(
     limit: int = 10,
     status: str = "open",
 ) -> List[Dict]:
-    """
-    Fetch prediction markets from Kalshi public API.
-
-    Args:
-        query: Search query to filter markets
-        limit: Number of markets to return (max 50)
-        status: Market status filter ("open", "closed", "settled")
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp", ...}
-    """
+    """Fetch prediction markets from Kalshi public API."""
     ck = _cache_key("fetch_kalshi", query, limit, status)
     cached = _cache_get(ck)
     if cached is not None:
@@ -722,17 +604,7 @@ async def fetch_metaculus(
     limit: int = 10,
     order_by: str = "-activity",
 ) -> List[Dict]:
-    """
-    Fetch prediction questions from Metaculus API.
-
-    Args:
-        query: Search query to filter questions
-        limit: Number of questions to return (max 50)
-        order_by: Sort order ("-activity", "-publish_time", "-resolve_time")
-
-    Returns:
-        List of {"title", "url", "source", "snippet", "timestamp", ...}
-    """
+    """Fetch prediction questions from Metaculus API."""
     ck = _cache_key("fetch_metaculus", query, limit, order_by)
     cached = _cache_get(ck)
     if cached is not None:
@@ -797,17 +669,7 @@ async def fetch_multi_source(
     sources: Optional[List[str]] = None,
     per_source_limit: int = 5,
 ) -> List[Dict]:
-    """
-    Fetch from multiple sources in parallel and merge results.
-
-    Args:
-        query: Search query (used as subreddit for Reddit, URL for RSS).
-        sources: List of source names. Default: ["brave", "hn", "reddit"].
-        per_source_limit: Max items per source.
-
-    Returns:
-        Merged list of feed items from all sources, errors included.
-    """
+    """Fetch from multiple sources in parallel and merge results."""
     if sources is None:
         sources = ["brave", "hn", "reddit"]
 

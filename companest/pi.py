@@ -1,14 +1,4 @@
-"""
-Companest Pi Agent
-
-The minimal agent unit: one LangChain agent (model + tools) per run, for
-every provider. There is no hand-written tool-use loop.
-
-Pi is stateless: each run() builds and invokes a fresh agent.
-Memory persists on disk via MemoryManager, not in the Pi instance.
-
-Supports model cascade: try cheap model first, escalate on failure/refusal.
-"""
+"""Companest Pi Agent"""
 
 import asyncio
 import logging
@@ -42,13 +32,7 @@ class PiConfig:
 
 
 class Pi:
-    """
-    Minimal agent unit, built on LangChain's create_agent.
-
-    Usage:
-        pi = Pi(config, memory, team_id="stock")
-        result = await pi.run("Analyze TSLA stock movement today")
-    """
+    """Minimal agent unit, built on LangChain's create_agent."""
 
     def __init__(
         self,
@@ -89,12 +73,7 @@ class Pi:
 
     @staticmethod
     def configure_proxy(proxy_config: "ProxyConfig") -> None:
-        """Set proxy env vars once at startup.
-
-        Called from orchestrator.init_teams() when proxy is enabled. Pi agents
-        get the proxy endpoint explicitly; the router and Dreamer create raw
-        provider clients that read these variables.
-        """
+        """Set proxy env vars once at startup."""
         import os
         if not proxy_config or not proxy_config.enabled:
             return
@@ -112,16 +91,7 @@ class Pi:
         on_progress: ProgressCallback = None,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Execute a task.
-
-        Args:
-            task: The prompt / instruction.
-            timeout: Hard timeout in seconds.
-            cascade: If True, try cheap model first and escalate on
-                     failure or low-quality response.
-            on_progress: Optional async callback for progress updates.
-            user_context: Optional dict with user_id, chat_id, channel for scheduling tools.
-        """
+        """Execute a task."""
         self._user_context = user_context
         try:
             # Extract company context for system prompt injection
@@ -138,7 +108,6 @@ class Pi:
             if not cascade:
                 return await self._run_single(task, system, timeout)
 
-            # -- Cascade mode (via CascadeEngine) --------------------
             engine = self.cascade_engine or CascadeEngine()
             metrics = CascadeMetrics.load(self.memory, self.team_id)
             chain = engine.get_effective_chain(self.model, task, metrics)
@@ -202,7 +171,6 @@ class Pi:
         finally:
             self._user_context = None
 
-    # -- Internal execution helpers ------------------------------
 
     @staticmethod
     def _resolve_memory_task_hint(
@@ -353,12 +321,7 @@ class Pi:
         return usage
 
     def _build_deny_set(self) -> set:
-        """Compute effective deny set from PiConfig.tools_deny + DEFAULT_TOOLS_DENY.
-
-        - tools_deny=[] (default) -uses DEFAULT_TOOLS_DENY
-        - tools_deny=["Bash", "Write"] -uses that set (overrides global)
-        - tools_deny=["none"] -empty set (trusted Pi, no denials)
-        """
+        """Compute effective deny set from PiConfig.tools_deny + DEFAULT_TOOLS_DENY."""
         if not self.tools_deny:
             return set(DEFAULT_TOOLS_DENY)
         if self.tools_deny == ["none"]:

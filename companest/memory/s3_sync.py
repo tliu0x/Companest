@@ -1,17 +1,4 @@
-"""
-Companest S3 Sync  Memory Snapshot Sync to S3
-
-Syncs memory snapshots to/from S3-compatible object storage at the
-team-entry level (not system-wide tar.gz like MemoryArchiver).
-
-Use cases:
-- Disaster recovery with point-in-time restore per team
-- Cross-instance migration (move a team's memory to another deployment)
-- Periodic entry-level backup (complementary to MemoryArchiver snapshots)
-
-Requires a MemoryBackend that supports snapshots
-(supports_snapshot == True).
-"""
+"""Companest S3 Sync  Memory Snapshot Sync to S3"""
 
 import json
 import logging
@@ -42,13 +29,7 @@ class S3SyncConfig:
 
 
 class S3Sync:
-    """
-    Sync memory snapshots to S3-compatible storage.
-
-    Operates at the team level: each team's memory is serialized to a
-    JSON snapshot and uploaded as a single S3 object. This complements
-    the system-level MemoryArchiver (tar.gz of entire .companest/).
-    """
+    """Sync memory snapshots to S3-compatible storage."""
 
     def __init__(
         self,
@@ -87,12 +68,7 @@ class S3Sync:
         return f"{self._config.prefix}{team_id}/{timestamp}.json"
 
     def upload_snapshot(self, team_id: str) -> str:
-        """
-        Export a snapshot from the backend and upload to S3.
-
-        Returns:
-            The S3 object key for the uploaded snapshot.
-        """
+        """Export a snapshot from the backend and upload to S3."""
         snapshot = self._backend.export_snapshot(team_id)
         now = datetime.now(timezone.utc)
         timestamp = now.strftime("%Y%m%dT%H%M%SZ")
@@ -119,12 +95,7 @@ class S3Sync:
         return key
 
     def download_snapshot(self, team_id: str, s3_key: str) -> Dict[str, Any]:
-        """
-        Download a snapshot from S3.
-
-        Returns:
-            The snapshot dict (contains 'team_id', 'timestamp', 'snapshot').
-        """
+        """Download a snapshot from S3."""
         s3 = self._get_s3()
         resp = s3.get_object(Bucket=self._config.bucket, Key=s3_key)
         body = resp["Body"].read().decode("utf-8")
@@ -136,9 +107,7 @@ class S3Sync:
         return data
 
     def restore_from_s3(self, team_id: str, s3_key: str) -> None:
-        """
-        Download a snapshot from S3 and restore it to the backend.
-        """
+        """Download a snapshot from S3 and restore it to the backend."""
         data = self.download_snapshot(team_id, s3_key)
         snapshot = data.get("snapshot", data)
         self._backend.restore_snapshot(team_id, snapshot)
@@ -148,12 +117,7 @@ class S3Sync:
         )
 
     def sync_all_teams(self) -> Dict[str, str]:
-        """
-        Export and upload snapshots for all teams.
-
-        Returns:
-            Dict mapping team_id to S3 object key.
-        """
+        """Export and upload snapshots for all teams."""
         stats = self._backend.get_all_stats()
         results: Dict[str, str] = {}
 
@@ -170,12 +134,7 @@ class S3Sync:
         return results
 
     def list_snapshots(self, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        List available snapshots in S3, optionally filtered by team.
-
-        Returns:
-            List of dicts with 'key', 'team_id', 'last_modified', 'size'.
-        """
+        """List available snapshots in S3, optionally filtered by team."""
         s3 = self._get_s3()
         prefix = self._config.prefix
         if team_id:

@@ -1,8 +1,4 @@
-"""
-Companest shared utilities.
-
-Robust JSON extraction from LLM output, shared across modes and dreamer.
-"""
+"""Companest shared utilities."""
 
 import json
 import re
@@ -10,13 +6,7 @@ from typing import Any, Dict, List, Optional
 
 
 def extract_json_object(raw: str) -> Optional[Dict[str, Any]]:
-    """Extract a JSON object from LLM output that may contain surrounding text.
-
-    Strategy (in order):
-    1. Direct json.loads
-    2. Extract from markdown code block (```json ... ``` or ``` ... ```)
-    3. Balanced-brace extraction (handles nested {})
-    """
+    """Extract a JSON object from LLM output that may contain surrounding text."""
     stripped = raw.strip()
 
     # 1. Direct parse
@@ -51,17 +41,7 @@ def extract_json_object(raw: str) -> Optional[Dict[str, Any]]:
 
 
 def extract_json_array(raw: str, max_items: int = 0) -> Optional[List[Any]]:
-    """Extract a JSON array from LLM output that may contain surrounding text.
-
-    Strategy (in order):
-    1. Direct json.loads
-    2. Extract from markdown code block
-    3. Balanced-bracket extraction (handles nested [])
-
-    Args:
-        raw: Raw LLM output text
-        max_items: If >0, truncate the array to this many items
-    """
+    """Extract a JSON array from LLM output that may contain surrounding text."""
     stripped = raw.strip()
 
     # 1. Direct parse
@@ -96,11 +76,7 @@ def extract_json_array(raw: str, max_items: int = 0) -> Optional[List[Any]]:
 
 
 def _extract_balanced(text: str, open_char: str, close_char: str) -> Optional[str]:
-    """Extract the first balanced substring delimited by open/close chars.
-
-    Handles nested delimiters and JSON strings (skips chars inside quotes).
-    Returns the matched substring including delimiters, or None.
-    """
+    """Extract the first balanced substring delimited by open/close chars."""
     start = text.find(open_char)
     if start == -1:
         return None

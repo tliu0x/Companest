@@ -1,16 +1,4 @@
-"""
-Companest LiteLLM Client
-
-Thin async HTTP client for the LiteLLM management API.
-Used by CostGate for accurate spend tracking and by CLI for key management.
-
-Endpoints used:
-- POST /team/new  create a team with budget
-- POST /key/generate  create a virtual key for a team
-- GET  /team/info  get team spend info
-- GET  /global/spend/report  total spend across all teams
-- GET  /key/info  list keys
-"""
+"""Companest LiteLLM Client"""
 
 import asyncio
 import logging
@@ -85,16 +73,7 @@ class LiteLLMClient:
     async def create_team(
         self, team_id: str, budget_usd: float, models: Optional[List[str]] = None,
     ) -> dict:
-        """Create a team with budget on LiteLLM proxy.
-
-        Args:
-            team_id: Unique team identifier
-            budget_usd: Max budget in USD
-            models: Optional list of allowed model names
-
-        Returns:
-            LiteLLM team creation response
-        """
+        """Create a team with budget on LiteLLM proxy."""
         payload: Dict[str, Any] = {
             "team_alias": team_id,
             "max_budget": budget_usd,
@@ -112,16 +91,7 @@ class LiteLLMClient:
         models: Optional[List[str]] = None,
         max_budget: Optional[float] = None,
     ) -> str:
-        """Generate a virtual API key for a team.
-
-        Args:
-            team_id: Team to associate the key with
-            models: Optional model restrictions
-            max_budget: Optional per-key budget
-
-        Returns:
-            The generated virtual key string
-        """
+        """Generate a virtual API key for a team."""
         payload: Dict[str, Any] = {"team_id": team_id}
         if models:
             payload["models"] = models
@@ -134,14 +104,7 @@ class LiteLLMClient:
         return key
 
     async def get_team_spend(self, team_id: str) -> float:
-        """Get total spend for a team.
-
-        Args:
-            team_id: Team identifier
-
-        Returns:
-            Total spend in USD
-        """
+        """Get total spend for a team."""
         try:
             result = await self._request(
                 "GET", "/team/info", params={"team_id": team_id},
@@ -153,11 +116,7 @@ class LiteLLMClient:
             raise
 
     async def get_total_spend(self) -> dict:
-        """Get global spend report.
-
-        Returns:
-            Dict with total spend and per-team breakdown
-        """
+        """Get global spend report."""
         try:
             result = await self._request("GET", "/global/spend/report")
             return result
@@ -166,23 +125,12 @@ class LiteLLMClient:
             return {"total_spend": 0.0}
 
     async def list_keys(self) -> list:
-        """List all virtual keys.
-
-        Returns:
-            List of key info dicts
-        """
+        """List all virtual keys."""
         result = await self._request("GET", "/key/info")
         return result if isinstance(result, list) else result.get("keys", [])
 
     async def get_key_spend(self, key: str) -> float:
-        """Get spend for a specific virtual key.
-
-        Args:
-            key: The virtual API key
-
-        Returns:
-            Total spend in USD for this key
-        """
+        """Get spend for a specific virtual key."""
         try:
             result = await self._request(
                 "GET", "/key/info", params={"key": key},
@@ -197,15 +145,7 @@ class LiteLLMClient:
             raise
 
     async def reconcile_spend(self, team_id: str, local_spend: float) -> Dict[str, Any]:
-        """Compare local spend tracking with LiteLLM remote spend.
-
-        Args:
-            team_id: Team identifier
-            local_spend: Locally tracked spend amount
-
-        Returns:
-            Dict with remote_spend, local_spend, drift, and drift_pct
-        """
+        """Compare local spend tracking with LiteLLM remote spend."""
         remote_spend = await self.get_team_spend(team_id)
         drift = remote_spend - local_spend
         drift_pct = (abs(drift) / max(local_spend, 0.0001)) * 100
@@ -228,11 +168,7 @@ class LiteLLMClient:
         return result
 
     async def health(self) -> bool:
-        """Check if LiteLLM proxy is reachable.
-
-        Returns:
-            True if healthy, False otherwise
-        """
+        """Check if LiteLLM proxy is reachable."""
         try:
             client = self._get_client()
             response = await client.get(f"{self.base_url}/health", timeout=5)

@@ -1,16 +1,4 @@
-"""
-Companest Multi-Team Execution
-
-Module-level functions for running tasks across multiple Pi Agent Teams.
-Extracted from CompanestOrchestrator to keep orchestrator slim.
-
-Usage:
-    result = await run_multi_team(
-        run_team_fn=orchestrator.run_team,
-        decision=routing_decision,
-        mode="cascade",
-    )
-"""
+"""Companest Multi-Team Execution"""
 
 import asyncio
 import logging
@@ -43,19 +31,7 @@ async def run_multi_team(
     on_progress: ProgressCallback = None,
     user_context: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """
-    Execute a multi-team routing decision.
-
-    Args:
-        run_team_fn: Callable matching orchestrator.run_team() signature.
-        decision: RoutingDecision with multiple teams.
-        mode: Execution mode per team.
-        on_progress: Optional async callback for progress updates.
-        user_context: Optional user context for scheduling tools.
-
-    Returns:
-        Synthesized result string.
-    """
+    """Execute a multi-team routing decision."""
     assignments = sorted(decision.teams, key=lambda a: a.priority)
 
     if decision.strategy == "parallel":

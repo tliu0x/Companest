@@ -1,9 +1,4 @@
-"""
-Loop execution mode -decompose -iterate with fresh context -synthesize.
-
-Ralph Loop: each subtask runs as an independent Pi.run() call with a clean
-context window. Progress is persisted in team memory for auditing.
-"""
+"""Loop execution mode -decompose -iterate with fresh context -synthesize."""
 
 import hashlib
 import logging
@@ -160,10 +155,7 @@ class LoopMode(ExecutionMode):
 
 
 def _parse_json_array(raw: str, max_items: int) -> List[str]:
-    """Extract a JSON array of strings from LLM output (may contain markdown).
-
-    Uses robust balanced-bracket extraction from utils, with a line-based fallback.
-    """
+    """Extract a JSON array of strings from LLM output (may contain markdown)."""
     parsed = extract_json_array(raw, max_items=max_items)
     if parsed is not None:
         return [str(x) for x in parsed]

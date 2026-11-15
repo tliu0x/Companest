@@ -151,7 +151,6 @@ class TestCollaborativePipeline:
         assert "a_output" in b_prompt
 
 
-
 def test_collaborative_passes_memory_task_hint(tmp_path):
     team = _make_team(str(tmp_path), ["a", "b"])
     team.pis["a"].run = AsyncMock(return_value="a_output")

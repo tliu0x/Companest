@@ -1,8 +1,4 @@
-"""
-Companest EventBus Tests
-
-Tests for the async pub/sub event system.
-"""
+"""Companest EventBus Tests"""
 
 import asyncio
 

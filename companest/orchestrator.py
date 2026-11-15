@@ -1,20 +1,3 @@
-"""
-Companest Orchestrator
-
-The central coordinator for the Companest framework.
-Routes tasks to Pi Agent Teams via the pipeline:
-
-    SmartRouter.route() -CostGate -TeamRegistry -AgentTeam.run()
-
-Usage:
-    config = CompanestConfig.from_markdown(".companest/config.md")
-    orchestrator = CompanestOrchestrator(config)
-    orchestrator.init_teams(".companest")
-
-    result, decision = await orchestrator.run_auto("Analyze TSLA")
-    result = await orchestrator.run_team("Analyze TSLA", "stock")
-"""
-
 import importlib.util
 import logging
 import asyncio
@@ -91,18 +74,7 @@ logger = logging.getLogger(__name__)
 
 
 class CompanestOrchestrator:
-    """
-    Companest Orchestrator - Central coordinator for task execution.
-
-    Primary entry point is run_team() which routes tasks to Pi Agent Teams.
-
-    Example:
-        config = CompanestConfig.from_markdown(".companest/config.md")
-        orchestrator = CompanestOrchestrator(config)
-        orchestrator.init_teams(".companest")
-
-        result = await orchestrator.run_team("Analyze this stock", "stock")
-    """
+    """Companest Orchestrator - Central coordinator for task execution."""
 
     def __init__(self, config: CompanestConfig):
         self.config = config
@@ -148,11 +120,7 @@ class CompanestOrchestrator:
     def add_routing_binding(
         self, pattern: str, team_id: str, mode: str = "cascade",
     ) -> None:
-        """Add a deterministic regex binding rule for fast routing.
-
-        Bindings run before LLM routing -first match wins.
-        Can be called before or after init_teams().
-        """
+        """Add a deterministic regex binding rule for fast routing."""
         if hasattr(self, "_smart_router"):
             self._smart_router.add_binding(pattern, team_id, mode)
         else:
@@ -192,7 +160,6 @@ class CompanestOrchestrator:
             status.update(self.get_teams_status())
         return status
 
-    #  Pi Agent Team integration 
 
     def init_teams(
         self,
@@ -200,17 +167,7 @@ class CompanestOrchestrator:
         s3_bucket: Optional[str] = None,
         s3_region: str = "us-east-2",
     ) -> None:
-        """
-        Initialize the Pi Agent Team subsystem.
-
-        Sets up MemoryManager, TeamRegistry, CostGate, Scheduler,
-        and optionally MemoryArchiver for S3 backup.
-
-        Args:
-            base_path: Path to .companest/ directory
-            s3_bucket: S3 bucket for memory backup (None = skip)
-            s3_region: AWS region for S3
-        """
+        """Initialize the Pi Agent Team subsystem."""
         self.memory = MemoryManager(base_path)
 
         # Instantiate memory backend based on config.
@@ -375,11 +332,9 @@ class CompanestOrchestrator:
             self._smart_router.add_binding(pattern, team_id, mode)
         self._pending_bindings = []
 
-        #  Workspace Registry (for coding teams) 
         self.workspace_registry = WorkspaceRegistry(base_path)
         self.workspace_registry.load()
 
-        #  Company Registry + CEO Agents 
         self.company_registry = CompanyRegistry(base_path)
         self.company_registry.scan()
         self._ceo_pis: Dict[str, Pi] = {}
@@ -404,16 +359,9 @@ class CompanestOrchestrator:
             f"{len(self._ceo_pis)} CEO agents"
         )
 
-    #  Team Access Control 
 
     def _legacy_can_access_team(self, company_id: Optional[str], team_id: str) -> bool:
-        """Check if a company is allowed to access a team.
-
-        Rules:
-        - Global teams (no '/') -accessible by all companies
-        - Private teams (contains '/') -only the owner company can access
-        - No company context -only global teams
-        """
+        """Check if a company is allowed to access a team."""
         if "/" not in team_id:
             # Global team — check shared_teams whitelist if company has one
             if company_id and hasattr(self, "company_registry"):
@@ -425,10 +373,7 @@ class CompanestOrchestrator:
         return company_id == owner
 
     def _get_company_shared_teams(self, company_id: Optional[str]) -> Optional[List[str]]:
-        """Return the company's global-team whitelist.
-
-        None means legacy unrestricted access. An empty list means no shared teams.
-        """
+        """Return the company's global-team whitelist."""
         if not company_id or not hasattr(self, "company_registry"):
             return None
         company = self.company_registry.get(company_id)
@@ -437,13 +382,7 @@ class CompanestOrchestrator:
         return company.shared_teams
 
     def can_access_team(self, company_id: Optional[str], team_id: str) -> bool:
-        """Check if a company is allowed to access a team.
-
-        Rules:
-        - Global teams: allowed if no whitelist (shared_teams is None),
-          otherwise must be in the whitelist (empty list = no access).
-        - Private teams (contains '/'): only the owner company can access.
-        """
+        """Check if a company is allowed to access a team."""
         if "/" not in team_id:
             shared_teams = self._get_company_shared_teams(company_id)
             if shared_teams is None:
@@ -452,7 +391,6 @@ class CompanestOrchestrator:
         owner = team_id.split("/", 1)[0]
         return company_id == owner
 
-    #  Company / CEO Management 
 
     def _init_company(self, company: CompanyConfig) -> None:
         """Initialize a single company: scan private teams, generate soul.md, create CEO Pi, register scheduler."""
@@ -839,12 +777,7 @@ class CompanestOrchestrator:
             self.memory.clear_cache()
 
     def set_notification_callback(self, callback) -> None:
-        """Set the notification callback (called by cli.py after MasterConnection is ready).
-
-        Args:
-            callback: async (chat_id, channel, user_id, message) -> None
-                      (i.e. MasterConnection.send_notification)
-        """
+        """Set the notification callback (called by cli.py after MasterConnection is ready)."""
         self._notification_callback = callback
         if hasattr(self, "background"):
             self.background.set_notification_callback(callback)
@@ -865,25 +798,7 @@ class CompanestOrchestrator:
         user_context: Optional[Dict[str, Any]] = None,
         priority: str = "normal",
     ) -> str:
-        """
-        Run a task via a specific Pi Agent Team.
-
-        Flow: CostGate evaluate -Team.run() -record spending.
-
-        Args:
-            task: The task/prompt
-            team_id: Target team ID
-            skip_cost_check: Skip CostGate (for meta-team internal calls)
-            mode: Execution mode override. None = use team.md default or "default"
-            on_progress: Optional async callback for progress updates
-            priority: Task priority for cost gate -"critical", "high", "normal", "low"
-
-        Returns:
-            Result string from the team's lead Pi
-
-        Raises:
-            OrchestratorError: If cost rejected or team fails
-        """
+        """Run a task via a specific Pi Agent Team."""
         if not hasattr(self, "team_registry"):
             raise OrchestratorError(
                 "Teams not initialized. Call init_teams() first."
@@ -1044,23 +959,7 @@ class CompanestOrchestrator:
         on_progress: ProgressCallback = None,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, RoutingDecision]:
-        """
-        Auto-route a task to the best team(s) using SmartRouter.
-
-        Uses LLM-powered routing (Haiku ~$0.001) with keyword fallback.
-        Supports multi-team execution (sequential/parallel) for cross-domain tasks.
-
-        Args:
-            task: The task/prompt
-            mode: Execution mode override. None = use router's decision.
-            on_progress: Optional async callback for progress updates
-
-        Returns:
-            (result_string, routing_decision)
-
-        Raises:
-            OrchestratorError: If declined, not initialized, or execution fails
-        """
+        """Auto-route a task to the best team(s) using SmartRouter."""
         if not hasattr(self, "_smart_router"):
             raise OrchestratorError(
                 "Teams not initialized. Call init_teams() first."

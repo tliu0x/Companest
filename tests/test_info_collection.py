@@ -1,12 +1,4 @@
-"""
-Integration tests for the info-collection system.
-
-Tests the full stack:
-1. Feed fetchers (live HTTP calls to Reddit, HN)
-2. Tool resolution and preset expansion
-3. Memory integration (feed.json  system prompt injection)
-4. Orchestrator wiring (scheduled + on-demand collection)
-"""
+"""Integration tests for the info-collection system."""
 
 import asyncio
 import json
@@ -25,8 +17,6 @@ from companest.tools import (
     resolve_tool_names,
 )
 
-
-#  1. Feed Fetchers (live HTTP) 
 
 class TestFeedFetchersLive:
     """Test feed fetchers against real APIs (requires network)."""
@@ -139,8 +129,6 @@ class TestFeedFetchersLive:
         assert items[0]["source"] == "openbb/news/Reuters"
 
 
-#  2. Tool Resolution 
-
 class TestToolResolution:
     """Test that collector preset resolves correctly."""
 
@@ -184,8 +172,6 @@ class TestToolResolution:
             "fetch_polymarket", "fetch_kalshi", "fetch_metaculus",
         }
 
-
-#  3. Memory Integration 
 
 class TestFeedInjection:
     """Test that feed.json gets injected into system prompts."""
@@ -286,8 +272,6 @@ class TestFeedInjection:
             assert "Item 19" in prompt
             assert "Item 20" not in prompt
 
-
-#  4. Orchestrator Wiring 
 
 class TestOrchestratorInfoCollection:
     """Test that orchestrator wires info-collection correctly."""
@@ -469,8 +453,6 @@ class TestOrchestratorInfoCollection:
         # Should not raise
         await bg.run_enrichment_cycle("info-collection", "Run collection")
 
-
-#  5. Watchlist + Team Config 
 
 class TestTeamConfig:
     """Test the info-collection team config and watchlist."""

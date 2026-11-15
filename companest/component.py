@@ -1,13 +1,4 @@
-"""
-Companest Company Component System
-
-Defines the pluggable company interface so each company is a self-contained
-component pack rather than just a config file.
-
-CompanyComponent: Protocol that companies implement (teams, schedules, hooks).
-CompanyContext:   Registration context passed to on_init().
-CompanyMemoryNamespace: Company-scoped view of MemoryManager.
-"""
+"""Companest Company Component System"""
 
 import logging
 import os
@@ -27,18 +18,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-#  Protocol 
-
-
 @runtime_checkable
 class CompanyComponent(Protocol):
-    """
-    A pluggable company definition.
-
-    Implement this to define a company as code instead of (or in addition to)
-    a static company.yaml.  The orchestrator will call the lifecycle methods
-    during init and teardown.
-    """
+    """A pluggable company definition."""
 
     @property
     def company_id(self) -> str:
@@ -59,18 +41,12 @@ class CompanyComponent(Protocol):
         ...
 
     def on_init(self, ctx: "CompanyContext") -> None:
-        """Called once during orchestrator init.
-
-        Use *ctx* to register enrichments, tools, routing bindings, etc.
-        """
+        """Called once during orchestrator init."""
         ...
 
     def on_teardown(self) -> None:
         """Called on shutdown or company removal."""
         ...
-
-
-#  Context passed to on_init 
 
 
 @dataclass
@@ -87,21 +63,8 @@ class CompanyContext:
     """register_enrichment(source)  inject enrichment into system prompts."""
 
 
-#  Company Memory Namespace 
-
-
 class CompanyMemoryNamespace:
-    """
-    Company-scoped view of MemoryManager.
-
-    Provides:
-    - **Shared memory** under ``companies/{company_id}/shared/`` for data
-      that is cross-team within one company.
-    - **Delegated team memory** that auto-prefixes team_id so each company
-      cannot accidentally read another company's private teams.
-
-    This is an *additive* wrapper  it does not replace MemoryManager.
-    """
+    """Company-scoped view of MemoryManager."""
 
     def __init__(self, manager: "MemoryManager", company_id: str) -> None:
         self._mgr = manager
@@ -112,7 +75,6 @@ class CompanyMemoryNamespace:
     def company_id(self) -> str:
         return self._company_id
 
-    #  Scoped team ID helper 
 
     def _scoped_team_id(self, team_id: str) -> str:
         """Prefix *team_id* with the company namespace to enforce isolation."""
@@ -131,7 +93,6 @@ class CompanyMemoryNamespace:
         # Bare team name → auto-prefix with company namespace
         return f"{self._company_id}/{team_id}"
 
-    #  Company-level shared memory 
 
     def _shared_dir(self) -> Path:
         d = self._mgr.base_path / "companies" / self._company_id / "shared"
@@ -160,7 +121,6 @@ class CompanyMemoryNamespace:
             if f.is_file() and not f.name.startswith(".")
         )
 
-    #  Delegated team memory (auto-prefixed) 
 
     def read_team_memory(self, team_id: str, key: str) -> Any:
         scoped = self._scoped_team_id(team_id)

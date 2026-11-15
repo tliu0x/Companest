@@ -22,9 +22,7 @@ from companest.knowledge.digests import DigestS3Store
 NOW = datetime.now(timezone.utc)
 
 
-# ---------------------------------------------------------------------------
 # Model validation
-# ---------------------------------------------------------------------------
 
 class TestDigestModels:
     def test_market_snapshot_valid(self):
@@ -130,9 +128,7 @@ class TestDigestModels:
         assert set(DIGEST_TYPE_MAP.keys()) == expected
 
 
-# ---------------------------------------------------------------------------
 # Idempotency
-# ---------------------------------------------------------------------------
 
 class TestIngestIdempotency:
     def test_first_ingest_accepted(self):
@@ -180,9 +176,7 @@ class TestIngestIdempotency:
         assert store.put_digest.call_count == 2
 
 
-# ---------------------------------------------------------------------------
 # Company ID validation
-# ---------------------------------------------------------------------------
 
 def _make_ingestor():
     """Standalone helper shared by idempotency and validation tests."""
@@ -217,9 +211,7 @@ class TestCompanyIdValidation:
         return DigestIngestor(mock_store), mock_store
 
 
-# ---------------------------------------------------------------------------
 # S3 store
-# ---------------------------------------------------------------------------
 
 class TestDigestS3Store:
     def test_put_digest_uploads_and_updates_latest(self):

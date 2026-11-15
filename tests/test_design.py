@@ -1,19 +1,4 @@
-"""
-Companest Design Verification Tests
-
-Tests that the architecture is wired correctly:
-1. Module imports  all new modules importable, no circular deps
-2. Memory hierarchy  read/write/list at all levels
-3. Team registry  scan, on-demand create, evict
-4. Cost gate  three tiers produce correct decisions
-5. Router  keyword routing accuracy
-6. Scheduler  add/start/stop lifecycle
-7. Orchestrator integration  init_teams() wires everything
-8. Server endpoints  endpoints exist on the app
-9. Exception hierarchy  all exceptions inherit CompanestError
-
-No external API keys or network access needed.
-"""
+"""Companest Design Verification Tests"""
 
 import asyncio
 import tempfile
@@ -23,8 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
-#  1. Module Imports 
 
 class TestModuleImports:
     """Verify all modules import without error."""
@@ -82,8 +65,6 @@ class TestModuleImports:
             SmartRouter, RoutingDecision, TeamAssignment,
         ])
 
-
-#  2. Memory Hierarchy 
 
 class TestMemoryHierarchy:
     """Test MemoryManager at all levels."""
@@ -156,8 +137,6 @@ class TestMemoryHierarchy:
         assert "stock" in stats
         assert stats["stock"]["files"] >= 1
 
-
-#  3. Team Registry 
 
 class TestTeamRegistry:
     """Test TeamConfig parsing and TeamRegistry lifecycle."""
@@ -283,8 +262,6 @@ class TestTeamRegistry:
         assert "stock" in reg.list_teams()
 
 
-#  4. Cost Gate 
-
 class TestCostGate:
     """Test three-tier cost approval logic."""
 
@@ -365,8 +342,6 @@ class TestCostGate:
             if downgrade is not None:
                 assert downgrade in MODEL_PRICES, f"downgrade target {downgrade} not in MODEL_PRICES"
 
-
-#  5. Router 
 
 class TestRouter:
     """Test keyword-based team routing."""
@@ -572,8 +547,6 @@ class TestRoutingDecision:
         assert a.priority == 1
 
 
-#  6. Scheduler 
-
 class TestScheduler:
     """Test scheduler lifecycle."""
 
@@ -646,8 +619,6 @@ class TestScheduler:
         assert counter["n"] == 1
 
 
-#  7. Tools 
-
 class TestTools:
     """Test tool name resolution and presets."""
 
@@ -680,8 +651,6 @@ class TestTools:
         assert result.count("Read") == 1
 
 
-#  8. Exception Hierarchy 
-
 class TestExceptions:
     """Verify all exceptions inherit from CompanestError."""
 
@@ -699,8 +668,6 @@ class TestExceptions:
         assert "test error" in str(e)
         assert "claude" in str(e)
 
-
-#  9. Server Endpoints 
 
 class TestServerEndpoints:
     """Verify API endpoints exist on the FastAPI app."""
@@ -748,8 +715,6 @@ class TestServerEndpoints:
         with pytest.raises(RuntimeError, match="COMPANEST_API_TOKEN is required"):
             server.create_app()
 
-
-#  10. Research Briefing Injection 
 
 class TestResearchBriefingInjection:
     """Test research briefing injection into system prompts."""
@@ -860,8 +825,6 @@ class TestResearchBriefingInjection:
         assert briefing_section.count("- ") == 1
 
 
-#  11. Research Team Registry 
-
 class TestResearchTeamRegistry:
     """Test research team is registered as meta-team."""
 
@@ -929,8 +892,6 @@ class TestResearchTeamRegistry:
         assert config.lead_pi == "scout"
 
 
-#  12. ToolRegistry 
-
 class TestToolRegistry:
     """Test ToolRegistry provider management."""
 
@@ -976,8 +937,6 @@ class TestToolRegistry:
         assert "Read" in result
         assert "mcp__mem__memory_read" in result
 
-
-#  13. TeamRegistry.register() 
 
 class TestTeamRegistryProgrammatic:
     """Test programmatic team registration."""
@@ -1042,8 +1001,6 @@ class TestTeamRegistryProgrammatic:
 
         assert "disabled" not in reg.list_teams()
 
-
-#  14. EnrichmentSource 
 
 class TestEnrichmentSource:
     """Test custom enrichment source registration."""
@@ -1143,8 +1100,6 @@ class TestEnrichmentSource:
         assert "Test headline" in prompt
 
 
-#  15. New exports 
-
 class TestNewExports:
     """Verify new classes are exported from the Companest package."""
 
@@ -1173,8 +1128,6 @@ class TestNewExports:
         assert "Bash" in DEFAULT_TOOLS_DENY
         assert "sessions_send" in SESSIONS_TOOL_NAMES
 
-
-#  16. Per-Agent Tool Deny List (P1) 
 
 class TestToolDenyList:
     """Test per-Pi configurable tool deny lists."""
@@ -1257,8 +1210,6 @@ class TestToolDenyList:
         assert len(pis) == 1
         assert pis[0].tools_deny == []
 
-
-#  17. Agent-to-Agent Messaging / Sessions Tools (P0) 
 
 class TestSessionsTools:
     """Test sessions tool name resolution and factory availability."""
@@ -1354,8 +1305,6 @@ class TestSessionsTools:
         assert "alpha" in teams
         assert "beta" in teams
 
-
-#  18. Binding-Based Fast Routing (P2) 
 
 class TestRoutingBindings:
     """Test deterministic regex binding rules in SmartRouter."""
@@ -1500,8 +1449,6 @@ class TestRoutingBindings:
         assert len(orch._smart_router._bindings) == 1
 
 
-#  19. CostGate Post-Hoc Mode 
-
 class TestCostGatePostHoc:
     """Test post-hoc default mode: always approve, reconcile later."""
 
@@ -1556,8 +1503,6 @@ class TestCostGatePostHoc:
         assert decision.priority == "critical"
         assert "Critical" in decision.reason
 
-
-#  20. CircuitBreaker 
 
 class TestCircuitBreaker:
     """Test CircuitBreaker velocity tracking and trip/reset behavior."""
@@ -1617,8 +1562,6 @@ class TestCircuitBreaker:
         assert status["tripped"] is True
         assert status["cooldown_remaining_seconds"] > 0
 
-
-#  21. Adaptive Budget 
 
 class TestAdaptiveBudget:
     """Test per-team budgets, overflow pool, priority multipliers, rolling window."""
@@ -1730,8 +1673,6 @@ class TestAdaptiveBudget:
         assert window_spend < 1.0  # old $100 excluded
 
 
-#  22. Budget Backward Compat 
-
 class TestBudgetBackwardCompat:
     """Test that old budget.json format gets defaults and new format reads correctly."""
 
@@ -1820,8 +1761,6 @@ class TestBudgetBackwardCompat:
         assert report["window_spend"] > 0
 
 
-#  23. RoutingDecision task_priority 
-
 class TestRoutingDecisionPriority:
     """Test task_priority field on RoutingDecision."""
 
@@ -1902,8 +1841,6 @@ class TestRoutingDecisionPriority:
             shutil.rmtree(tmpdir)
 
 
-#  24. Server New Endpoints 
-
 class TestServerNewEndpoints:
     """Test finance report and circuit breaker reset endpoints exist."""
 
@@ -1962,8 +1899,6 @@ class TestCompanyScoping:
         assert orch._initialized_company_ids() == ["ceo-disabled"]
 
 
-#  25. CostDecision priority field 
-
 class TestCostDecisionPriority:
     """Test CostDecision includes priority field."""
 
@@ -1979,8 +1914,6 @@ class TestCostDecisionPriority:
         d = CostDecision(action="auto_approve", estimate=est, reason="test", priority="high")
         assert d.priority == "high"
 
-
-#  26. EventType circuit breaker 
 
 class TestEventTypeCircuitBreaker:
     """Test CIRCUIT_BREAKER_TRIPPED event type."""

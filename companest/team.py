@@ -1,15 +1,4 @@
-"""
-Companest Agent Team + TeamRegistry
-
-AgentTeam: A group of collaborating Pi agents with shared memory.
-TeamRegistry: Dynamic team registry  scans .companest/teams/, on-demand instantiation.
-
-Execution modes (default, cascade, loop, council, collaborative) live in
-companest/modes/. AgentTeam methods are thin delegators for backward compat.
-
-Teams are pure config (directories + markdown files).
-Adding/removing a team = adding/removing a directory. Zero code changes.
-"""
+"""Companest Agent Team + TeamRegistry"""
 
 import logging
 import re
@@ -32,21 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class TeamConfig:
-    """
-    Configuration for an Agent Team, parsed from team.md.
-
-    Example team.md:
-        # Team: stock
-        - role: general
-        - lead_pi: analyst
-        - enabled: true
-        - always_on: false
-
-        #### Pi: analyst
-        - model: deepseek-chat
-        - tools: web_search, memory_read, memory_write
-        - max_turns: 10
-    """
+    """Configuration for an Agent Team, parsed from team.md."""
 
     def __init__(
         self,
@@ -132,14 +107,7 @@ class TeamConfig:
 
 
 class AgentTeam:
-    """
-    A group of collaborating Pi agents = one department.
-
-    Each team has:
-    - Shared memory (via MemoryManager)
-    - One or more Pi agents
-    - A lead_pi that handles tasks by default
-    """
+    """A group of collaborating Pi agents = one department."""
 
     def __init__(
         self,
@@ -235,12 +203,7 @@ class AgentTeam:
 
 
 class TeamRegistry:
-    """
-    Dynamic team registry  on-demand instantiation + hot reload.
-
-    Scans .companest/teams/ directory. Each subdirectory = one team definition.
-    Business teams are created on demand; meta-teams stay resident.
-    """
+    """Dynamic team registry  on-demand instantiation + hot reload."""
 
     def __init__(
         self,
@@ -308,11 +271,7 @@ class TeamRegistry:
         )
 
     def scan_company_teams(self, company_id: str, teams_dir: Path) -> None:
-        """Scan a company's private teams directory.
-
-        Private teams are registered as {company_id}/{team_id}.
-        Only the owning company can access them (enforced by orchestrator).
-        """
+        """Scan a company's private teams directory."""
         if not teams_dir.exists():
             return
         for team_dir in sorted(teams_dir.iterdir()):
@@ -380,10 +339,7 @@ class TeamRegistry:
         self._last_used[team_id] = time.time()
 
     def evict_idle(self) -> List[str]:
-        """Release team instances that have been idle longer than timeout.
-
-        Skips teams with active in-flight tasks to prevent data loss.
-        """
+        """Release team instances that have been idle longer than timeout."""
         now = time.time()
         evicted = []
         for tid, ts in list(self._last_used.items()):
@@ -399,11 +355,7 @@ class TeamRegistry:
         return evicted
 
     def reload(self) -> None:
-        """Hot reload: clear idle instances, rescan configs.
-
-        Instances with active in-flight tasks are preserved to prevent
-        data loss. They will be cleaned up by eviction after tasks complete.
-        """
+        """Hot reload: clear idle instances, rescan configs."""
         # Preserve instances with active tasks
         active_instances = {}
         active_last_used = {}
@@ -451,12 +403,7 @@ class TeamRegistry:
         return {tid: cfg for tid, cfg in self._configs.items() if tid.startswith(f"{company_id}/")}
 
     def unregister_company(self, company_id: str) -> None:
-        """Remove all teams belonging to a company.
-
-        Configs are removed immediately so no new tasks can be routed.
-        Instances with active in-flight tasks are kept alive and will be
-        cleaned up by the eviction timer after tasks complete.
-        """
+        """Remove all teams belonging to a company."""
         to_remove = [tid for tid in self._configs if tid.startswith(f"{company_id}/")]
         for tid in to_remove:
             self._configs.pop(tid, None)
@@ -501,8 +448,6 @@ class TeamRegistry:
         }
 
 
-#  Rubric parsing helper (used at config time) 
-
 def _parse_rubric(raw: str) -> Optional[List[Dict[str, Any]]]:
     """Parse 'reasoning=0.4, depth=0.3, clarity=0.3' into normalized rubric list."""
     entries = []
@@ -528,8 +473,6 @@ def _parse_rubric(raw: str) -> Optional[List[Dict[str, Any]]]:
 
     return entries
 
-
-#  Markdown parsing helpers 
 
 def _extract_field(text: str, field_name: str, default: str = None) -> Optional[str]:
     """Extract '- field_name: value' from markdown text."""

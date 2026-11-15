@@ -1,12 +1,4 @@
-"""
-Dreamer + Memory Index Tests
-
-Tests for:
-- Index CRUD (rebuild, write/read/delete updates, meta update)
-- Dreaming (mock LLM: scoring, compaction, GC)
-- CoW snapshot (restore on failure, no restore on success)
-- Integration (run_team_dream, run_all_dreams, prompt long-term section)
-"""
+"""Dreamer + Memory Index Tests"""
 
 import copy
 import json
@@ -18,9 +10,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 
 from companest.memory import MemoryManager, INDEX_FILENAME, Dreamer
-
-
-#  Fixtures 
 
 
 @pytest.fixture
@@ -72,9 +61,6 @@ def dreamer(mm):
         min_importance_to_keep=0.3,
         max_access_for_gc=2,
     )
-
-
-#  Index CRUD Tests 
 
 
 class TestIndexCRUD:
@@ -183,9 +169,6 @@ class TestIndexCRUD:
         assert "log.json" in index
         # Size should reflect the appended content
         assert index["log.json"]["size_bytes"] > 2  # more than "[]"
-
-
-#  Dreaming Tests (mock LLM) 
 
 
 class TestDreamingScoring:
@@ -344,9 +327,6 @@ class TestDreamingGC:
         assert "popular.json" not in deleted
 
 
-#  CoW Snapshot Tests 
-
-
 class TestCoWSnapshot:
 
     @pytest.mark.asyncio
@@ -384,9 +364,6 @@ class TestCoWSnapshot:
         meta = mm.get_entry_meta("alpha", "entry.json")
         assert meta["importance"] == 0.5
         assert meta["summary"] == "Test entry"
-
-
-#  Integration Tests 
 
 
 class TestDreamerIntegration:
@@ -492,9 +469,6 @@ class TestDreamerIntegration:
         # Deep consolidated entry should exist
         deep_keys = [k for k in index if k.startswith("deep-consolidated-")]
         assert len(deep_keys) == 1
-
-
-#  Memory Index in get_all_memory_stats 
 
 
 class TestOverviewGeneration:

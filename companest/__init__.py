@@ -1,20 +1,5 @@
-"""
-Companest - Pi Agent Team Orchestrator
+"""Companest - Pi Agent Team Orchestrator"""
 
-Routes tasks to Pi Agent Teams that call LLM APIs directly via SDK.
-Master connection receives tasks from Telegram/chat gateway.
-
-Core Components:
-- CompanestOrchestrator: Central coordinator (team routing)
-- Pi Agent Teams: Department-structured agent collaboration
-- CostGate: Three-tier cost approval (auto/notify/escalate)
-- SmartRouter: LLM-powered auto-routing
-- MemoryManager: Hierarchical memory (master -> team -> pi)
-- EventBus: Async pub/sub lifecycle events
-- ToolRegistry: Pluggable tool provider system
-"""
-
-#  Always-available core imports 
 from .config import (
     CompanestConfig,
     APIConfig,
@@ -78,7 +63,6 @@ from .exceptions import (
     SchedulerError,
 )
 
-#  Optional imports (may fail if extra deps not installed) 
 
 try:
     from .client import GatewayClient
@@ -112,8 +96,6 @@ try:
 except ImportError:
     UserScheduler = None
 
-
-#  Build __all__ dynamically (exclude None entries) 
 
 _all_names = [
     # Config

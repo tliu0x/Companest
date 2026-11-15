@@ -1,10 +1,4 @@
-"""
-Companest Output Sinks
-
-CEO cycle results are dispatched through OutputSink instances.
-MemorySink is always registered (results never lost).
-Additional sinks (webhook, callback, telegram) are optional.
-"""
+"""Companest Output Sinks"""
 
 import logging
 from abc import ABC, abstractmethod

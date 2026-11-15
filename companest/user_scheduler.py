@@ -1,25 +1,3 @@
-"""
-Companest User Scheduler
-
-User-facing scheduling system built on APScheduler 3.x.
-Allows users to create recurring or one-shot scheduled tasks via Pi tools.
-
-Two-layer persistence:
-- APScheduler uses in-memory store (reconstructed from DB on restart to avoid pickle issues)
-- aiosqlite stores our metadata (user_id, chat_id, task, channel)
-
-Usage:
-    scheduler = UserScheduler(data_dir=Path(".companest"))
-    await scheduler.start()
-    scheduler.set_execution_callback(my_async_fn)
-
-    job = await scheduler.add_job(
-        user_id="123", chat_id="-100456", channel="telegram",
-        task="Summarize tech news", description="Summarize tech news daily at 9am",
-        trigger_type="cron", trigger_args={"hour": 9},
-    )
-"""
-
 import asyncio
 import json
 import logging
@@ -97,12 +75,7 @@ class ScheduledJob:
 
 
 class UserScheduler:
-    """
-    User-facing scheduler wrapping APScheduler 3.x.
-
-    Provides add/cancel/list for user-created scheduled tasks.
-    Jobs survive restarts via SQLAlchemy job store + aiosqlite metadata.
-    """
+    """User-facing scheduler wrapping APScheduler 3.x."""
 
     def __init__(self, data_dir: Path):
         self._data_dir = data_dir
@@ -178,16 +151,7 @@ class UserScheduler:
         team_id: Optional[str] = None,
         mode: str = "default",
     ) -> ScheduledJob:
-        """
-        Create a new scheduled job.
-
-        Args:
-            trigger_type: "cron", "interval", or "date"
-            trigger_args: Dict passed to APScheduler trigger constructor.
-                - cron: {"hour": 9, "minute": 0}, {"day_of_week": "mon-fri", "hour": 9}
-                - interval: {"minutes": 30}, {"hours": 2}
-                - date: {"run_date": "2026-02-16T09:00:00"}
-        """
+        """Create a new scheduled job."""
         if not self._started:
             raise SchedulerError("UserScheduler not started")
 
@@ -229,12 +193,7 @@ class UserScheduler:
         return job
 
     async def cancel_job(self, job_id: str, user_id: Optional[str] = None) -> bool:
-        """
-        Cancel a scheduled job. Supports partial ID match.
-        If user_id is provided, enforces ownership.
-
-        Returns True if cancelled, False if not found.
-        """
+        """Cancel a scheduled job. Supports partial ID match. If user_id is provided, enforces ownership."""
         if not self._started:
             raise SchedulerError("UserScheduler not started")
 
@@ -296,15 +255,9 @@ class UserScheduler:
             status["next_run"] = str(jobs[0].next_run_time) if jobs else None
         return status
 
-    #  Internal helpers 
 
     def _fire_job(self, job_id: str) -> None:
-        """
-        Sync callback invoked by APScheduler when a job fires.
-
-        APScheduler 3.x requires sync callables. We bridge to async
-        by scheduling a task on the event loop captured at start().
-        """
+        """Sync callback invoked by APScheduler when a job fires."""
         def _on_task_done(task):
             exc = task.exception() if not task.cancelled() else None
             if exc:
@@ -368,10 +321,7 @@ class UserScheduler:
             logger.info(f"One-shot job {job_id} completed and deactivated")
 
     async def _restore_jobs(self) -> None:
-        """
-        On restart, reconstruct APScheduler jobs from our metadata DB.
-        Date triggers that are in the past are skipped (they already fired).
-        """
+        """On restart, reconstruct APScheduler jobs from our metadata DB."""
         if not self._scheduler or not self._db:
             return
 

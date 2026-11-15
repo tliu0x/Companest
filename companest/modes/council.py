@@ -1,9 +1,4 @@
-"""
-Council execution mode -multi-perspective synthesis.
-
-Karpathy-style council: all Pis answer independently, then lead Pi
-synthesizes a final answer. Optional judge scoring via rubric.
-"""
+"""Council execution mode -multi-perspective synthesis."""
 
 import asyncio
 import json
@@ -173,14 +168,9 @@ class CouncilMode(ExecutionMode):
             user_context=_with_memory_task_hint(user_context, task),
         )
 
-    # -- Council helpers ---------------------------------------
 
     def _get_pi_archetypes(self, team: "AgentTeam") -> Dict[str, str]:
-        """Extract archetype tags from Pi soul.md files.
-
-        Looks for '- archetype: xxx' in each Pi's soul.md.
-        Returns {pi_id: archetype} for Pis that have the tag.
-        """
+        """Extract archetype tags from Pi soul.md files."""
         archetypes = {}
         for pi_id in team.pis:
             soul = team.memory.read_pi_soul(team.id, pi_id)
@@ -197,10 +187,7 @@ class CouncilMode(ExecutionMode):
         self, team: "AgentTeam", task: str, perspectives: List[Tuple[str, str]],
         user_context: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Ask lead Pi to score each perspective against the rubric.
-
-        Returns parsed scores dict or None if parsing fails.
-        """
+        """Ask lead Pi to score each perspective against the rubric."""
         # Build criteria description for prompt
         criteria_lines = []
         for entry in team.rubric:
@@ -242,12 +229,7 @@ class CouncilMode(ExecutionMode):
         perspectives: List[Tuple[str, str]],
         judge_scores: Dict[str, Any],
     ) -> List[Tuple[str, str]]:
-        """Filter out low-scoring perspectives.
-
-        Rules:
-        - Drop perspectives with weighted score < mean * 0.7
-        - Keep at least 2 perspectives
-        """
+        """Filter out low-scoring perspectives."""
         scores = judge_scores.get("scores", {})
         if not scores:
             return perspectives
@@ -308,8 +290,6 @@ class CouncilMode(ExecutionMode):
         return "\n".join(lines) + "\n\n"
 
 
-# -- Module-level helpers --------------------------------------
-
 def _parse_judge_response(
     raw: str, rubric: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
@@ -353,6 +333,5 @@ def _parse_judge_response(
         pi_scores["weighted"] = round(weighted, 2)
 
     return {"scores": scores, "notes": parsed.get("notes", "")}
-
 
 
