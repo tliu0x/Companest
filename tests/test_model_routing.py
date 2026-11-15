@@ -158,97 +158,49 @@ class TestRemovedProxyConfig:
 
 
 # ---------------------------------------------------------------------------
-# Pi: _run_openai wrapper and max_turns
+# build_chat_model: endpoint selection for the agent runtime
 # ---------------------------------------------------------------------------
 
-class TestPiOpenAIRouting:
-    """Test Pi._run_openai uses resolve_model_endpoint correctly."""
+class TestBuildChatModel:
+    """build_chat_model picks the right LangChain model class and endpoint."""
 
-    def _make_pi(self, model="deepseek-chat", proxy=None):
-        from companest.pi import Pi, PiConfig
-        mm = MagicMock()
-        mm.build_system_prompt.return_value = "system"
-        return Pi(
-            PiConfig(id="test", model=model, max_turns=5),
-            memory=mm,
-            team_id="test-team",
-            proxy_config=proxy,
-        )
-
-    def _build_agents_mock(self):
-        """Build a mock 'agents' module for lazy-import patching."""
-        mock_agent_cls = MagicMock()
-        mock_runner_cls = MagicMock()
-        mock_wrapper_cls = MagicMock()
-        mock_result = MagicMock()
-        mock_result.final_output = "answer"
-        mock_runner_cls.run = AsyncMock(return_value=mock_result)
-        return mock_agent_cls, mock_runner_cls, mock_wrapper_cls
-
-    def _patch_modules(self, mock_agent, mock_runner, mock_wrapper, mock_openai_client):
-        """Context manager helper to patch both agents and openai modules."""
-        import sys
-        agents_mod = MagicMock()
-        agents_mod.Agent = mock_agent
-        agents_mod.Runner = mock_runner
-        agents_mod.OpenAIChatCompletionsModel = mock_wrapper
-
-        openai_mod = MagicMock()
-        openai_mod.AsyncOpenAI = MagicMock(return_value=mock_openai_client)
-
-        return patch.dict(sys.modules, {"agents": agents_mod, "openai": openai_mod})
-
-    @pytest.mark.asyncio
-    async def test_max_turns_passed_to_runner(self):
-        """Runner.run must receive max_turns=self.max_turns."""
-        pi = self._make_pi()
-        mock_agent, mock_runner, mock_wrapper = self._build_agents_mock()
-        mock_oa_client = AsyncMock()
-
+    def test_direct_deepseek_uses_openai_protocol_endpoint(self):
+        from companest.model_routing import build_chat_model
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test"}):
-            with self._patch_modules(mock_agent, mock_runner, mock_wrapper, mock_oa_client):
-                result = await pi._run_openai("hello", "system")
+            model = build_chat_model("deepseek-chat")
+        assert type(model).__name__ == "ChatOpenAI"
+        assert model.model_name == "deepseek-chat"
+        assert str(model.openai_api_base).rstrip("/") == "https://api.deepseek.com"
+        assert model.openai_api_key.get_secret_value() == "sk-test"
 
-        assert mock_runner.run.call_count == 1
-        call_kwargs = mock_runner.run.call_args
-        assert call_kwargs.kwargs.get("max_turns") == 5
-
-    @pytest.mark.asyncio
-    async def test_direct_deepseek_uses_wrapper(self):
-        """Without proxy, deepseek-chat should use OpenAIChatCompletionsModel."""
-        pi = self._make_pi()
-        mock_agent, mock_runner, mock_wrapper = self._build_agents_mock()
-        mock_oa_client = AsyncMock()
-
-        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test"}):
-            with self._patch_modules(mock_agent, mock_runner, mock_wrapper, mock_oa_client):
-                result = await pi._run_openai("hello", "system")
-                mock_wrapper.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_proxy_deepseek_no_wrapper(self):
-        """With proxy, deepseek-chat should NOT use OpenAIChatCompletionsModel."""
+    def test_proxy_routes_openai_protocol_models_through_proxy(self):
+        from companest.model_routing import build_chat_model
         proxy = _make_proxy()
-        pi = self._make_pi(proxy=proxy)
-        mock_agent, mock_runner, mock_wrapper = self._build_agents_mock()
-        mock_oa_client = AsyncMock()
+        model = build_chat_model("deepseek-chat", proxy)
+        assert type(model).__name__ == "ChatOpenAI"
+        assert str(model.openai_api_base) == proxy.base_url.rstrip("/") + "/v1"
 
-        with self._patch_modules(mock_agent, mock_runner, mock_wrapper, mock_oa_client):
-            result = await pi._run_openai("hello", "system")
-            mock_wrapper.assert_not_called()
+    def test_claude_uses_anthropic_client(self):
+        from companest.model_routing import build_chat_model
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}):
+            model = build_chat_model("claude-sonnet-5-5")
+        assert type(model).__name__ == "ChatAnthropic"
+        assert model.model == "claude-sonnet-5-5"
 
-    @pytest.mark.asyncio
-    async def test_missing_key_raises_config_error(self):
+    def test_proxy_routes_claude_through_proxy(self):
+        from companest.model_routing import build_chat_model
+        proxy = _make_proxy()
+        model = build_chat_model("claude-sonnet-5-5", proxy)
+        assert type(model).__name__ == "ChatAnthropic"
+        assert str(model.anthropic_api_url).rstrip("/") == proxy.base_url.rstrip("/")
+
+    def test_missing_key_raises_config_error(self):
         """Missing DEEPSEEK_API_KEY should raise ConfigurationError, not 401."""
-        import sys
-        pi = self._make_pi()
-        agents_mod = MagicMock()
-
-        with patch.dict(sys.modules, {"agents": agents_mod}):
-            env = {k: v for k, v in os.environ.items() if k != "DEEPSEEK_API_KEY"}
-            with patch.dict(os.environ, env, clear=True):
-                with pytest.raises(ConfigurationError, match="DEEPSEEK_API_KEY"):
-                    await pi._run_openai("hello", "system")
+        from companest.model_routing import build_chat_model
+        env = {k: v for k, v in os.environ.items() if k != "DEEPSEEK_API_KEY"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(ConfigurationError, match="DEEPSEEK_API_KEY"):
+                build_chat_model("deepseek-chat")
 
 
 # ---------------------------------------------------------------------------

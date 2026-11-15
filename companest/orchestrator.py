@@ -288,7 +288,7 @@ class CompanestOrchestrator:
             )
             logger.info(f"LiteLLM client initialized: {self.config.proxy.base_url}")
 
-        # Set proxy env vars once for SDKs that read them (claude-agent-sdk, openai-agents)
+        # Set proxy env vars once for the raw provider clients (router, Dreamer)
         if self.config.proxy.enabled:
             Pi.configure_proxy(self.config.proxy)
 

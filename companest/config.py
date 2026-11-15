@@ -163,7 +163,7 @@ class MCPServerConfig(BaseModel):
         return self
 
     def to_sdk_config(self) -> dict:
-        """Convert to claude_agent_sdk McpServerConfig dict."""
+        """Convert to the MCP server config dict stored in the ToolRegistry."""
         if self.transport == "stdio":
             cfg = {"type": "stdio", "command": self.command, "args": self.args}
             if self.env:

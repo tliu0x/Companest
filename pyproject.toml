@@ -28,12 +28,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-claude = [
-    "anthropic>=0.40.0",
-    "claude-agent-sdk>=0.1.0",
-]
-openai = [
-    "openai-agents>=0.1.0",
+agents = [
+    "langchain>=1.5.0,<2.0.0",
+    "langgraph>=1.2.0,<2.0.0",
+    "langchain-anthropic>=1.7.0,<2.0.0",
+    "langchain-openai>=1.8.0,<2.0.0",
+    "langchain-mcp-adapters>=0.3.0",
 ]
 server = [
     "fastapi>=0.110.0",
@@ -55,7 +55,7 @@ scheduler = [
     "aiosqlite>=0.19.0",
 ]
 all = [
-    "companest-orchestrator[claude,openai,server,gateway,s3,qdrant,scheduler]",
+    "companest-orchestrator[agents,server,gateway,s3,qdrant,scheduler]",
 ]
 dev = [
     "companest-orchestrator[all]",
