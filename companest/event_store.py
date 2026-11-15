@@ -1,7 +1,3 @@
-"""Persistent event history for the operator console."""
-
-from __future__ import annotations
-
 import json
 import logging
 from dataclasses import dataclass
@@ -30,8 +26,6 @@ class StoredEvent:
 
 
 class EventStore:
-    """SQLite-backed append-only event store."""
-
     def __init__(self, data_dir: Path):
         self._data_dir = data_dir
         self._db = None
@@ -69,19 +63,14 @@ class EventStore:
         return True
 
     async def close(self) -> None:
-        if self._db is None:
-            return
         await self._db.close()
         self._db = None
 
     async def get_latest_sequence(self) -> int:
-        if self._db is None:
-            return 0
         async with self._db.execute(
             "SELECT COALESCE(MAX(sequence_id), 0) FROM events"
         ) as cursor:
-            row = await cursor.fetchone()
-        return int(row[0] if row else 0)
+            return (await cursor.fetchone())[0]
 
     async def append_event(
         self,
@@ -90,9 +79,6 @@ class EventStore:
         timestamp: str,
         company_id: Optional[str] = None,
     ) -> StoredEvent:
-        if self._db is None:
-            raise RuntimeError("EventStore is not started")
-
         cursor = await self._db.execute(
             """
             INSERT INTO events (event_type, timestamp, company_id, payload_json)
@@ -101,9 +87,8 @@ class EventStore:
             (event_type, timestamp, company_id, json.dumps(payload)),
         )
         await self._db.commit()
-        sequence_id = int(cursor.lastrowid)
         return StoredEvent(
-            sequence_id=sequence_id,
+            sequence_id=cursor.lastrowid,
             event_type=event_type,
             timestamp=timestamp,
             company_id=company_id,
@@ -120,23 +105,17 @@ class EventStore:
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[StoredEvent], int]:
-        if self._db is None:
-            return [], 0
-
         where_parts: List[str] = []
         params: List[Any] = []
-        if event_type:
-            where_parts.append("event_type = ?")
-            params.append(event_type)
-        if company_id:
-            where_parts.append("company_id = ?")
-            params.append(company_id)
-        if start:
-            where_parts.append("timestamp >= ?")
-            params.append(start)
-        if end:
-            where_parts.append("timestamp <= ?")
-            params.append(end)
+        for clause, value in (
+            ("event_type = ?", event_type),
+            ("company_id = ?", company_id),
+            ("timestamp >= ?", start),
+            ("timestamp <= ?", end),
+        ):
+            if value:
+                where_parts.append(clause)
+                params.append(value)
 
         where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
 
@@ -144,10 +123,8 @@ class EventStore:
             f"SELECT COUNT(*) FROM events {where_sql}",
             params,
         ) as count_cursor:
-            count_row = await count_cursor.fetchone()
-        total = int(count_row[0] if count_row else 0)
+            total = (await count_cursor.fetchone())[0]
 
-        query_params = [*params, limit, offset]
         async with self._db.execute(
             f"""
             SELECT sequence_id, event_type, timestamp, company_id, payload_json
@@ -156,17 +133,17 @@ class EventStore:
             ORDER BY sequence_id DESC
             LIMIT ? OFFSET ?
             """,
-            query_params,
+            [*params, limit, offset],
         ) as cursor:
             rows = await cursor.fetchall()
 
         events = [
             StoredEvent(
-                sequence_id=int(row[0]),
+                sequence_id=row[0],
                 event_type=row[1],
                 timestamp=row[2],
                 company_id=row[3],
-                payload=json.loads(row[4]) if row[4] else {},
+                payload=json.loads(row[4]),
             )
             for row in rows
         ]

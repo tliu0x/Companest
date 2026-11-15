@@ -1,5 +1,3 @@
-"""Companest Event Bus"""
-
 import asyncio
 import logging
 from dataclasses import dataclass, field
@@ -9,12 +7,10 @@ from typing import Any, Callable, Coroutine, Dict, List
 
 logger = logging.getLogger(__name__)
 
-# Callback type: async fn(Event) -> None
 EventCallback = Callable[["Event"], Coroutine[Any, Any, None]]
 
 
 class EventType(str, Enum):
-    """Lifecycle events emitted by the Companest framework."""
     TASK_STARTED = "task_started"
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
@@ -30,56 +26,35 @@ class EventType(str, Enum):
 
 @dataclass
 class Event:
-    """A single event emitted by the EventBus."""
     type: EventType
     data: Dict[str, Any] = field(default_factory=dict)
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 class EventBus:
-    """Async pub/sub event bus."""
-
     def __init__(self):
         self._listeners: Dict[EventType, List[EventCallback]] = {}
         self._any_listeners: List[EventCallback] = []
 
     def on(self, event_type: EventType, callback: EventCallback) -> None:
-        """Subscribe to a specific event type."""
-        if event_type not in self._listeners:
-            self._listeners[event_type] = []
-        if callback not in self._listeners[event_type]:
-            self._listeners[event_type].append(callback)
+        listeners = self._listeners.setdefault(event_type, [])
+        if callback not in listeners:
+            listeners.append(callback)
 
     def on_any(self, callback: EventCallback) -> None:
-        """Subscribe to all events (wildcard)."""
         if callback not in self._any_listeners:
             self._any_listeners.append(callback)
 
     def off_any(self, callback: EventCallback) -> None:
-        """Unsubscribe from wildcard events."""
         try:
             self._any_listeners.remove(callback)
         except ValueError:
             pass
 
-    def off(self, event_type: EventType, callback: EventCallback) -> None:
-        """Unsubscribe from a specific event type."""
-        if event_type in self._listeners:
-            try:
-                self._listeners[event_type].remove(callback)
-            except ValueError:
-                pass
-
     async def emit(self, event_type: EventType, data: Dict[str, Any] = None) -> None:
         """Fire an event. All callbacks run concurrently; errors are logged not raised."""
         event = Event(type=event_type, data=data or {})
-
-        callbacks = list(self._listeners.get(event_type, []))
-        callbacks.extend(self._any_listeners)
-
-        if not callbacks:
-            return
-
+        callbacks = self._listeners.get(event_type, []) + self._any_listeners
         results = await asyncio.gather(
             *[self._safe_call(cb, event) for cb in callbacks],
             return_exceptions=True,
@@ -90,10 +65,5 @@ class EventBus:
 
     @staticmethod
     async def _safe_call(callback: EventCallback, event: Event) -> None:
-        """Call a callback, catching and re-raising exceptions for gather."""
+        # Calling inside a coroutine lets gather capture errors raised at call time too.
         await callback(event)
-
-    def clear(self) -> None:
-        """Remove all listeners."""
-        self._listeners.clear()
-        self._any_listeners.clear()

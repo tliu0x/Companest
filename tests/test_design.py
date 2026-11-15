@@ -581,19 +581,6 @@ class TestScheduler:
 
         asyncio.get_event_loop().run_until_complete(lifecycle())
 
-    def test_disable_enable(self):
-        from companest.scheduler import Scheduler
-
-        async def dummy():
-            pass
-
-        s = Scheduler()
-        s.add("t", dummy, interval=3600)
-        assert s.disable("t")
-        assert not s._tasks["t"].enabled
-        assert s.enable("t")
-        assert s._tasks["t"].enabled
-
     def test_remove(self):
         from companest.scheduler import Scheduler
 

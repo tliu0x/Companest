@@ -11,10 +11,9 @@ from .exceptions import SchedulerError
 
 logger = logging.getLogger(__name__)
 
-# Callback type: async fn(ScheduledJob) -> str
 ExecutionCallback = Callable[["ScheduledJob"], Coroutine[Any, Any, str]]
 
-# Callback type: async fn(chat_id, channel, user_id, message) -> None
+# async fn(chat_id, channel, user_id, message)
 NotificationCallback = Callable[[str, str, str, str], Coroutine[Any, Any, None]]
 
 _METADATA_SCHEMA = """
@@ -39,7 +38,6 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
 
 @dataclass
 class ScheduledJob:
-    """Metadata for a user-scheduled job."""
     id: str
     user_id: str
     chat_id: str
@@ -80,31 +78,26 @@ class UserScheduler:
     def __init__(self, data_dir: Path):
         self._data_dir = data_dir
         self._db_path = data_dir / "user_schedules.db"
-        self._db: Optional[Any] = None  # aiosqlite.Connection (lazy import)
+        self._db: Optional[Any] = None
         self._scheduler = None
         self._execution_callback: Optional[ExecutionCallback] = None
         self._notification_callback: Optional[NotificationCallback] = None
         self._started = False
 
     async def start(self) -> None:
-        """Initialize APScheduler + metadata DB."""
         if self._started:
             return
-        # Capture the running loop for sync callbacks from APScheduler
+        # _fire_job is called synchronously by APScheduler and needs this loop.
         self._loop = asyncio.get_running_loop()
 
-        # Ensure data dir exists
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
-        # Init metadata DB
         import aiosqlite
         self._db = await aiosqlite.connect(str(self._db_path))
         await self._db.execute(_METADATA_SCHEMA)
         await self._db.commit()
 
-        # Init APScheduler with in-memory store
-        # (our aiosqlite DB is the persistence layer; we reconstruct
-        #  APScheduler jobs from it on restart to avoid pickle issues)
+        # APScheduler jobs live in memory only; _restore_jobs rebuilds them from SQLite (no pickling).
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
         self._scheduler = AsyncIOScheduler(
@@ -113,13 +106,11 @@ class UserScheduler:
         self._scheduler.start()
         self._started = True
 
-        # Reconstruct APScheduler jobs from persisted metadata
         await self._restore_jobs()
 
         logger.info(f"UserScheduler started (db={self._db_path})")
 
     async def shutdown(self) -> None:
-        """Gracefully stop scheduler and close DB."""
         if self._scheduler:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
@@ -132,11 +123,9 @@ class UserScheduler:
         logger.info("UserScheduler stopped")
 
     def set_execution_callback(self, callback: ExecutionCallback) -> None:
-        """Set the async function called when a job fires."""
         self._execution_callback = callback
 
     def set_notification_callback(self, callback: NotificationCallback) -> None:
-        """Set the async function called to deliver results to users."""
         self._notification_callback = callback
 
     async def add_job(
@@ -151,7 +140,6 @@ class UserScheduler:
         team_id: Optional[str] = None,
         mode: str = "default",
     ) -> ScheduledJob:
-        """Create a new scheduled job."""
         if not self._started:
             raise SchedulerError("UserScheduler not started")
 
@@ -173,10 +161,8 @@ class UserScheduler:
             mode=mode,
         )
 
-        # Save metadata
         await self._save_job_metadata(job)
 
-        # Schedule in APScheduler
         self._scheduler.add_job(
             self._fire_job,
             trigger=trigger_type,
@@ -197,24 +183,20 @@ class UserScheduler:
         if not self._started:
             raise SchedulerError("UserScheduler not started")
 
-        # Find full job ID from partial match
         full_id = await self._resolve_job_id(job_id, user_id)
         if not full_id:
             return False
 
-        # Ownership check
         if user_id:
             row = await self._get_job_row(full_id)
             if row and row["user_id"] != user_id:
                 return False
 
-        # Remove from APScheduler
         try:
             self._scheduler.remove_job(full_id)
         except Exception:
             pass  # May already be gone (date trigger fired)
 
-        # Mark inactive in metadata
         await self._db.execute(
             "UPDATE scheduled_jobs SET active = 0 WHERE id = ?",
             (full_id,),
@@ -244,7 +226,6 @@ class UserScheduler:
         return [self._row_to_job(dict(zip(columns, row))) for row in rows]
 
     def get_status(self) -> Dict[str, Any]:
-        """Status summary for API."""
         status = {
             "started": self._started,
             "db_path": str(self._db_path),
@@ -255,9 +236,7 @@ class UserScheduler:
             status["next_run"] = str(jobs[0].next_run_time) if jobs else None
         return status
 
-
     def _fire_job(self, job_id: str) -> None:
-        """Sync callback invoked by APScheduler when a job fires."""
         def _on_task_done(task):
             exc = task.exception() if not task.cancelled() else None
             if exc:
@@ -274,7 +253,6 @@ class UserScheduler:
             logger.error(f"No event loop for job {job_id}")
 
     async def _fire_job_async(self, job_id: str) -> None:
-        """Async job execution: run task + deliver notification."""
         row = await self._get_job_row(job_id)
         if not row:
             logger.warning(f"Job {job_id} metadata not found, skipping")
@@ -283,7 +261,6 @@ class UserScheduler:
         job = self._row_to_job(row)
         logger.info(f"Firing job {job_id}: {job.task[:60]}")
 
-        # Update fire count
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "UPDATE scheduled_jobs SET fire_count = fire_count + 1, last_fired = ? WHERE id = ?",
@@ -291,7 +268,6 @@ class UserScheduler:
         )
         await self._db.commit()
 
-        # Execute via callback
         result = None
         if self._execution_callback:
             try:
@@ -300,7 +276,6 @@ class UserScheduler:
                 logger.error(f"Job {job_id} execution failed: {e}")
                 result = f"Scheduled task failed: {e}"
 
-        # Deliver notification
         if result and self._notification_callback:
             try:
                 header = f"[Scheduled] {job.description or job.task[:50]}\n\n"
@@ -311,7 +286,6 @@ class UserScheduler:
             except Exception as e:
                 logger.error(f"Job {job_id} notification failed: {e}")
 
-        # Auto-cleanup one-shot date triggers
         if job.trigger_type == "date":
             await self._db.execute(
                 "UPDATE scheduled_jobs SET active = 0 WHERE id = ?",
@@ -321,10 +295,6 @@ class UserScheduler:
             logger.info(f"One-shot job {job_id} completed and deactivated")
 
     async def _restore_jobs(self) -> None:
-        """On restart, reconstruct APScheduler jobs from our metadata DB."""
-        if not self._scheduler or not self._db:
-            return
-
         cursor = await self._db.execute(
             "SELECT * FROM scheduled_jobs WHERE active = 1",
         )
@@ -333,8 +303,7 @@ class UserScheduler:
 
         restored = 0
         for row in rows:
-            row_dict = dict(zip(columns, row))
-            job = self._row_to_job(row_dict)
+            job = self._row_to_job(dict(zip(columns, row)))
             try:
                 self._scheduler.add_job(
                     self._fire_job,
@@ -346,7 +315,7 @@ class UserScheduler:
                 )
                 restored += 1
             except Exception as e:
-                # Date triggers in the past will fail  deactivate them
+                # Date triggers in the past fail to schedule; deactivate them.
                 logger.debug(f"Could not restore job {job.id}: {e}")
                 await self._db.execute(
                     "UPDATE scheduled_jobs SET active = 0 WHERE id = ?",
@@ -358,7 +327,6 @@ class UserScheduler:
             logger.info(f"Restored {restored} persisted job(s)")
 
     async def _save_job_metadata(self, job: ScheduledJob) -> None:
-        """Insert job metadata into aiosqlite."""
         await self._db.execute(
             """INSERT INTO scheduled_jobs
                (id, user_id, chat_id, channel, task, description,
@@ -377,7 +345,6 @@ class UserScheduler:
         await self._db.commit()
 
     async def _get_job_row(self, job_id: str) -> Optional[Dict]:
-        """Fetch a single job row by ID."""
         cursor = await self._db.execute(
             "SELECT * FROM scheduled_jobs WHERE id = ?", (job_id,),
         )
@@ -390,7 +357,6 @@ class UserScheduler:
     async def _resolve_job_id(
         self, partial_id: str, user_id: Optional[str] = None,
     ) -> Optional[str]:
-        """Resolve a partial job ID to a full ID."""
         if user_id:
             cursor = await self._db.execute(
                 "SELECT id FROM scheduled_jobs WHERE id LIKE ? AND user_id = ? AND active = 1",
@@ -406,24 +372,19 @@ class UserScheduler:
 
     @staticmethod
     def _row_to_job(row: Dict) -> ScheduledJob:
-        """Convert a DB row dict to a ScheduledJob."""
-        trigger_args = row.get("trigger_args", "{}")
-        if isinstance(trigger_args, str):
-            trigger_args = json.loads(trigger_args)
-
         return ScheduledJob(
             id=row["id"],
             user_id=row["user_id"],
             chat_id=row["chat_id"],
-            channel=row.get("channel", "telegram"),
+            channel=row["channel"],
             task=row["task"],
-            description=row.get("description", ""),
+            description=row["description"],
             trigger_type=row["trigger_type"],
-            trigger_args=trigger_args,
-            team_id=row.get("team_id"),
-            mode=row.get("mode", "default"),
-            fire_count=row.get("fire_count", 0),
-            last_fired=row.get("last_fired"),
-            created_at=row.get("created_at", ""),
-            active=bool(row.get("active", 1)),
+            trigger_args=json.loads(row["trigger_args"]),
+            team_id=row["team_id"],
+            mode=row["mode"],
+            fire_count=row["fire_count"],
+            last_fired=row["last_fired"],
+            created_at=row["created_at"],
+            active=bool(row["active"]),
         )

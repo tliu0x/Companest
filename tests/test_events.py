@@ -45,39 +45,6 @@ class TestEventBus:
         assert EventType.TASK_STARTED in received
         assert EventType.TASK_COMPLETED in received
 
-    def test_off(self):
-        """Unsubscribed callback no longer fires."""
-        bus = EventBus()
-        received = []
-
-        async def handler(event: Event):
-            received.append(event)
-
-        bus.on(EventType.TASK_STARTED, handler)
-        bus.off(EventType.TASK_STARTED, handler)
-
-        asyncio.get_event_loop().run_until_complete(
-            bus.emit(EventType.TASK_STARTED, {})
-        )
-        assert len(received) == 0
-
-    def test_clear(self):
-        """Clear removes all listeners."""
-        bus = EventBus()
-        received = []
-
-        async def handler(event: Event):
-            received.append(event)
-
-        bus.on(EventType.TASK_STARTED, handler)
-        bus.on_any(handler)
-        bus.clear()
-
-        asyncio.get_event_loop().run_until_complete(
-            bus.emit(EventType.TASK_STARTED, {})
-        )
-        assert len(received) == 0
-
     def test_emit_with_no_listeners(self):
         """Emit without listeners does not crash."""
         bus = EventBus()

@@ -4,14 +4,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
-from .exceptions import SchedulerError
-
 logger = logging.getLogger(__name__)
+
+TASK_TIMEOUT_SECONDS = 300
 
 
 @dataclass
 class ScheduledTask:
-    """A periodic task definition."""
     name: str
     func: Callable[[], Coroutine]
     interval_seconds: int
@@ -21,15 +20,12 @@ class ScheduledTask:
     run_count: int = 0
     error_count: int = 0
     last_error: Optional[str] = None
-    scope_type: Optional[str] = None  # "company" | "system"
-    scope_id: Optional[str] = None    # company_id
-    timeout: Optional[int] = None     # max seconds per execution (default 300)
+    scope_type: Optional[str] = None
+    scope_id: Optional[str] = None
     _executing: bool = field(default=False, repr=False)
 
 
 class Scheduler:
-    """Async periodic task scheduler."""
-
     def __init__(self):
         self._tasks: Dict[str, ScheduledTask] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
@@ -45,7 +41,6 @@ class Scheduler:
         scope_type: Optional[str] = None,
         scope_id: Optional[str] = None,
     ) -> None:
-        """Register a periodic task."""
         if name in self._tasks:
             logger.warning(f"[Scheduler] Overwriting existing task: {name}")
         self._tasks[name] = ScheduledTask(
@@ -63,7 +58,6 @@ class Scheduler:
         )
 
     def remove(self, name: str) -> bool:
-        """Remove a scheduled task."""
         if name in self._running_tasks:
             self._running_tasks[name].cancel()
             del self._running_tasks[name]
@@ -73,7 +67,6 @@ class Scheduler:
         return False
 
     def remove_by_scope(self, scope_type: str, scope_id: str) -> List[str]:
-        """Remove all tasks matching the given scope."""
         removed = []
         for name in list(self._tasks):
             task = self._tasks[name]
@@ -82,29 +75,7 @@ class Scheduler:
                 removed.append(name)
         return removed
 
-    def enable(self, name: str) -> bool:
-        """Enable a disabled task."""
-        if name in self._tasks:
-            self._tasks[name].enabled = True
-            if self._started and name not in self._running_tasks:
-                self._running_tasks[name] = asyncio.create_task(
-                    self._run_loop(self._tasks[name])
-                )
-            return True
-        return False
-
-    def disable(self, name: str) -> bool:
-        """Disable a task (stops its loop)."""
-        if name in self._tasks:
-            self._tasks[name].enabled = False
-            if name in self._running_tasks:
-                self._running_tasks[name].cancel()
-                del self._running_tasks[name]
-            return True
-        return False
-
     async def start(self) -> None:
-        """Start all enabled scheduled tasks."""
         if self._started:
             return
         self._started = True
@@ -120,29 +91,22 @@ class Scheduler:
         )
 
     async def stop(self) -> None:
-        """Stop all running tasks."""
         self._started = False
-        for name, atask in self._running_tasks.items():
+        for atask in self._running_tasks.values():
             atask.cancel()
-        # Wait for all tasks to finish cancellation
-        if self._running_tasks:
-            await asyncio.gather(
-                *self._running_tasks.values(), return_exceptions=True
-            )
+        await asyncio.gather(
+            *self._running_tasks.values(), return_exceptions=True
+        )
         self._running_tasks.clear()
         logger.info("[Scheduler] Stopped")
 
     async def _run_loop(self, task: ScheduledTask) -> None:
-        """Main loop for a single scheduled task."""
         try:
-            # Optionally run immediately on start
             if task.run_on_start:
                 await self._execute(task)
 
             while True:
                 await asyncio.sleep(task.interval_seconds)
-                if not task.enabled:
-                    break
                 await self._execute(task)
         except asyncio.CancelledError:
             logger.debug(f"[Scheduler] Task '{task.name}' cancelled")
@@ -150,22 +114,20 @@ class Scheduler:
             logger.error(f"[Scheduler] Task '{task.name}' loop died: {e}")
 
     async def _execute(self, task: ScheduledTask) -> None:
-        """Execute a single task with error handling, timeout, and overlap prevention."""
         if task._executing:
             logger.warning(f"[Scheduler] Skipping '{task.name}': still running from previous interval")
             return
         task._executing = True
-        effective_timeout = task.timeout or 300
         try:
             logger.debug(f"[Scheduler] Running '{task.name}'")
-            await asyncio.wait_for(task.func(), timeout=effective_timeout)
+            await asyncio.wait_for(task.func(), timeout=TASK_TIMEOUT_SECONDS)
             task.last_run = datetime.now(timezone.utc)
             task.run_count += 1
         except asyncio.TimeoutError:
             task.error_count += 1
-            task.last_error = f"Timed out after {effective_timeout}s"
+            task.last_error = f"Timed out after {TASK_TIMEOUT_SECONDS}s"
             logger.error(
-                f"[Scheduler] Task '{task.name}' timed out after {effective_timeout}s"
+                f"[Scheduler] Task '{task.name}' timed out after {TASK_TIMEOUT_SECONDS}s"
             )
         except Exception as e:
             task.error_count += 1
@@ -178,7 +140,6 @@ class Scheduler:
             task._executing = False
 
     def get_status(self) -> Dict[str, Any]:
-        """Get status of all scheduled tasks."""
         return {
             "started": self._started,
             "tasks": {
@@ -196,7 +157,6 @@ class Scheduler:
         }
 
     async def run_now(self, name: str) -> bool:
-        """Manually trigger a task immediately."""
         task = self._tasks.get(name)
         if not task:
             return False
