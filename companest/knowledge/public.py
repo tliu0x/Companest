@@ -18,16 +18,14 @@ DEFAULT_PREFIX = "companest-public-knowledge/"
 
 
 class PublicKnowledgeDoc(BaseModel):
-    """A structured document in the shared public knowledge pool."""
-
     doc_id: str = Field(..., description="Unique document identifier (UUID)")
 
     @field_validator("doc_id")
     @classmethod
     def validate_doc_id_is_uuid(cls, v: str) -> str:
-        """Enforce that doc_id is a valid UUID string, matching the JSON schema."""
-        UUID(v)  # raises ValueError if not a valid UUID
+        UUID(v)
         return v
+
     source_type: Literal["news", "research", "filing", "social", "prediction_market"] = Field(
         ..., description="Category of the information source"
     )
@@ -56,8 +54,6 @@ class PublicKnowledgeDoc(BaseModel):
 
 
 class PublicKnowledgeIndexEntry(BaseModel):
-    """Index entry: same fields as PublicKnowledgeDoc minus summary."""
-
     doc_id: str
     source_type: Literal["news", "research", "filing", "social", "prediction_market"]
     title: str = Field(..., min_length=1, max_length=500)
@@ -70,23 +66,10 @@ class PublicKnowledgeIndexEntry(BaseModel):
 
     @classmethod
     def from_doc(cls, doc: PublicKnowledgeDoc) -> "PublicKnowledgeIndexEntry":
-        """Create an index entry from a full document (drops summary)."""
-        return cls(
-            doc_id=doc.doc_id,
-            source_type=doc.source_type,
-            title=doc.title,
-            tags=doc.tags,
-            source_url=doc.source_url,
-            published_at=doc.published_at,
-            fresh_until=doc.fresh_until,
-            confidence=doc.confidence,
-            visibility=doc.visibility,
-        )
+        return cls(**doc.model_dump(exclude={"summary"}))
 
 
 class SearchQuery(BaseModel):
-    """Query parameters for searching the public knowledge index."""
-
     tags: Optional[List[str]] = Field(default=None, description="Filter by tags (any match)")
     source_type: Optional[str] = Field(default=None, description="Filter by exact source_type")
     fresh_only: bool = Field(default=False, description="Only return docs where fresh_until > now")
@@ -111,8 +94,6 @@ def _s3_settings_from_env() -> dict:
 
 
 class PublicKnowledgeS3Store(S3JsonStore):
-    """Full documents, one JSON object per doc_id."""
-
     def __init__(self, bucket: str = "", prefix: str = DEFAULT_PREFIX,
                  region: str = "us-east-1", endpoint_url: Optional[str] = None) -> None:
         super().__init__(bucket, prefix, region, endpoint_url)
@@ -129,8 +110,6 @@ class PublicKnowledgeS3Store(S3JsonStore):
 
 
 class IndexStore(S3JsonStore):
-    """The JSONL search index."""
-
     KEY = "index/latest.jsonl"
 
     def __init__(self, bucket: str = "", prefix: str = DEFAULT_PREFIX,
@@ -174,8 +153,6 @@ class IndexStore(S3JsonStore):
 
 
 class PublicKnowledgePublisher:
-    """Keeps the document store and the index in sync."""
-
     def __init__(self, s3_store: PublicKnowledgeS3Store, index_store: IndexStore) -> None:
         self._s3_store = s3_store
         self._index_store = index_store
@@ -194,41 +171,23 @@ def search(
     query: SearchQuery,
     index: List[PublicKnowledgeIndexEntry],
 ) -> List[PublicKnowledgeIndexEntry]:
-    """Filter and sort index entries based on the search query."""
     results = list(index)
-
-    # Filter by tags (any match)
     if query.tags:
         query_tags_lower = {t.lower() for t in query.tags}
-        results = [
-            e for e in results
-            if any(t.lower() in query_tags_lower for t in e.tags)
-        ]
-
-    # Filter by source_type (exact match)
+        results = [e for e in results if any(t.lower() in query_tags_lower for t in e.tags)]
     if query.source_type:
         results = [e for e in results if e.source_type == query.source_type]
-
     if query.fresh_only:
         now = datetime.now(timezone.utc)
         results = [e for e in results if _is_fresh(e, now)]
-
-    # Filter by keyword (case-insensitive title contains)
     if query.keyword:
         kw = query.keyword.lower()
         results = [e for e in results if kw in e.title.lower()]
-
-    # Sort by published_at descending
     results.sort(key=lambda e: e.published_at, reverse=True)
-
-    # Apply limit
-    results = results[: query.limit]
-
-    return results
+    return results[: query.limit]
 
 
 def create_public_knowledge_router():
-    """Build the FastAPI router for /api/public-knowledge."""
     from fastapi import APIRouter, HTTPException, Query
 
     router = APIRouter(prefix="/api/public-knowledge", tags=["public-knowledge"])
@@ -284,29 +243,18 @@ def create_public_knowledge_tool_defs(
     _index_store = IndexStore(**settings)
 
     async def search_public_knowledge(args: dict) -> str:
-        """Search the public knowledge index."""
         tags_raw = args.get("tags", "")
-        tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else None
-
         query = SearchQuery(
-            tags=tags,
+            tags=[t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else None,
             source_type=args.get("source_type") or None,
             fresh_only=bool(args.get("fresh_only", False)),
             keyword=args.get("keyword") or None,
             limit=int(args.get("limit", 20)),
         )
-
-        entries = _index_store.load_index()
-        results = search(query, entries)
-
-        return json.dumps(
-            [r.model_dump(mode="json") for r in results],
-            ensure_ascii=False,
-            indent=2,
-        )
+        results = search(query, _index_store.load_index())
+        return json.dumps([r.model_dump(mode="json") for r in results], ensure_ascii=False, indent=2)
 
     async def read_public_knowledge(args: dict) -> str:
-        """Read a full public knowledge document by ID."""
         doc_id = args["doc_id"]
         doc = _store.get_doc(doc_id)
         if doc is None:

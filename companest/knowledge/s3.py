@@ -39,7 +39,6 @@ class S3JsonStore:
         return self._s3
 
     def _put(self, key: str, body: str, content_type: str = "application/json") -> str:
-        """Write a text object under the prefix and return its full key."""
         full_key = self.prefix + key
         self._get_s3().put_object(
             Bucket=self.bucket,
@@ -69,7 +68,6 @@ class S3JsonStore:
 
 
 def _is_missing_key(error: Exception) -> bool:
-    """True for boto3's NoSuchKey / 404 errors."""
     if type(error).__name__ == "NoSuchKey":
         return True
     response = getattr(error, "response", None)

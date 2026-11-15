@@ -20,7 +20,6 @@ from companest.knowledge.feeds import (
     fetch_hn,
     fetch_kalshi,
     fetch_metaculus,
-    fetch_multi_source,
     fetch_openbb,
     fetch_polymarket,
     fetch_reddit,
@@ -488,52 +487,6 @@ class TestFetchMetaculus:
 
         assert len(items) == 1
         assert "error" in items[0]
-
-
-#  Multi-Source Tests
-
-class TestFetchMultiSource:
-    @pytest.mark.asyncio
-    async def test_merge_results(self):
-        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
-            {"title": "Brave result", "source": "brave"},
-        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, return_value=[
-            {"title": "HN story", "source": "hn"},
-        ]):
-            items = await fetch_multi_source("AI news", sources=["brave", "hn"])
-
-        assert len(items) == 2
-        sources = {i["source"] for i in items}
-        assert "brave" in sources
-        assert "hn" in sources
-
-    @pytest.mark.asyncio
-    async def test_unknown_source_skipped(self):
-        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
-            {"title": "Result", "source": "brave"},
-        ]):
-            items = await fetch_multi_source("test", sources=["brave", "unknown_source"])
-
-        assert len(items) == 1
-        assert items[0]["source"] == "brave"
-
-    @pytest.mark.asyncio
-    async def test_no_valid_sources(self):
-        items = await fetch_multi_source("test", sources=["invalid1", "invalid2"])
-        assert len(items) == 1
-        assert "error" in items[0]
-
-    @pytest.mark.asyncio
-    async def test_partial_failure(self):
-        with patch("companest.knowledge.feeds.brave_search", new_callable=AsyncMock, return_value=[
-            {"title": "Good", "source": "brave"},
-        ]), patch("companest.knowledge.feeds.fetch_hn", new_callable=AsyncMock, side_effect=Exception("API down")):
-            items = await fetch_multi_source("test", sources=["brave", "hn"])
-
-        # Should have 1 good result + 1 error
-        assert len(items) == 2
-        assert items[0]["source"] == "brave"
-        assert "error" in items[1]
 
 
 class TestCloseClient:

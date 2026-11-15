@@ -3,15 +3,14 @@
 import asyncio
 import logging
 import os
+import re
 import time
 import defusedxml.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from xml.etree.ElementTree import Element as XmlElement
 
 logger = logging.getLogger(__name__)
 
-# Reuse a shared httpx client for connection pooling
 _client = None
 
 
@@ -28,7 +27,6 @@ def _get_client():
 
 
 async def close_client() -> None:
-    """Close the shared httpx client. Call on shutdown to avoid resource leak."""
     global _client
     if _client is not None:
         await _client.aclose()
@@ -51,28 +49,24 @@ _last_request_time: Dict[str, float] = {}
 
 
 async def _rate_limit(source: str) -> None:
-    """Wait if needed to respect per-source rate limit."""
     min_interval = _RATE_LIMITS.get(source, 1.0)
-    last = _last_request_time.get(source, 0.0)
-    elapsed = time.monotonic() - last
+    elapsed = time.monotonic() - _last_request_time.get(source, 0.0)
     if elapsed < min_interval:
         await asyncio.sleep(min_interval - elapsed)
     _last_request_time[source] = time.monotonic()
 
 
-_CACHE_TTL = 300  # 5 minutes
+_CACHE_TTL = 300
 _cache: Dict[str, Any] = {}  # key -> (timestamp, result)
 
 
 def _cache_key(func_name: str, *args: Any, **kwargs: Any) -> str:
-    """Build a cache key from function name and arguments."""
     parts = [func_name] + [str(a) for a in args]
     parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
     return "|".join(parts)
 
 
 def _cache_get(key: str) -> Optional[List[Dict]]:
-    """Return cached result if still valid, else None."""
     entry = _cache.get(key)
     if entry is None:
         return None
@@ -84,8 +78,29 @@ def _cache_get(key: str) -> Optional[List[Dict]]:
 
 
 def _cache_set(key: str, result: List[Dict]) -> None:
-    """Store result in cache."""
     _cache[key] = (time.monotonic(), result)
+
+
+async def _get_json(client, url: str, **kwargs: Any) -> Any:
+    resp = await client.get(url, **kwargs)
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def _fetch(ck: str, source: str, failure: str, request, parse, error=str) -> List[Dict]:
+    """Cached, rate-limited request + parse. Only request failures become error items; they are not cached."""
+    cached = _cache_get(ck)
+    if cached is not None:
+        return cached
+    await _rate_limit(source)
+    try:
+        data = await request(_get_client())
+    except Exception as e:
+        logger.error(f"{failure}: {e}")
+        return [{"error": error(e)}]
+    items = parse(data)
+    _cache_set(ck, items)
+    return items
 
 
 async def brave_search(
@@ -94,109 +109,67 @@ async def brave_search(
     freshness: str = "",
     api_key: Optional[str] = None,
 ) -> List[Dict]:
-    """Search via Brave Search API."""
     key = api_key or os.getenv("BRAVE_API_KEY", "")
     if not key:
         return [{"error": "BRAVE_API_KEY not set"}]
 
-    ck = _cache_key("brave_search", query, count, freshness)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
-
-    params = {
-        "q": query,
-        "count": min(count, 20),
-    }
+    params = {"q": query, "count": min(count, 20)}
     if freshness:
         params["freshness"] = freshness
 
-    await _rate_limit("brave")
-    try:
-        client = _get_client()
-        resp = await client.get(
-            "https://api.search.brave.com/res/v1/web/search",
+    return await _fetch(
+        _cache_key("brave_search", query, count, freshness), "brave", "Brave Search failed",
+        lambda client: _get_json(
+            client, "https://api.search.brave.com/res/v1/web/search",
             params=params,
             headers={"X-Subscription-Token": key, "Accept": "application/json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"Brave Search failed: {e}")
-        return [{"error": str(e)}]
-
-    items = []
-    for result in data.get("web", {}).get("results", []):
-        items.append({
+        ),
+        lambda data: [{
             "title": result.get("title", ""),
             "url": result.get("url", ""),
             "source": "brave",
             "snippet": result.get("description", ""),
             "timestamp": result.get("age", ""),
-        })
-    _cache_set(ck, items)
-    return items
+        } for result in data.get("web", {}).get("results", [])],
+    )
 
 
 async def fetch_rss(url: str, limit: int = 15) -> List[Dict]:
-    """Fetch and parse an RSS or Atom feed."""
-    ck = _cache_key("fetch_rss", url, limit)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
-
-    await _rate_limit("rss")
-    try:
-        client = _get_client()
+    """Fetch and parse an RSS 2.0 or Atom feed."""
+    async def request(client):
         resp = await client.get(url)
         resp.raise_for_status()
-        root = ET.fromstring(resp.text)
-    except Exception as e:
-        logger.error(f"RSS fetch failed ({url}): {e}")
-        return [{"error": str(e)}]
+        return ET.fromstring(resp.text)
 
-    items = []
-
-    # RSS 2.0
-    for item in root.findall(".//item")[:limit]:
-        items.append({
+    def parse(root):
+        items = [{
             "title": _xml_text(item, "title"),
             "url": _xml_text(item, "link"),
             "source": "rss",
             "snippet": _xml_text(item, "description", max_len=300),
             "timestamp": _xml_text(item, "pubDate"),
-        })
+        } for item in root.findall(".//item")[:limit]]
+        if not items:
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            for entry in root.findall(".//atom:entry", ns)[:limit]:
+                link_el = entry.find("atom:link", ns)
+                items.append({
+                    "title": _xml_text(entry, "atom:title", ns=ns),
+                    "url": link_el.get("href", "") if link_el is not None else "",
+                    "source": "rss",
+                    "snippet": _xml_text(entry, "atom:summary", ns=ns, max_len=300),
+                    "timestamp": _xml_text(entry, "atom:updated", ns=ns),
+                })
+        return items
 
-    # Atom (if no RSS items found)
-    if not items:
-        ns = {"atom": "http://www.w3.org/2005/Atom"}
-        for entry in root.findall(".//atom:entry", ns)[:limit]:
-            link_el = entry.find("atom:link", ns)
-            items.append({
-                "title": _xml_text(entry, "atom:title", ns=ns),
-                "url": link_el.get("href", "") if link_el is not None else "",
-                "source": "rss",
-                "snippet": _xml_text(entry, "atom:summary", ns=ns, max_len=300),
-                "timestamp": _xml_text(entry, "atom:updated", ns=ns),
-            })
-
-    _cache_set(ck, items)
-    return items
+    return await _fetch(_cache_key("fetch_rss", url, limit), "rss", f"RSS fetch failed ({url})", request, parse)
 
 
-def _xml_text(
-    el: XmlElement, tag: str, default: str = "",
-    ns: Optional[Dict] = None, max_len: int = 0,
-) -> str:
-    """Extract text from an XML element, handling namespaces."""
-    child = el.find(tag, ns) if ns else el.find(tag)
+def _xml_text(el, tag: str, ns: Optional[Dict] = None, max_len: int = 0) -> str:
+    child = el.find(tag, ns)
     if child is None or child.text is None:
-        return default
-    text = child.text.strip()
-    # Strip HTML tags from descriptions
-    if "<" in text:
-        import re
-        text = re.sub(r"<[^>]+>", "", text)
+        return ""
+    text = re.sub(r"<[^>]+>", "", child.text.strip())
     if max_len and len(text) > max_len:
         text = text[:max_len] + "..."
     return text
@@ -208,92 +181,65 @@ async def fetch_reddit(
     limit: int = 10,
 ) -> List[Dict]:
     """Fetch Reddit posts via public JSON API (no auth required)."""
-    ck = _cache_key("fetch_reddit", subreddit, sort, limit)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
+    def parse(data):
+        items = []
+        for post in data.get("data", {}).get("children", []):
+            d = post.get("data", {})
+            created = d.get("created_utc", 0)
+            items.append({
+                "title": d.get("title", ""),
+                "url": f"https://reddit.com{d.get('permalink', '')}",
+                "source": f"r/{subreddit}",
+                "snippet": (d.get("selftext", "") or "")[:300],
+                "timestamp": datetime.fromtimestamp(created, tz=timezone.utc).isoformat() if created else "",
+                "score": d.get("score", 0),
+                "comments": d.get("num_comments", 0),
+            })
+        return items
 
-    url = f"https://www.reddit.com/r/{subreddit}/{sort}.json"
-    await _rate_limit("reddit")
-    try:
-        client = _get_client()
-        resp = await client.get(
-            url,
+    return await _fetch(
+        _cache_key("fetch_reddit", subreddit, sort, limit), "reddit", f"Reddit fetch failed (r/{subreddit})",
+        lambda client: _get_json(
+            client, f"https://www.reddit.com/r/{subreddit}/{sort}.json",
             params={"limit": min(limit, 25), "raw_json": 1},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"Reddit fetch failed (r/{subreddit}): {e}")
-        return [{"error": str(e)}]
-
-    items = []
-    for post in data.get("data", {}).get("children", []):
-        d = post.get("data", {})
-        # Convert Unix timestamp
-        created = d.get("created_utc", 0)
-        ts = datetime.fromtimestamp(created, tz=timezone.utc).isoformat() if created else ""
-
-        items.append({
-            "title": d.get("title", ""),
-            "url": f"https://reddit.com{d.get('permalink', '')}",
-            "source": f"r/{subreddit}",
-            "snippet": (d.get("selftext", "") or "")[:300],
-            "timestamp": ts,
-            "score": d.get("score", 0),
-            "comments": d.get("num_comments", 0),
-        })
-    _cache_set(ck, items)
-    return items
+        ),
+        parse,
+    )
 
 
 async def fetch_hn(
     story_type: str = "top",
     limit: int = 15,
 ) -> List[Dict]:
-    """Fetch Hacker News stories via official API."""
-    ck = _cache_key("fetch_hn", story_type, limit)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
-
     base = "https://hacker-news.firebaseio.com/v0"
-    await _rate_limit("hn")
-    try:
-        client = _get_client()
 
-        # Get story IDs
-        resp = await client.get(f"{base}/{story_type}stories.json")
-        resp.raise_for_status()
-        story_ids = resp.json()[:min(limit, 30)]
+    async def request(client):
+        story_ids = (await _get_json(client, f"{base}/{story_type}stories.json"))[:min(limit, 30)]
 
-        # Fetch each story (in parallel-ish via gather)
         async def _fetch_one(sid):
             r = await client.get(f"{base}/item/{sid}.json")
             return r.json() if r.status_code == 200 else None
 
-        stories = await asyncio.gather(*[_fetch_one(sid) for sid in story_ids])
+        return await asyncio.gather(*[_fetch_one(sid) for sid in story_ids])
 
-    except Exception as e:
-        logger.error(f"HN fetch failed: {e}")
-        return [{"error": str(e)}]
+    def parse(stories):
+        items = []
+        for story in stories:
+            if not story:
+                continue
+            ts = story.get("time", 0)
+            items.append({
+                "title": story.get("title", ""),
+                "url": story.get("url", f"https://news.ycombinator.com/item?id={story.get('id', '')}"),
+                "source": "hn",
+                "snippet": "",
+                "timestamp": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else "",
+                "score": story.get("score", 0),
+                "comments": story.get("descendants", 0),
+            })
+        return items
 
-    items = []
-    for story in stories:
-        if not story:
-            continue
-        ts = story.get("time", 0)
-        items.append({
-            "title": story.get("title", ""),
-            "url": story.get("url", f"https://news.ycombinator.com/item?id={story.get('id', '')}"),
-            "source": "hn",
-            "snippet": "",
-            "timestamp": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else "",
-            "score": story.get("score", 0),
-            "comments": story.get("descendants", 0),
-        })
-    _cache_set(ck, items)
-    return items
+    return await _fetch(_cache_key("fetch_hn", story_type, limit), "hn", "HN fetch failed", request, parse)
 
 
 async def fetch_x(
@@ -314,30 +260,19 @@ async def fetch_x(
     await _rate_limit("x")
     try:
         client = _get_client()
-
-        # Step 1: Resolve username to user ID
-        user_resp = await client.get(
-            f"https://api.x.com/2/users/by/username/{username}",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        user_resp.raise_for_status()
-        user_data = user_resp.json()
+        headers = {"Authorization": f"Bearer {token}"}
+        user_data = await _get_json(client, f"https://api.x.com/2/users/by/username/{username}", headers=headers)
         user_id = user_data.get("data", {}).get("id")
         if not user_id:
             return [{"error": f"X user not found: {username}"}]
-
-        # Step 2: Get user tweets
-        tweets_resp = await client.get(
-            f"https://api.x.com/2/users/{user_id}/tweets",
+        tweets_data = await _get_json(
+            client, f"https://api.x.com/2/users/{user_id}/tweets",
             params={
                 "max_results": min(limit, 100),
                 "tweet.fields": "created_at,text,public_metrics",
             },
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
         )
-        tweets_resp.raise_for_status()
-        tweets_data = tweets_resp.json()
-
     except Exception as e:
         logger.error(f"X fetch failed (@{username}): {e}")
         return [{"error": str(e)}]
@@ -377,47 +312,33 @@ async def fetch_openbb(
     if not endpoint:
         return [{"error": f"Unknown data_type: {data_type}. Use: {', '.join(_OPENBB_ENDPOINTS)}"}]
 
-    ck = _cache_key("fetch_openbb", symbols, data_type, provider)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
-
     params: Dict[str, Any] = {"provider": provider}
     if data_type != "news":
         params["symbol"] = symbols
 
-    await _rate_limit("openbb")
-    try:
-        client = _get_client()
-        resp = await client.get(f"{url}{endpoint}", params=params)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"OpenBB fetch failed ({data_type}, {symbols}): {e}")
-        return [{"error": f"OpenBB API unavailable: {e}"}]
+    def parse(data):
+        results = data.get("results", [])
+        if not isinstance(results, list):
+            results = [results] if results else []
+        now = datetime.now(timezone.utc).isoformat()
+        if data_type == "quote":
+            return _normalize_quotes(results, now)
+        if data_type == "news":
+            return _normalize_news(results)
+        if data_type == "economy":
+            return _normalize_economy(results, now)
+        return _normalize_historical(results, symbols, data_type, now)
 
-    results = data.get("results", [])
-    if not isinstance(results, list):
-        results = [results] if results else []
-
-    now = datetime.now(timezone.utc).isoformat()
-
-    if data_type == "quote":
-        items = _normalize_quotes(results, now)
-    elif data_type == "news":
-        items = _normalize_news(results)
-    elif data_type == "economy":
-        items = _normalize_economy(results, now)
-    elif data_type in ("historical", "crypto"):
-        items = _normalize_historical(results, symbols, data_type, now)
-    else:
-        return [{"error": f"Unhandled data_type: {data_type}"}]
-    _cache_set(ck, items)
-    return items
+    return await _fetch(
+        _cache_key("fetch_openbb", symbols, data_type, provider), "openbb",
+        f"OpenBB fetch failed ({data_type}, {symbols})",
+        lambda client: _get_json(client, f"{url}{endpoint}", params=params),
+        parse,
+        lambda e: f"OpenBB API unavailable: {e}",
+    )
 
 
 def _normalize_quotes(results: List[Dict], now: str) -> List[Dict]:
-    """Normalize OpenBB equity quote results to feed items."""
     items = []
     for q in results:
         symbol = q.get("symbol", "-")
@@ -444,262 +365,151 @@ def _normalize_quotes(results: List[Dict], now: str) -> List[Dict]:
 
 
 def _normalize_news(results: List[Dict]) -> List[Dict]:
-    """Normalize OpenBB news results to feed items."""
-    items = []
-    for n in results:
-        items.append({
-            "title": n.get("title", ""),
-            "url": n.get("url") or n.get("link", ""),
-            "source": f"openbb/news/{n.get('source', 'unknown')}",
-            "snippet": (n.get("text") or n.get("description") or "")[:300],
-            "timestamp": n.get("date") or n.get("published", ""),
-        })
-    return items
+    return [{
+        "title": n.get("title", ""),
+        "url": n.get("url") or n.get("link", ""),
+        "source": f"openbb/news/{n.get('source', 'unknown')}",
+        "snippet": (n.get("text") or n.get("description") or "")[:300],
+        "timestamp": n.get("date") or n.get("published", ""),
+    } for n in results]
 
 
 def _normalize_economy(results: List[Dict], now: str) -> List[Dict]:
-    """Normalize OpenBB economy indicator results to feed items."""
-    items = []
-    for e in results:
-        name = e.get("title") or e.get("name") or e.get("symbol", "-")
-        value = e.get("value", "N/A")
-        items.append({
-            "title": f"{name}: {value}",
-            "url": "",
-            "source": "openbb/economy",
-            "snippet": f"Country: {e.get('country', 'N/A')}, Unit: {e.get('unit', 'N/A')}",
-            "timestamp": e.get("date") or now,
-        })
-    return items
+    return [{
+        "title": f"{e.get('title') or e.get('name') or e.get('symbol', '-')}: {e.get('value', 'N/A')}",
+        "url": "",
+        "source": "openbb/economy",
+        "snippet": f"Country: {e.get('country', 'N/A')}, Unit: {e.get('unit', 'N/A')}",
+        "timestamp": e.get("date") or now,
+    } for e in results]
 
 
 def _normalize_historical(
     results: List[Dict], symbols: str, data_type: str, now: str,
 ) -> List[Dict]:
-    """Normalize OpenBB historical price results to a summary feed item."""
+    """Summarize a price series as one item for its latest data point."""
     if not results:
         return []
-    # Summarize: latest data point from the series
-    latest = results[-1] if results else {}
+    latest = results[-1]
     label = symbols.split(",")[0]
-    source_tag = "openbb/crypto" if data_type == "crypto" else "openbb/historical"
     o, h, l, c = latest.get("open", ""), latest.get("high", ""), latest.get("low", ""), latest.get("close", "")
     return [{
         "title": f"{label} OHLC: O={o} H={h} L={l} C={c}",
         "url": f"https://finance.yahoo.com/quote/{label}",
-        "source": source_tag,
+        "source": "openbb/crypto" if data_type == "crypto" else "openbb/historical",
         "snippet": f"Volume: {latest.get('volume', 'N/A')}, Date: {latest.get('date', 'N/A')}",
         "timestamp": latest.get("date") or now,
     }]
 
-
-#  Polymarket
 
 async def fetch_polymarket(
     query: str = "",
     limit: int = 10,
     active_only: bool = True,
 ) -> List[Dict]:
-    """Fetch prediction markets from Polymarket CLOB API."""
-    ck = _cache_key("fetch_polymarket", query, limit, active_only)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
-
     params: Dict[str, Any] = {"limit": min(limit, 50)}
     if active_only:
         params["active"] = "true"
 
-    await _rate_limit("polymarket")
-    try:
-        client = _get_client()
-        resp = await client.get(
-            "https://clob.polymarket.com/markets",
-            params=params,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"Polymarket fetch failed: {e}")
-        return [{"error": str(e)}]
+    def parse(data):
+        markets = data if isinstance(data, list) else data.get("data", data.get("markets", []))
+        items = []
+        query_lower = query.lower()
+        for m in markets:
+            question = m.get("question", "") or m.get("title", "")
+            if query and query_lower not in question.lower():
+                continue
+            slug = m.get("slug", m.get("condition_id", ""))
+            items.append({
+                "title": question,
+                "url": f"https://polymarket.com/event/{slug}" if slug else "",
+                "source": "polymarket",
+                "snippet": (m.get("description", "") or "")[:300],
+                "timestamp": m.get("end_date_iso", m.get("created_at", "")),
+                "probability": m.get("outcomePrices", m.get("last_trade_price")),
+                "volume": m.get("volume", m.get("volumeNum")),
+            })
+            if len(items) >= limit:
+                break
+        return items
 
-    markets = data if isinstance(data, list) else data.get("data", data.get("markets", []))
-    items = []
-    query_lower = query.lower()
-    for m in markets:
-        question = m.get("question", "") or m.get("title", "")
-        if query and query_lower not in question.lower():
-            continue
-        slug = m.get("slug", m.get("condition_id", ""))
-        items.append({
-            "title": question,
-            "url": f"https://polymarket.com/event/{slug}" if slug else "",
-            "source": "polymarket",
-            "snippet": (m.get("description", "") or "")[:300],
-            "timestamp": m.get("end_date_iso", m.get("created_at", "")),
-            "probability": m.get("outcomePrices", m.get("last_trade_price")),
-            "volume": m.get("volume", m.get("volumeNum")),
-        })
-        if len(items) >= limit:
-            break
-    _cache_set(ck, items)
-    return items
+    return await _fetch(
+        _cache_key("fetch_polymarket", query, limit, active_only), "polymarket", "Polymarket fetch failed",
+        lambda client: _get_json(client, "https://clob.polymarket.com/markets", params=params),
+        parse,
+    )
 
-
-#  Kalshi
 
 async def fetch_kalshi(
     query: str = "",
     limit: int = 10,
     status: str = "open",
 ) -> List[Dict]:
-    """Fetch prediction markets from Kalshi public API."""
-    ck = _cache_key("fetch_kalshi", query, limit, status)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
-
     params: Dict[str, Any] = {"limit": min(limit, 50), "status": status}
 
-    await _rate_limit("kalshi")
-    try:
-        client = _get_client()
-        resp = await client.get(
-            "https://api.elections.kalshi.com/trade-api/v2/markets",
-            params=params,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"Kalshi fetch failed: {e}")
-        return [{"error": str(e)}]
+    def parse(data):
+        items = []
+        query_lower = query.lower()
+        for m in data.get("markets", []):
+            title = m.get("title", "") or m.get("subtitle", "")
+            if query and query_lower not in title.lower():
+                continue
+            ticker = m.get("ticker", "")
+            items.append({
+                "title": title,
+                "url": f"https://kalshi.com/markets/{ticker}" if ticker else "",
+                "source": "kalshi",
+                "snippet": (m.get("rules_primary", "") or m.get("subtitle", ""))[:300],
+                "timestamp": m.get("close_time", m.get("expiration_time", "")),
+                "yes_price": m.get("yes_ask", m.get("last_price")),
+                "volume": m.get("volume", m.get("open_interest")),
+            })
+            if len(items) >= limit:
+                break
+        return items
 
-    markets = data.get("markets", [])
-    items = []
-    query_lower = query.lower()
-    for m in markets:
-        title = m.get("title", "") or m.get("subtitle", "")
-        if query and query_lower not in title.lower():
-            continue
-        ticker = m.get("ticker", "")
-        items.append({
-            "title": title,
-            "url": f"https://kalshi.com/markets/{ticker}" if ticker else "",
-            "source": "kalshi",
-            "snippet": (m.get("rules_primary", "") or m.get("subtitle", ""))[:300],
-            "timestamp": m.get("close_time", m.get("expiration_time", "")),
-            "yes_price": m.get("yes_ask", m.get("last_price")),
-            "volume": m.get("volume", m.get("open_interest")),
-        })
-        if len(items) >= limit:
-            break
-    _cache_set(ck, items)
-    return items
+    return await _fetch(
+        _cache_key("fetch_kalshi", query, limit, status), "kalshi", "Kalshi fetch failed",
+        lambda client: _get_json(client, "https://api.elections.kalshi.com/trade-api/v2/markets", params=params),
+        parse,
+    )
 
-
-#  Metaculus
 
 async def fetch_metaculus(
     query: str = "",
     limit: int = 10,
     order_by: str = "-activity",
 ) -> List[Dict]:
-    """Fetch prediction questions from Metaculus API."""
-    ck = _cache_key("fetch_metaculus", query, limit, order_by)
-    cached = _cache_get(ck)
-    if cached is not None:
-        return cached
-
-    params: Dict[str, Any] = {
-        "limit": min(limit, 50),
-        "order_by": order_by,
-    }
+    params: Dict[str, Any] = {"limit": min(limit, 50), "order_by": order_by}
     if query:
         params["search"] = query
 
-    await _rate_limit("metaculus")
-    try:
-        client = _get_client()
-        resp = await client.get(
-            "https://www.metaculus.com/api2/questions/",
-            params=params,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"Metaculus fetch failed: {e}")
-        return [{"error": str(e)}]
+    def parse(data):
+        items = []
+        for q in data.get("results", []):
+            qid = q.get("id", "")
+            prediction = q.get("community_prediction", {})
+            items.append({
+                "title": q.get("title", ""),
+                "url": f"https://www.metaculus.com/questions/{qid}/" if qid else "",
+                "source": "metaculus",
+                "snippet": (q.get("description", "") or "")[:300],
+                "timestamp": q.get("publish_time", q.get("created_time", "")),
+                "prediction": prediction.get("full", {}).get("q2") if isinstance(prediction, dict) else None,
+                "num_predictions": q.get("number_of_predictions", 0),
+            })
+            if len(items) >= limit:
+                break
+        return items
 
-    questions = data.get("results", [])
-    items = []
-    for q in questions:
-        qid = q.get("id", "")
-        prediction = q.get("community_prediction", {})
-        median = prediction.get("full", {}).get("q2") if isinstance(prediction, dict) else None
-        items.append({
-            "title": q.get("title", ""),
-            "url": f"https://www.metaculus.com/questions/{qid}/" if qid else "",
-            "source": "metaculus",
-            "snippet": (q.get("description", "") or "")[:300],
-            "timestamp": q.get("publish_time", q.get("created_time", "")),
-            "prediction": median,
-            "num_predictions": q.get("number_of_predictions", 0),
-        })
-        if len(items) >= limit:
-            break
-    _cache_set(ck, items)
-    return items
-
-
-#  Multi-Source Aggregation
-
-_SOURCE_FETCHERS = {
-    "brave": lambda q, n: brave_search(q, count=n),
-    "reddit": lambda q, n: fetch_reddit(q, limit=n),
-    "hn": lambda q, n: fetch_hn(limit=n),
-    "rss": lambda q, n: fetch_rss(q, limit=n),
-    "polymarket": lambda q, n: fetch_polymarket(q, limit=n),
-    "kalshi": lambda q, n: fetch_kalshi(q, limit=n),
-    "metaculus": lambda q, n: fetch_metaculus(q, limit=n),
-}
-
-
-async def fetch_multi_source(
-    query: str,
-    sources: Optional[List[str]] = None,
-    per_source_limit: int = 5,
-) -> List[Dict]:
-    """Fetch from multiple sources in parallel and merge results."""
-    if sources is None:
-        sources = ["brave", "hn", "reddit"]
-
-    tasks = []
-    source_names = []
-    for src in sources:
-        fetcher = _SOURCE_FETCHERS.get(src)
-        if fetcher:
-            tasks.append(fetcher(query, per_source_limit))
-            source_names.append(src)
-        else:
-            logger.warning(f"Unknown source '{src}' in fetch_multi_source")
-
-    if not tasks:
-        return [{"error": "No valid sources specified"}]
-
-    results_list = await asyncio.gather(*tasks, return_exceptions=True)
-
-    merged: List[Dict] = []
-    for src_name, result in zip(source_names, results_list):
-        if isinstance(result, Exception):
-            merged.append({"error": f"{src_name}: {result}", "source": src_name})
-        elif isinstance(result, list):
-            merged.extend(result)
-
-    return merged
+    return await _fetch(
+        _cache_key("fetch_metaculus", query, limit, order_by), "metaculus", "Metaculus fetch failed",
+        lambda client: _get_json(client, "https://www.metaculus.com/api2/questions/", params=params),
+        parse,
+    )
 
 
 def _fmt_large_num(n) -> str:
-    """Format a large number with T/B/M suffix."""
     try:
         n = float(n)
     except (TypeError, ValueError):

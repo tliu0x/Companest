@@ -15,8 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class DigestEnvelope(BaseModel):
-    """Common envelope fields shared by all digest types."""
-
     company_id: str = Field(..., description="Company that owns this digest")
     digest_type: str = Field(..., description="Type discriminator")
     schema_version: str = Field(..., description="Schema version string")
@@ -31,8 +29,6 @@ class DigestEnvelope(BaseModel):
 
 
 class MarketItem(BaseModel):
-    """A single market entry in a market snapshot."""
-
     ticker: str
     title: str
     yes_price: float = Field(..., ge=0, le=100)
@@ -44,8 +40,6 @@ class MarketItem(BaseModel):
 
 
 class PositionItem(BaseModel):
-    """A single position entry."""
-
     ticker: str
     market_title: Optional[str] = None
     side: Literal["yes", "no"]
@@ -58,8 +52,6 @@ class PositionItem(BaseModel):
 
 
 class SettlementItem(BaseModel):
-    """A single settlement event."""
-
     ticker: str
     market_title: Optional[str] = None
     outcome: Literal["yes", "no"]
@@ -71,8 +63,6 @@ class SettlementItem(BaseModel):
 
 
 class ApprovalItem(BaseModel):
-    """A single pending approval entry."""
-
     order_id: str
     ticker: str
     market_title: Optional[str] = None
@@ -86,24 +76,18 @@ class ApprovalItem(BaseModel):
 
 
 class MarketSnapshotDigest(DigestEnvelope):
-    """Snapshot of markets a trader is actively watching."""
-
     digest_type: Literal["market_snapshot"] = "market_snapshot"
     schema_version: Literal["1.0.0"] = "1.0.0"
     markets: List[MarketItem]
 
 
 class PositionsDigest(DigestEnvelope):
-    """Current positions held by a trader."""
-
     digest_type: Literal["positions"] = "positions"
     schema_version: Literal["1.0.0"] = "1.0.0"
     positions: List[PositionItem]
 
 
 class PnLDigest(DigestEnvelope):
-    """Profit and loss summary for a trader."""
-
     digest_type: Literal["pnl"] = "pnl"
     schema_version: Literal["1.0.0"] = "1.0.0"
     daily_pnl: Optional[float] = Field(
@@ -124,8 +108,6 @@ class PnLDigest(DigestEnvelope):
 
 
 class RiskDigest(DigestEnvelope):
-    """Risk metrics for a trader."""
-
     digest_type: Literal["risk"] = "risk"
     schema_version: Literal["1.0.0"] = "1.0.0"
     total_exposure: float = Field(
@@ -150,16 +132,12 @@ class RiskDigest(DigestEnvelope):
 
 
 class SettlementDigest(DigestEnvelope):
-    """Recent settlement events for a trader."""
-
     digest_type: Literal["settlement"] = "settlement"
     schema_version: Literal["1.0.0"] = "1.0.0"
     settlements: List[SettlementItem]
 
 
 class ApprovalQueueDigest(DigestEnvelope):
-    """Pending trade approvals awaiting human review."""
-
     digest_type: Literal["approval_queue"] = "approval_queue"
     schema_version: Literal["1.0.0"] = "1.0.0"
     pending_approvals: List[ApprovalItem]
@@ -176,15 +154,13 @@ DIGEST_TYPE_MAP: Dict[str, Type[DigestEnvelope]] = {
 
 
 class DigestS3Store(S3JsonStore):
-    """S3-backed storage for company-private digests."""
-
     def __init__(self, bucket: str = "", prefix: str = "companest-digests/",
                  region: str = "us-east-1", endpoint_url: Optional[str] = None) -> None:
         super().__init__(bucket, prefix, region, endpoint_url)
 
     def put_digest(self, company_id: str, digest_type: str,
                    digest_data: Dict[str, Any], idempotency_key: str) -> str:
-        """Store a digest and update the latest pointer. Returns the S3 key."""
+        """Store a digest and update the latest pointer."""
         body = json.dumps(digest_data, ensure_ascii=False, default=str)
         base = f"{company_id}/{digest_type}"
         key = self._put(f"{base}/{idempotency_key}.json", body)
@@ -192,14 +168,11 @@ class DigestS3Store(S3JsonStore):
         return key
 
     def get_latest_digest(self, company_id: str, digest_type: str) -> Optional[Dict[str, Any]]:
-        """Return the latest digest for a company and type, or None."""
         return self._get_json(f"{company_id}/{digest_type}/latest.json")
 
 
 @dataclass
 class IngestResult:
-    """Result of a digest ingestion attempt."""
-
     accepted: bool
     reason: str
     digest_type: str
@@ -207,8 +180,6 @@ class IngestResult:
 
 
 class DigestIngestor:
-    """Validates, deduplicates and stores digests."""
-
     def __init__(self, s3_store: DigestS3Store) -> None:
         self._s3_store = s3_store
         self._seen_keys: Set[str] = set()
@@ -241,7 +212,6 @@ class DigestIngestor:
 
 
 def create_digest_router(s3_store: DigestS3Store):
-    """Build the FastAPI router for digest ingestion and retrieval."""
     from fastapi import APIRouter, HTTPException
 
     router = APIRouter(prefix="/api/companies")
