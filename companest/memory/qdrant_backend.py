@@ -1,5 +1,6 @@
 import logging
-import hashlib
+import json
+import uuid
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -9,7 +10,7 @@ from .manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
-_COLLECTION_PREFIX = "companest_memory_"
+_COLLECTION_NAME = "companest_memory_v2"
 _DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 _VECTOR_SIZE = 384  # bge-small-en-v1.5 output dimension
 
@@ -35,7 +36,7 @@ class QdrantBackend(MemoryBackend):
         self._in_memory = in_memory
         self._client = None
         self._embedder = None
-        self._initialized_collections: set = set()
+        self._collection_initialized = False
 
     @synchronized
     def _get_client(self):
@@ -75,32 +76,24 @@ class QdrantBackend(MemoryBackend):
         return list(self._get_embedder().embed(texts))
 
     @synchronized
-    def _collection_name(self, team_id: str) -> str:
-        # Replacing separators aliases e.g. acme/research and acme_research.
-        # Never read the ambiguous legacy collection, even as a fallback.
-        digest = hashlib.sha256(team_id.encode("utf-8")).hexdigest()
-        return f"{_COLLECTION_PREFIX}v2_{digest}"
-
-    @synchronized
-    def _ensure_collection(self, team_id: str) -> None:
-        name = self._collection_name(team_id)
-        if name in self._initialized_collections:
+    def _ensure_collection(self) -> None:
+        if self._collection_initialized:
             return
 
         client = self._get_client()
         from qdrant_client.models import Distance, VectorParams
 
-        if not client.collection_exists(name):
-            client.create_collection(
-                collection_name=name,
-                vectors_config=VectorParams(
-                    size=_VECTOR_SIZE,
-                    distance=Distance.COSINE,
-                ),
-            )
-            logger.info("Created Qdrant collection: %s", name)
-
-        self._initialized_collections.add(name)
+        if not client.collection_exists(_COLLECTION_NAME):
+            try:
+                client.create_collection(
+                    collection_name=_COLLECTION_NAME,
+                    vectors_config=VectorParams(size=_VECTOR_SIZE, distance=Distance.COSINE),
+                )
+            except Exception:
+                # Another actor may have created the shared collection first.
+                if not client.collection_exists(_COLLECTION_NAME):
+                    raise
+        self._collection_initialized = True
 
     @synchronized
     def _entry_to_text(self, key: str, meta: dict) -> str:
@@ -114,9 +107,8 @@ class QdrantBackend(MemoryBackend):
 
     @synchronized
     def _upsert_entry(self, team_id: str, key: str) -> None:
-        self._ensure_collection(team_id)
+        self._ensure_collection()
         client = self._get_client()
-        name = self._collection_name(team_id)
 
         index = self._file_backend.get_index(team_id)
         meta = index.get(key, {})
@@ -124,9 +116,9 @@ class QdrantBackend(MemoryBackend):
         vectors = self._embed([text])
 
         from qdrant_client.models import PointStruct
-        point_id = self._key_to_point_id(key)
+        point_id = self._point_id(team_id, key)
         client.upsert(
-            collection_name=name,
+            collection_name=_COLLECTION_NAME,
             points=[
                 PointStruct(
                     id=point_id,
@@ -138,22 +130,22 @@ class QdrantBackend(MemoryBackend):
 
     @synchronized
     def _delete_entry(self, team_id: str, key: str) -> None:
-        name = self._collection_name(team_id)
-        if name not in self._initialized_collections:
-            return
+        self._ensure_collection()
         client = self._get_client()
         from qdrant_client.models import PointIdsList
         client.delete(
-            collection_name=name,
-            points_selector=PointIdsList(points=[self._key_to_point_id(key)]),
+            collection_name=_COLLECTION_NAME,
+            points_selector=PointIdsList(points=[self._point_id(team_id, key)]),
         )
 
     @staticmethod
-    def _key_to_point_id(key: str) -> str:
-        """Deterministic point ID from memory key."""
-        import hashlib
-        import uuid
-        return str(uuid.UUID(hashlib.md5(key.encode()).hexdigest()))
+    def _point_id(team_id: str, key: str) -> str:
+        """Qdrant requires a UUID/integer per memory record, not per team.
+
+        The original team_id is the sole tenant identifier; equal memory keys
+        in different teams must still identify distinct records.
+        """
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([team_id, key])))
 
     @property
     @synchronized
@@ -229,7 +221,7 @@ class QdrantBackend(MemoryBackend):
     def reindex_team(self, team_id: str) -> int:
         """Rebuild a team's derived vectors from authoritative mounted files.
 
-        Used when moving from legacy collection names; errors propagate so an
+        Used when moving from legacy per-team collections; errors propagate so an
         operator cannot mistake a partial rebuild for a completed migration.
         """
         keys = self._file_backend.list_keys(team_id)
@@ -246,9 +238,8 @@ class QdrantBackend(MemoryBackend):
         limit: int = 20,
         include_archive: bool = True,
     ) -> List[Dict[str, Any]]:
-        self._ensure_collection(team_id)
+        self._ensure_collection()
         client = self._get_client()
-        name = self._collection_name(team_id)
 
         vectors = self._embed([query])
 
@@ -256,12 +247,12 @@ class QdrantBackend(MemoryBackend):
         scope_filter = Filter(must=[FieldCondition(key="team_id", match=MatchValue(value=team_id))])
         if hasattr(client, "query_points"):
             hits = client.query_points(
-                collection_name=name, query=vectors[0], query_filter=scope_filter,
+                collection_name=_COLLECTION_NAME, query=vectors[0], query_filter=scope_filter,
                 limit=limit, with_payload=True,
             ).points
         else:
             hits = client.search(
-                collection_name=name, query_vector=vectors[0], query_filter=scope_filter,
+                collection_name=_COLLECTION_NAME, query_vector=vectors[0], query_filter=scope_filter,
                 limit=limit, with_payload=True,
             )
 

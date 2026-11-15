@@ -48,9 +48,8 @@ class BackgroundManager:
         all_teams = set(self._team_registry.list_teams())
         for team_id, cycle in self._enrichment_cycles.items():
             if team_id in all_teams:
-                safe_name = team_id.replace("-", "_") + "_cycle"
                 self._scheduler.add(
-                    safe_name,
+                    f"enrichment/{team_id}",
                     lambda tid=team_id, p=cycle["prompt"]: self.run_enrichment_cycle(tid, p),
                     interval=cycle["interval"],
                     run_on_start=False,

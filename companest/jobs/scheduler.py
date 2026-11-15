@@ -145,6 +145,8 @@ class Scheduler:
             "tasks": {
                 name: {
                     "enabled": t.enabled,
+                    "scope_type": t.scope_type,
+                    "scope_id": t.scope_id,
                     "interval_seconds": t.interval_seconds,
                     "last_run": t.last_run.isoformat() if t.last_run else None,
                     "run_count": t.run_count,

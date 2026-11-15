@@ -661,7 +661,7 @@ class CompanestAPIServer:
                 return {"started": False, "tasks": {}, "note": "Scheduler not initialized"}
             return self.orchestrator.scheduler.get_status()
 
-        @app.post("/api/scheduler/{task_name}/trigger")
+        @app.post("/api/scheduler/{task_name:path}/trigger")
         async def trigger_scheduled_task(task_name: str):
             if not hasattr(self.orchestrator, "scheduler"):
                 raise HTTPException(status_code=503, detail="Scheduler not initialized")
@@ -864,7 +864,7 @@ class CompanestAPIServer:
                 sched_status = self.orchestrator.scheduler.get_status()
                 data["schedule_status"] = {
                     name: info for name, info in sched_status["tasks"].items()
-                    if name.startswith(f"company_{company_id}_") or name == f"ceo_{company_id}"
+                    if info.get("scope_type") == "company" and info.get("scope_id") == company_id
                 }
             recent = await self.job_manager.list_jobs(company_id=company_id, limit=10)
             data["recent_jobs"] = [j.to_dict() for j in recent]

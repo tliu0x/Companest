@@ -35,7 +35,7 @@ class TestServerEndpoints:
             "/api/finance/report",
             "/api/finance/circuit-breaker/reset",
             "/api/scheduler/status",
-            "/api/scheduler/{task_name}/trigger",
+            "/api/scheduler/{task_name:path}/trigger",
             "/api/v2/status",
         ):
             assert path in routes

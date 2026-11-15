@@ -450,7 +450,7 @@ class CompanestOrchestrator:
         for sched in company.schedules:
             if not sched.enabled:
                 continue
-            task_name = f"company_{company.id}_{sched.name}"
+            task_name = f"company/{company.id}/{sched.name}"
             self.scheduler.add(
                 task_name,
                 lambda tid=sched.team_id, p=sched.prompt, m=sched.mode, cid=company.id:

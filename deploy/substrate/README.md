@@ -149,11 +149,19 @@ The Docker control plane also needs `COMPANEST_WORKSPACE_MOUNT`, mounted at
 `/mnt/companest/workspaces`. Its workspace declarations must reference the same
 persistent storage identities as the corresponding actor templates.
 
+Company schedule names now use `company/<id>/<name>` and enrichment schedules
+use `enrichment/<team_id>` without character replacement. Update operator
+run-now references accordingly; company status uses exact scope metadata, not
+ambiguous name prefixes.
+
 ### Existing Qdrant indexes
 
-Collection names now hash the complete team ID. The old separator replacement
-could alias a company's private team with a shared team, so there is deliberately
-no fallback to old collections. File memory remains authoritative and unchanged.
+All teams now use one `companest_memory_v2` collection and the original `team_id`
+as their scope identifier. No team ID is rewritten or mapped to a second team
+identifier. Queries filter by exact `team_id`; record UUIDs include both that ID
+and the memory key, so one team's write/delete cannot overwrite another's same
+key. Old per-team collection names could alias private and shared teams, so
+there is deliberately no fallback. File memory remains authoritative and unchanged.
 For deployments using Qdrant, instantiate the configured `QdrantBackend` with
 the authoritative memory mount and call `backend.reindex_team(team_id)` for
 each registered team, using the fully qualified `company/team` ID for private
@@ -179,9 +187,15 @@ Existing contract tests were adapted; no new simulation script is shipped.
 Real model/tool execution and final CSI/cluster deployment acceptance were not
 performed. Run that acceptance separately before using this in production.
 
-The full repository suite passed with **521 tests and 3 live-network tests
-deselected** after the migration. Two obsolete local-runtime implementation
-checks were removed; public API, isolation and result contracts remain covered.
+The migration initially passed 521 default tests. PR review then removed 39
+duplicate/wrapper test functions (68 cases); the retained suite passed with
+**453 tests and 3 live-network tests deselected**. Public API, isolation and
+data-integrity contracts remain covered; see [test scope](../../tests/README.md).
 Compilation and targeted static checks passed. Temporary boundary simulations
 also checked company/capability denial, company/workspace schedule persistence,
 actor UID replacement, malformed records and durable-result-before-deletion.
+
+The PR review additionally simulated priority ceilings, revocation during
+approval, cancellation-safe actor acceptance, nested scope inheritance,
+one-shot schedule claims, hot schedule registration, and Qdrant read/write/delete
+isolation using the canonical team ID with fake embeddings.
