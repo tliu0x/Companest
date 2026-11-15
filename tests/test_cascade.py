@@ -441,12 +441,6 @@ class TestCascadeEngine:
         )
         assert "claude-opus-4-6" in chain
 
-    def test_get_downgrade(self):
-        engine = CascadeEngine()
-        downgrade = engine.get_downgrade("claude-opus-4-6")
-        assert downgrade is not None
-        assert "sonnet" in downgrade
-
     def test_check_adequate_delegates(self):
         engine = CascadeEngine()
         adequate, quality = engine.check_adequate(
@@ -461,27 +455,6 @@ class TestCascadeEngine:
         chain = engine.get_chain("claude-opus-4-6")
         providers = {_detect_provider(m) for m in chain}
         assert len(providers) > 1
-
-    def test_estimate_cascade_cost(self):
-        engine = CascadeEngine()
-        cost = engine.estimate_cascade_cost("analyze this", "claude-opus-4-6")
-        assert cost > 0
-
-    def test_estimate_cascade_cost_with_metrics(self):
-        engine = CascadeEngine()
-        metrics = CascadeMetrics()
-        # Record high success rate for cheap model
-        for _ in range(10):
-            metrics.record("claude-haiku-4-5-20251001", succeeded=True)
-
-        cost_with_metrics = engine.estimate_cascade_cost(
-            "analyze this", "claude-opus-4-6", metrics=metrics,
-        )
-        cost_without = engine.estimate_cascade_cost(
-            "analyze this", "claude-opus-4-6",
-        )
-        # With high success rate on cheap model, expected cost should be lower
-        assert cost_with_metrics <= cost_without
 
     def test_custom_strategy(self):
         strategy = CascadeStrategy()

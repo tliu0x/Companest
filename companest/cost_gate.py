@@ -1,11 +1,10 @@
 """Companest CostGate  Finance Department Approval System"""
 
 import asyncio
-import json
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
@@ -14,11 +13,9 @@ from .memory import MemoryManager
 
 logger = logging.getLogger(__name__)
 
-# Valid priority levels
 VALID_PRIORITIES = {"critical", "high", "normal", "low"}
 
-# Model pricing ($/1M tokens)  kept in sync with soul.md
-# "langs": {lang_code: strength}  language affinity for cascade sorting
+# $/1M tokens; "langs" is the language affinity used to order cascade chains
 MODEL_PRICES = {
     "deepseek-chat":              {"input": 0.14,  "output": 0.28,  "langs": {"zh": 1.0, "en": 0.9}},
     "gpt-4o-mini":                {"input": 0.15,  "output": 0.60,  "langs": {"en": 1.0, "multi": 0.8}},
@@ -41,7 +38,6 @@ MODEL_PRICES = {
 
 @dataclass
 class SpendingVelocity:
-    """A single spending event for velocity tracking."""
     timestamp: float   # time.monotonic()
     amount: float
     team_id: str
@@ -59,16 +55,14 @@ class CostEstimate:
 
 @dataclass
 class CostDecision:
-    action: str  # "auto_approve" | "notify_approve" | "pending_approval" | "rejected"
+    action: str  # "auto_approve" | "notify_approve" | "rejected"
     estimate: CostEstimate
     reason: str
     approval_id: Optional[str] = None
-    priority: str = "normal"  # records what priority was used
+    priority: str = "normal"
 
 
 class CircuitBreaker:
-    """In-memory velocity tracker."""
-
     def __init__(
         self,
         window_minutes: float = 5,
@@ -82,7 +76,6 @@ class CircuitBreaker:
         self._tripped_at: Optional[float] = None
 
     def record(self, amount: float, team_id: str) -> None:
-        """Append spending event and prune old ones."""
         now = time.monotonic()
         self._events.append(SpendingVelocity(
             timestamp=now, amount=amount, team_id=team_id,
@@ -90,25 +83,19 @@ class CircuitBreaker:
         self._prune(now)
 
     def _prune(self, now: float) -> None:
-        """Remove events outside the window."""
         cutoff = now - self.window_minutes * 60
         while self._events and self._events[0].timestamp < cutoff:
             self._events.popleft()
 
     def is_tripped(self, daily_limit: float) -> bool:
-        """Check if breaker is tripped. Auto-resets after cooldown."""
         now = time.monotonic()
-
-        # Auto-reset after cooldown
         if self._tripped_at is not None:
-            elapsed = now - self._tripped_at
-            if elapsed >= self.cooldown_minutes * 60:
+            if now - self._tripped_at >= self.cooldown_minutes * 60:
                 self._tripped_at = None
                 logger.info("[CircuitBreaker] Auto-reset after cooldown")
                 return False
             return True
 
-        # Check velocity
         self._prune(now)
         window_spend = sum(e.amount for e in self._events)
         threshold = daily_limit * (self.threshold_pct / 100.0)
@@ -119,25 +106,21 @@ class CircuitBreaker:
                 f"exceeds {self.threshold_pct}% of ${daily_limit:.2f} limit"
             )
             return True
-
         return False
 
     def reset(self) -> None:
-        """Manual reset."""
         self._tripped_at = None
         self._events.clear()
         logger.info("[CircuitBreaker] Manually reset")
 
     def get_status(self) -> dict:
-        """Status dict for dashboards."""
         now = time.monotonic()
         self._prune(now)
         window_spend = sum(e.amount for e in self._events)
         tripped = self._tripped_at is not None
         cooldown_remaining = 0.0
-        if tripped and self._tripped_at is not None:
-            elapsed = now - self._tripped_at
-            cooldown_remaining = max(0.0, self.cooldown_minutes * 60 - elapsed)
+        if tripped:
+            cooldown_remaining = max(0.0, self.cooldown_minutes * 60 - (now - self._tripped_at))
 
         return {
             "tripped": tripped,
@@ -151,8 +134,6 @@ class CircuitBreaker:
 
 
 class CostGate:
-    """Cost approval gate with two operating modes:"""
-
     def __init__(
         self,
         memory: MemoryManager,
@@ -170,6 +151,11 @@ class CostGate:
         self._circuit_breaker: Optional[CircuitBreaker] = None
         self._background_tasks: set = set()  # prevent GC of fire-and-forget tasks
 
+    def _spawn(self, coro) -> None:
+        t = asyncio.create_task(coro)
+        self._background_tasks.add(t)
+        t.add_done_callback(self._background_tasks.discard)
+
     def _load_budget(self) -> Dict[str, Any]:
         budget = self.memory.read_team_memory("finance", "budget.json")
         if not budget:
@@ -180,7 +166,6 @@ class CostGate:
                 "monthly_limit": 200.00,
             }
 
-        # Backward-compatible defaults for new fields
         budget.setdefault("mode", "post_hoc")
         budget.setdefault("rolling_window_hours", 24)
         budget.setdefault("circuit_breaker", {"window_minutes": 5, "threshold_pct": 30})
@@ -190,7 +175,6 @@ class CostGate:
             "critical": 999, "high": 3.0, "normal": 1.0, "low": 0.5,
         })
 
-        # Lazy-init circuit breaker from budget config
         if self._circuit_breaker is None:
             cb_cfg = budget["circuit_breaker"]
             self._circuit_breaker = CircuitBreaker(
@@ -202,7 +186,6 @@ class CostGate:
         return budget
 
     def _get_today_spending(self) -> float:
-        """Get today's spend from local log (sync fallback)."""
         log = self.memory.read_team_memory("finance", "spending-log.json")
         if not log or not isinstance(log, list):
             return 0.0
@@ -213,81 +196,31 @@ class CostGate:
             if isinstance(entry, dict) and entry.get("date", "").startswith(today)
         )
 
-    def _get_window_spending(self, hours: float) -> float:
-        """Get spending within a rolling window of `hours`."""
+    def _get_window_spending(self, hours: float, field: Optional[str] = None, value: Any = None) -> float:
         log = self.memory.read_team_memory("finance", "spending-log.json")
         if not log or not isinstance(log, list):
             return 0.0
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         total = 0.0
         for entry in log:
-            if not isinstance(entry, dict):
-                continue
-            date_str = entry.get("date", "")
-            if not date_str:
+            if not isinstance(entry, dict) or (field and entry.get(field) != value):
                 continue
             try:
-                entry_time = datetime.fromisoformat(date_str)
-                if entry_time >= cutoff:
+                if datetime.fromisoformat(entry.get("date", "")) >= cutoff:
                     total += entry.get("cost", 0)
             except (ValueError, TypeError):
                 continue
         return total
 
     def _get_team_window_spending(self, team_id: str, hours: float) -> float:
-        """Get per-team spending within a rolling window."""
-        log = self.memory.read_team_memory("finance", "spending-log.json")
-        if not log or not isinstance(log, list):
-            return 0.0
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        total = 0.0
-        for entry in log:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("team") != team_id:
-                continue
-            date_str = entry.get("date", "")
-            if not date_str:
-                continue
-            try:
-                entry_time = datetime.fromisoformat(date_str)
-                if entry_time >= cutoff:
-                    total += entry.get("cost", 0)
-            except (ValueError, TypeError):
-                continue
-        return total
+        return self._get_window_spending(hours, "team", team_id)
 
     def _get_company_window_spending(self, company_id: str, hours: float) -> float:
-        """Get per-company spending within a rolling window."""
-        log = self.memory.read_team_memory("finance", "spending-log.json")
-        if not log or not isinstance(log, list):
-            return 0.0
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        total = 0.0
-        for entry in log:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("company") != company_id:
-                continue
-            date_str = entry.get("date", "")
-            if not date_str:
-                continue
-            try:
-                entry_time = datetime.fromisoformat(date_str)
-                if entry_time >= cutoff:
-                    total += entry.get("cost", 0)
-            except (ValueError, TypeError):
-                continue
-        return total
+        return self._get_window_spending(hours, "company", company_id)
 
     def _get_overflow_usage(self, budget: dict, hours: float) -> float:
-        """Calculate how much overflow pool has been consumed."""
-        team_budgets = budget.get("team_budgets", {})
-        if not team_budgets:
-            return 0.0
-
         overflow_used = 0.0
-        for tid, tb in team_budgets.items():
+        for tid, tb in budget["team_budgets"].items():
             team_daily = tb.get("daily", 0)
             if team_daily <= 0:
                 continue
@@ -296,34 +229,19 @@ class CostGate:
                 overflow_used += team_spent - team_daily
         return overflow_used
 
-    async def get_today_spending_async(self) -> float:
-        """Get today's spend  prefer LiteLLM (accurate), fall back to local log."""
-        if self.litellm_client:
-            try:
-                report = await self.litellm_client.get_total_spend()
-                return float(report.get("total_spend", 0.0))
-            except Exception as e:
-                logger.warning(f"LiteLLM spend query failed, using local: {e}")
-        return self._get_today_spending()
-
     def estimate_cost(self, task: str, target_model: str, target_team: str) -> CostEstimate:
-        """Quick rule-based cost estimation (conservative  overestimates to be safe)."""
         from .cascade import get_downgrade
 
-        # Conservative: ~2 chars per token (handles CJK, code, mixed)
+        # Deliberately overestimates: ~2 chars per token, ~2000 tokens of system prompt
         task_tokens = max(len(task) // 2, 10)
         prices = MODEL_PRICES.get(target_model)
         if not prices:
-            # Unknown model: use expensive fallback to avoid budget overruns
             logger.warning(f"Unknown model '{target_model}', using conservative pricing")
             prices = {"input": 15.0, "output": 75.0}
 
-        # System prompt: soul.md + user.md + team memory keys ~ 2000 tokens typical
         est_input = task_tokens + 2000
         est_output = min(task_tokens * 3, 8192)
-
         cost = (est_input * prices["input"] + est_output * prices["output"]) / 1_000_000
-
         return CostEstimate(
             estimated_input_tokens=est_input,
             estimated_output_tokens=est_output,
@@ -339,197 +257,120 @@ class CostGate:
         company_id: Optional[str] = None,
         company_budget_hourly: Optional[float] = None,
     ) -> CostDecision:
-        """Evaluate a task and return approval decision."""
         async with self._budget_lock:
             return await self._evaluate_locked(
-                task, target_team_id, target_model, priority,
-                company_id=company_id,
-                company_budget_hourly=company_budget_hourly,
+                task, target_team_id, target_model, priority, company_id, company_budget_hourly,
             )
 
     async def _evaluate_locked(
         self, task: str, target_team_id: str, target_model: str, priority: str,
-        company_id: Optional[str] = None,
-        company_budget_hourly: Optional[float] = None,
+        company_id: Optional[str], company_budget_hourly: Optional[float],
     ) -> CostDecision:
-        """Internal evaluate  called under _budget_lock."""
         budget = self._load_budget()
         estimate = self.estimate_cost(task, target_model, target_team_id)
         cost = estimate.estimated_cost_usd
+        daily_limit = budget.get("daily_limit", 10.0)
+        hours = budget["rolling_window_hours"]
 
-        # Validate priority
         if priority not in VALID_PRIORITIES:
             priority = "normal"
 
-        # 1. Critical priority  always bypass
+        def rejected(reason: str) -> CostDecision:
+            return CostDecision(action="rejected", estimate=estimate, reason=reason, priority=priority)
+
         if priority == "critical":
             return CostDecision(
                 action="auto_approve", estimate=estimate,
                 reason="Critical priority bypass", priority=priority,
             )
 
-        # 1.5. Company-level hourly budget check
         if company_id and company_budget_hourly is not None and company_budget_hourly > 0:
             company_spent = self._get_company_window_spending(company_id, hours=1.0)
             if company_spent + cost > company_budget_hourly:
-                return CostDecision(
-                    action="rejected", estimate=estimate,
-                    reason=(
-                        f"Company '{company_id}' hourly budget exceeded "
-                        f"(${company_spent:.2f}+${cost:.2f} > ${company_budget_hourly:.2f}/hr)"
-                    ),
-                    priority=priority,
+                return rejected(
+                    f"Company '{company_id}' hourly budget exceeded "
+                    f"(${company_spent:.2f}+${cost:.2f} > ${company_budget_hourly:.2f}/hr)"
                 )
 
-        # 2. Check circuit breaker
-        if self._circuit_breaker and self._circuit_breaker.is_tripped(budget.get("daily_limit", 10.0)):
-            # Emit event (fire-and-forget)
+        if self._circuit_breaker.is_tripped(daily_limit):
             if self._event_bus:
-                try:
-                    from .events import EventType
-                    t = asyncio.create_task(self._event_bus.emit(
-                        EventType.CIRCUIT_BREAKER_TRIPPED,
-                        self._circuit_breaker.get_status(),
-                    ))
-                    self._background_tasks.add(t)
-                    t.add_done_callback(self._background_tasks.discard)
-                except Exception:
-                    pass
+                from .events import EventType
+                self._spawn(self._event_bus.emit(
+                    EventType.CIRCUIT_BREAKER_TRIPPED,
+                    self._circuit_breaker.get_status(),
+                ))
+            reason = "Circuit breaker tripped  anomalous spending velocity"
             if self.notifier:
-                approval_id = f"approval-{uuid4().hex[:8]}"
-                window_spent = self._get_window_spending(budget.get("rolling_window_hours", 24))
                 return await self._escalate(
-                    approval_id, task, estimate, window_spent, budget,
-                    reason="Circuit breaker tripped  anomalous spending velocity",
-                    priority=priority,
+                    task, estimate, self._get_window_spending(hours), daily_limit, reason, priority,
                 )
-            return CostDecision(
-                action="rejected", estimate=estimate,
-                reason="Circuit breaker tripped  anomalous spending velocity",
-                priority=priority,
-            )
+            return rejected(reason)
 
-        # 3. Per-team budget check (if configured)
-        team_budgets = budget.get("team_budgets", {})
-        hours = budget.get("rolling_window_hours", 24)
-        if target_team_id in team_budgets:
-            team_daily = team_budgets[target_team_id].get("daily", 0)
-            if team_daily > 0:
-                team_spent = self._get_team_window_spending(target_team_id, hours)
-                if team_spent + cost > team_daily:
-                    # Try overflow pool
-                    overflow_pool = budget.get("overflow_pool", 0.0)
-                    overflow_used = self._get_overflow_usage(budget, hours)
-                    overflow_remaining = max(0.0, overflow_pool - overflow_used)
-                    overage = (team_spent + cost) - team_daily
-                    if overage <= overflow_remaining:
-                        logger.info(
-                            f"[CostGate] Team {target_team_id} over budget, "
-                            f"using ${overage:.4f} from overflow pool"
-                        )
-                    else:
-                        # Over budget, no overflow left
-                        if self.notifier:
-                            approval_id = f"approval-{uuid4().hex[:8]}"
-                            return await self._escalate(
-                                approval_id, task, estimate, team_spent, budget,
-                                reason=(
-                                    f"Team '{target_team_id}' budget exceeded "
-                                    f"(${team_spent:.2f}+${cost:.2f} > ${team_daily:.2f})"
-                                ),
-                                priority=priority,
-                            )
-                        return CostDecision(
-                            action="rejected", estimate=estimate,
-                            reason=(
-                                f"Team '{target_team_id}' budget exceeded "
-                                f"(${team_spent:.2f}+${cost:.2f} > ${team_daily:.2f})"
-                            ),
-                            priority=priority,
-                        )
-
-        mode = budget.get("mode", "post_hoc")
-
-        # 4. Post-hoc mode (default)  auto_approve, reconcile later
-        if mode == "post_hoc":
-            # Check rolling window limit as a safety net
-            window_spent = self._get_window_spending(hours)
-            daily_limit = budget.get("daily_limit", 10.0)
-            if window_spent + cost > daily_limit and priority != "high":
-                if self.notifier:
-                    approval_id = f"approval-{uuid4().hex[:8]}"
-                    return await self._escalate(
-                        approval_id, task, estimate, window_spent, budget,
-                        reason=f"Rolling window limit exceeded (${window_spent:.2f} + ${cost:.2f} > ${daily_limit:.2f})",
-                        priority=priority,
+        team_daily = budget["team_budgets"].get(target_team_id, {}).get("daily", 0)
+        if team_daily > 0:
+            team_spent = self._get_team_window_spending(target_team_id, hours)
+            if team_spent + cost > team_daily:
+                overflow_remaining = max(
+                    0.0, budget["overflow_pool"] - self._get_overflow_usage(budget, hours),
+                )
+                overage = (team_spent + cost) - team_daily
+                if overage <= overflow_remaining:
+                    logger.info(
+                        f"[CostGate] Team {target_team_id} over budget, "
+                        f"using ${overage:.4f} from overflow pool"
                     )
-                return CostDecision(
-                    action="rejected", estimate=estimate,
-                    reason=f"Rolling window limit exceeded (${window_spent:.2f} + ${cost:.2f} > ${daily_limit:.2f})",
-                    priority=priority,
+                else:
+                    reason = (
+                        f"Team '{target_team_id}' budget exceeded "
+                        f"(${team_spent:.2f}+${cost:.2f} > ${team_daily:.2f})"
+                    )
+                    if self.notifier:
+                        return await self._escalate(task, estimate, team_spent, daily_limit, reason, priority)
+                    return rejected(reason)
+
+        post_hoc = budget["mode"] == "post_hoc"
+        window_spent = self._get_window_spending(hours)
+        # In post-hoc mode "high" priority is exempt from the rolling-window limit
+        if window_spent + cost > daily_limit and not (post_hoc and priority == "high"):
+            reason = f"Rolling window limit exceeded (${window_spent:.2f} + ${cost:.2f} > ${daily_limit:.2f})"
+            if self.notifier:
+                return await self._escalate(
+                    task, estimate, window_spent, daily_limit,
+                    reason if post_hoc
+                    else f"Rolling window limit exceeded (spent ${window_spent:.2f} / ${daily_limit:.2f})",
+                    priority,
                 )
+            return rejected(reason)
+
+        if post_hoc:
             return CostDecision(
                 action="auto_approve", estimate=estimate,
                 reason="Post-hoc mode: auto-approved",
                 priority=priority,
             )
 
-        # 5. Approval mode  three-tier with priority-adjusted thresholds
-        multipliers = budget.get("priority_multipliers", {
-            "critical": 999, "high": 3.0, "normal": 1.0, "low": 0.5,
-        })
-        multiplier = multipliers.get(priority, 1.0)
-
-        auto_threshold = budget.get("auto_approve_threshold", 0.05) * multiplier
-        escalation_threshold = budget.get("escalation_threshold", 1.0) * multiplier
-
-        # Check rolling window limit
-        window_spent = self._get_window_spending(hours)
-        daily_limit = budget.get("daily_limit", 10.0)
-        if window_spent + cost > daily_limit:
-            if self.notifier:
-                approval_id = f"approval-{uuid4().hex[:8]}"
-                return await self._escalate(
-                    approval_id, task, estimate, window_spent, budget,
-                    reason=f"Rolling window limit exceeded (spent ${window_spent:.2f} / ${daily_limit:.2f})",
-                    priority=priority,
-                )
-            return CostDecision(
-                action="rejected", estimate=estimate,
-                reason=f"Rolling window limit exceeded (${window_spent:.2f} + ${cost:.2f} > ${daily_limit:.2f})",
-                priority=priority,
-            )
-
-        # Tier 1: cheap  auto approve
-        if cost < auto_threshold:
+        multiplier = budget["priority_multipliers"].get(priority, 1.0)
+        if cost < budget.get("auto_approve_threshold", 0.05) * multiplier:
             return CostDecision(
                 action="auto_approve", estimate=estimate,
                 reason="Below auto-approve threshold",
                 priority=priority,
             )
 
-        # Tier 2: medium  approve + notify
-        if cost < escalation_threshold:
+        if cost < budget.get("escalation_threshold", 1.0) * multiplier:
             if self.notifier:
-                t = asyncio.create_task(self.notifier.notify_cost(estimate, task))
-                self._background_tasks.add(t)
-                t.add_done_callback(self._background_tasks.discard)
+                self._spawn(self.notifier.notify_cost(estimate, task))
             return CostDecision(
                 action="notify_approve", estimate=estimate,
                 reason="Medium cost, user notified",
                 priority=priority,
             )
 
-        # Tier 3: expensive  escalate
         if self.notifier:
-            approval_id = f"approval-{uuid4().hex[:8]}"
             return await self._escalate(
-                approval_id, task, estimate, window_spent, budget,
-                reason="Above escalation threshold",
-                priority=priority,
+                task, estimate, window_spent, daily_limit, "Above escalation threshold", priority,
             )
 
-        # No notifier configured  auto approve with warning
         logger.warning(f"No notifier configured, auto-approving ${cost:.4f} task")
         return CostDecision(
             action="auto_approve", estimate=estimate,
@@ -538,11 +379,10 @@ class CostGate:
         )
 
     async def _escalate(
-        self, approval_id: str, task: str, estimate: CostEstimate,
-        today_spent: float, budget: dict, reason: str,
-        priority: str = "normal",
+        self, task: str, estimate: CostEstimate,
+        today_spent: float, daily_limit: float, reason: str, priority: str,
     ) -> CostDecision:
-        """Send approval request to user and wait for response."""
+        approval_id = f"approval-{uuid4().hex[:8]}"
         future = asyncio.get_running_loop().create_future()
         self._pending[approval_id] = future
         self._pending_metadata[approval_id] = {
@@ -557,7 +397,7 @@ class CostGate:
             "target_model": estimate.target_model,
             "suggested_downgrade": estimate.suggested_downgrade,
             "today_spent": round(today_spent, 4),
-            "daily_limit": budget.get("daily_limit", 10.0),
+            "daily_limit": daily_limit,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -566,14 +406,12 @@ class CostGate:
             task=task,
             estimate=estimate,
             today_spent=today_spent,
-            daily_limit=budget.get("daily_limit", 10.0),
+            daily_limit=daily_limit,
         )
 
         try:
             user_choice = await asyncio.wait_for(future, timeout=300)
         except asyncio.TimeoutError:
-            self._pending.pop(approval_id, None)
-            self._pending_metadata.pop(approval_id, None)
             return CostDecision(
                 action="rejected", estimate=estimate,
                 reason="Approval timeout (5 minutes)", approval_id=approval_id,
@@ -588,22 +426,20 @@ class CostGate:
                 reason="User approved", approval_id=approval_id,
                 priority=priority,
             )
-        elif user_choice == "downgrade" and estimate.suggested_downgrade:
+        if user_choice == "downgrade" and estimate.suggested_downgrade:
             estimate.target_model = estimate.suggested_downgrade
             return CostDecision(
                 action="auto_approve", estimate=estimate,
                 reason="User approved (downgraded)", approval_id=approval_id,
                 priority=priority,
             )
-        else:
-            return CostDecision(
-                action="rejected", estimate=estimate,
-                reason="User rejected", approval_id=approval_id,
-                priority=priority,
-            )
+        return CostDecision(
+            action="rejected", estimate=estimate,
+            reason="User rejected", approval_id=approval_id,
+            priority=priority,
+        )
 
     def resolve_approval(self, approval_id: str, choice: str) -> bool:
-        """Resolve a pending approval (called from API endpoint)."""
         future = self._pending.get(approval_id)
         if future and not future.done():
             future.set_result(choice)
@@ -611,14 +447,11 @@ class CostGate:
         return False
 
     def get_pending_approvals(self) -> List[Dict[str, Any]]:
-        """Return pending approval metadata for dashboards and APIs."""
-        pending = []
-        for approval_id, metadata in self._pending_metadata.items():
-            future = self._pending.get(approval_id)
-            if not future or future.done():
-                continue
-            pending.append(dict(metadata))
-        pending.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+        pending = [
+            dict(metadata) for approval_id, metadata in self._pending_metadata.items()
+            if not self._pending[approval_id].done()
+        ]
+        pending.sort(key=lambda item: item["created_at"], reverse=True)
         return pending
 
     def record_spending(
@@ -626,7 +459,6 @@ class CostGate:
         actual_cost: Optional[float] = None,
         company_id: Optional[str] = None,
     ) -> None:
-        """Record spending to finance memory. Feeds circuit breaker."""
         effective_cost = actual_cost if actual_cost is not None else cost
         entry = {
             "date": datetime.now(timezone.utc).isoformat(),
@@ -641,17 +473,15 @@ class CostGate:
             entry["company"] = company_id
         self.memory.append_team_memory("finance", "spending-log.json", entry)
 
-        # Feed circuit breaker
+        # None until the first _load_budget() creates the breaker
         if self._circuit_breaker:
             self._circuit_breaker.record(effective_cost, team_id)
 
     def get_daily_report(self, hours: float = 24) -> Dict[str, Any]:
-        """Generate report dict with window spend, utilization, per-team breakdown, breaker status."""
         budget = self._load_budget()
-        window_spent = self._get_window_spending(hours)
         daily_limit = budget.get("daily_limit", 10.0)
 
-        # Per-team breakdown
+        window_spent = 0.0
         by_team: Dict[str, float] = {}
         log = self.memory.read_team_memory("finance", "spending-log.json")
         if log and isinstance(log, list):
@@ -659,109 +489,89 @@ class CostGate:
             for entry in log:
                 if not isinstance(entry, dict):
                     continue
-                date_str = entry.get("date", "")
-                if not date_str:
-                    continue
                 try:
-                    entry_time = datetime.fromisoformat(date_str)
-                    if entry_time >= cutoff:
+                    if datetime.fromisoformat(entry.get("date", "")) >= cutoff:
+                        cost = entry.get("cost", 0)
                         tid = entry.get("team", "unknown")
-                        by_team[tid] = by_team.get(tid, 0) + entry.get("cost", 0)
+                        window_spent += cost
+                        by_team[tid] = by_team.get(tid, 0) + cost
                 except (ValueError, TypeError):
                     continue
 
-        # Team budget utilization
-        team_budgets = budget.get("team_budgets", {})
         team_utilization = {}
-        for tid, tb in team_budgets.items():
+        for tid, tb in budget["team_budgets"].items():
             team_daily = tb.get("daily", 0)
             if team_daily > 0:
                 team_spent = by_team.get(tid, 0)
                 team_utilization[tid] = {
                     "spent": round(team_spent, 4),
                     "budget": team_daily,
-                    "utilization_pct": round(team_spent / team_daily * 100, 1) if team_daily > 0 else 0,
+                    "utilization_pct": round(team_spent / team_daily * 100, 1),
                 }
 
-        report = {
+        return {
             "window_hours": hours,
             "window_spend": round(window_spent, 4),
             "daily_limit": daily_limit,
             "utilization_pct": round(window_spent / daily_limit * 100, 1) if daily_limit > 0 else 0,
             "by_team": {k: round(v, 4) for k, v in by_team.items()},
             "team_utilization": team_utilization,
-            "mode": budget.get("mode", "post_hoc"),
-            "circuit_breaker": self._circuit_breaker.get_status() if self._circuit_breaker else None,
-            "overflow_pool": budget.get("overflow_pool", 0.0),
+            "mode": budget["mode"],
+            "circuit_breaker": self._circuit_breaker.get_status(),
+            "overflow_pool": budget["overflow_pool"],
             "overflow_used": round(self._get_overflow_usage(budget, hours), 4),
             "pending_approvals_count": len(self.get_pending_approvals()),
         }
-        return report
 
     def get_spending_summary(self, days: int = 7) -> Dict[str, Any]:
-        """Get spending summary for dashboard."""
         budget = self._load_budget()
+        pending = self.get_pending_approvals()
+        status = {
+            "source": "litellm" if self.litellm_client else "local",
+            "mode": budget["mode"],
+            "circuit_breaker": self._circuit_breaker.get_status(),
+            "pending_approvals": pending,
+            "pending_approvals_count": len(pending),
+        }
         log = self.memory.read_team_memory("finance", "spending-log.json")
         if not log or not isinstance(log, list):
-            return {
-                "total": 0, "by_team": {}, "entries": 0,
-                "source": "litellm" if self.litellm_client else "local",
-                "mode": budget.get("mode", "post_hoc"),
-                "circuit_breaker": self._circuit_breaker.get_status() if self._circuit_breaker else None,
-                "pending_approvals": self.get_pending_approvals(),
-                "pending_approvals_count": len(self.get_pending_approvals()),
-            }
+            return {"total": 0, "by_team": {}, "entries": 0, **status}
 
-        # Filter entries to the requested time window
+        # Entries whose date is missing or unparseable are counted, not dropped
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         filtered = []
         for e in log:
             if not isinstance(e, dict):
                 continue
-            date_str = e.get("date", "")
-            if date_str:
-                try:
-                    if datetime.fromisoformat(date_str) >= cutoff:
-                        filtered.append(e)
-                except (ValueError, TypeError):
-                    filtered.append(e)  # include entries with unparseable dates
-            else:
-                filtered.append(e)
+            try:
+                if datetime.fromisoformat(e.get("date", "")) < cutoff:
+                    continue
+            except (ValueError, TypeError):
+                pass
+            filtered.append(e)
 
-        total = sum(e.get("cost", 0) for e in filtered)
         by_team: Dict[str, float] = {}
         for e in filtered:
             tid = e.get("team", "unknown")
             by_team[tid] = by_team.get(tid, 0) + e.get("cost", 0)
 
-        hours = budget.get("rolling_window_hours", 24)
-        window_spend = self._get_window_spending(hours)
-
-        result = {
-            "total": round(total, 4),
+        return {
+            "total": round(sum(e.get("cost", 0) for e in filtered), 4),
             "by_team": {k: round(v, 4) for k, v in by_team.items()},
             "entries": len(filtered),
             "days": days,
             "today": round(self._get_today_spending(), 4),
-            "window_spend": round(window_spend, 4),
+            "window_spend": round(self._get_window_spending(budget["rolling_window_hours"]), 4),
             "budget": budget,
-            "source": "litellm" if self.litellm_client else "local",
-            "mode": budget.get("mode", "post_hoc"),
-            "circuit_breaker": self._circuit_breaker.get_status() if self._circuit_breaker else None,
-            "pending_approvals": self.get_pending_approvals(),
-            "pending_approvals_count": len(self.get_pending_approvals()),
+            **status,
         }
-        return result
 
 
 class UserNotifier:
-    """Sends approval requests and notifications to the user."""
-
     def __init__(self, send_fn: Optional[Callable] = None):
         self.send_fn = send_fn
 
-    async def _send(self, msg: str, metadata: Optional[Dict] = None) -> None:
-        """Send a message via callback or log."""
+    async def _send(self, msg: str) -> None:
         if self.send_fn:
             try:
                 result = self.send_fn(msg)
@@ -776,7 +586,6 @@ class UserNotifier:
         self, approval_id: str, task: str, estimate: CostEstimate,
         today_spent: float, daily_limit: float,
     ) -> None:
-        """Send approval request to user."""
         total_tokens = estimate.estimated_input_tokens + estimate.estimated_output_tokens
         choices = "approve / reject"
         if estimate.suggested_downgrade:
@@ -793,65 +602,26 @@ class UserNotifier:
             f"Reply: {choices}"
         )
         logger.info(f"[CostGate] Approval request: {approval_id} (${estimate.estimated_cost_usd:.2f})")
-        await self._send(msg, {
-            "type": "approval_request",
-            "approval_id": approval_id,
-            "cost": estimate.estimated_cost_usd,
-            "team": estimate.target_team,
-            "model": estimate.target_model,
-        })
+        await self._send(msg)
 
     async def notify_cost(self, estimate: CostEstimate, task: str) -> None:
-        """Non-blocking cost notification."""
         msg = f"Companest: {estimate.target_team} spent ${estimate.estimated_cost_usd:.2f} -- {task[:50]}..."
         logger.info(f"[CostGate] {msg}")
-        await self._send(msg, {"type": "cost_notification"})
-
-    async def notify_overspend(
-        self, estimate: CostEstimate, actual_cost: float, task: str
-    ) -> None:
-        """Overspend alert."""
-        pct = (actual_cost / max(estimate.estimated_cost_usd, 0.0001) - 1) * 100
-        msg = (
-            f"*Overspend Alert*\n"
-            f"Task: {task[:50]}...\n"
-            f"Estimated: ${estimate.estimated_cost_usd:.2f} -> Actual: ${actual_cost:.2f} (+{pct:.0f}%)"
-        )
-        logger.info(f"[CostGate] {msg}")
-        await self._send(msg, {"type": "overspend_alert", "actual_cost": actual_cost})
+        await self._send(msg)
 
     async def notify_daily_report(self, report: Dict[str, Any]) -> None:
-        """Formatted daily spend report."""
-        window = report.get("window_hours", 24)
-        spend = report.get("window_spend", 0)
-        limit = report.get("daily_limit", 0)
-        pct = report.get("utilization_pct", 0)
-
-        by_team = report.get("by_team", {})
-        team_lines = "\n".join(f"  {tid}: ${amt:.2f}" for tid, amt in sorted(by_team.items()))
-
-        breaker = report.get("circuit_breaker", {})
-        breaker_status = "TRIPPED" if breaker and breaker.get("tripped") else "OK"
+        spend = report["window_spend"]
+        limit = report["daily_limit"]
+        team_lines = "\n".join(f"  {tid}: ${amt:.2f}" for tid, amt in sorted(report["by_team"].items()))
+        breaker_status = "TRIPPED" if report["circuit_breaker"]["tripped"] else "OK"
 
         msg = (
             f"*Companest Daily Finance Report*\n"
             f"\n"
-            f"Window: {window}h\n"
-            f"Spend: ${spend:.2f} / ${limit:.2f} ({pct:.0f}%)\n"
+            f"Window: {report['window_hours']}h\n"
+            f"Spend: ${spend:.2f} / ${limit:.2f} ({report['utilization_pct']:.0f}%)\n"
             f"Circuit breaker: {breaker_status}\n"
             f"\nBy team:\n{team_lines or '  (no spending)'}"
         )
         logger.info(f"[CostGate] Daily report: ${spend:.2f}/{limit:.2f}")
-        await self._send(msg, {"type": "daily_report"})
-
-    async def notify_circuit_breaker(self, status: Dict[str, Any]) -> None:
-        """Alert when circuit breaker trips."""
-        msg = (
-            f"*Circuit Breaker Alert*\n"
-            f"\n"
-            f"Status: {'TRIPPED' if status.get('tripped') else 'OK'}\n"
-            f"Window spend: ${status.get('window_spend', 0):.4f}\n"
-            f"Cooldown remaining: {status.get('cooldown_remaining_seconds', 0):.0f}s"
-        )
-        logger.warning(f"[CostGate] {msg}")
-        await self._send(msg, {"type": "circuit_breaker_alert", **status})
+        await self._send(msg)
