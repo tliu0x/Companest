@@ -1,0 +1,113 @@
+{
+ "moves": [
+  {
+   "from": "companest/pi.py",
+   "to": "companest/agents/pi.py"
+  },
+  {
+   "from": "companest/team.py",
+   "to": "companest/agents/team.py"
+  },
+  {
+   "from": "companest/tools.py",
+   "to": "companest/agents/tools.py"
+  },
+  {
+   "from": "companest/builtin_tools.py",
+   "to": "companest/agents/builtin_tools.py"
+  },
+  {
+   "from": "companest/git_tools.py",
+   "to": "companest/agents/git_tools.py"
+  },
+  {
+   "from": "companest/workspace.py",
+   "to": "companest/agents/workspace.py"
+  },
+  {
+   "from": "companest/model_routing.py",
+   "to": "companest/agents/model_routing.py"
+  },
+  {
+   "from": "companest/cascade.py",
+   "to": "companest/agents/cascade.py"
+  },
+  {
+   "from": "companest/company.py",
+   "to": "companest/companies/company.py"
+  },
+  {
+   "from": "companest/component.py",
+   "to": "companest/companies/component.py"
+  },
+  {
+   "from": "companest/ceo_engine.py",
+   "to": "companest/companies/ceo_engine.py"
+  },
+  {
+   "from": "companest/output.py",
+   "to": "companest/companies/output.py"
+  },
+  {
+   "from": "companest/orchestrator.py",
+   "to": "companest/orchestration/orchestrator.py"
+  },
+  {
+   "from": "companest/router.py",
+   "to": "companest/orchestration/router.py"
+  },
+  {
+   "from": "companest/multi_team.py",
+   "to": "companest/orchestration/multi_team.py"
+  },
+  {
+   "from": "companest/background.py",
+   "to": "companest/orchestration/background.py"
+  },
+  {
+   "from": "companest/cost_gate.py",
+   "to": "companest/orchestration/cost_gate.py"
+  },
+  {
+   "from": "companest/jobs.py",
+   "to": "companest/jobs/jobs.py"
+  },
+  {
+   "from": "companest/scheduler.py",
+   "to": "companest/jobs/scheduler.py"
+  },
+  {
+   "from": "companest/user_scheduler.py",
+   "to": "companest/jobs/user_scheduler.py"
+  },
+  {
+   "from": "companest/server.py",
+   "to": "companest/server/server.py"
+  },
+  {
+   "from": "companest/event_store.py",
+   "to": "companest/server/event_store.py"
+  },
+  {
+   "from": "companest/client.py",
+   "to": "companest/gateway/client.py"
+  },
+  {
+   "from": "companest/master.py",
+   "to": "companest/gateway/master.py"
+  },
+  {
+   "from": "companest/archiver.py",
+   "to": "companest/memory/archiver.py"
+  },
+  {
+   "from": "scripts/master_gateway.py",
+   "to": "companest/gateway/server.py"
+  },
+  {
+   "from": "scripts/channel.py",
+   "to": "companest/gateway/channel.py"
+  }
+ ],
+ "deletes": []
+}
