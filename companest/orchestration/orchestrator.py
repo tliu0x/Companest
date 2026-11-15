@@ -373,10 +373,9 @@ class CompanestOrchestrator:
         return ctx
 
     def _register_company_memory_paths(self, company_id, configs):
-        root = self.memory.base_path / "companies" / company_id / "teams"
-        for tid, cfg in configs.items():
-            if cfg.local_id:
-                self.memory.register_team_path(tid, root / cfg.local_id)
+        for team_id, cfg in configs.items():
+            if cfg.source_dir is not None:
+                self.memory.register_team_path(team_id, cfg.source_dir)
 
     def _prepare_company_memory(self, company, available):
         with self.memory._io_lock:
@@ -389,10 +388,13 @@ class CompanestOrchestrator:
         for key, content in seed.get("shared", {}).items():
             if ns.read_shared(key) is None:
                 ns.write_shared(key, content)
-        for seed_team_id, team_seed in seed.get("teams", {}).items():
+        # Legacy manifests identify seed directories by local name. Resolve
+        # those declarations here, before calling the canonical runtime API.
+        for seed_name, team_seed in seed.get("teams", {}).items():
+            team_id = seed_name if "/" in seed_name or seed_name == f"company-{company.id}" else f"{company.id}/{seed_name}"
             for key, content in team_seed.items():
-                if ns.read_team_memory(seed_team_id, key) is None:
-                    ns.write_team_memory(seed_team_id, key, content)
+                if ns.read_team_memory(team_id, key) is None:
+                    ns.write_team_memory(team_id, key, content)
 
     def _init_company(self, company: CompanyConfig) -> None:
         root = self.memory.base_path / "companies" / company.id / "teams"

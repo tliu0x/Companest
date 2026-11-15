@@ -22,3 +22,7 @@
 组件对象和 Python 回调是当前进程的扩展，不会序列化并发送给远端 actor。
 actor 需要的团队、模型、MCP 与记忆配置必须存在于该 scope 的挂载/镜像中；不能只在控制面的内存注册表里修改它们。
 组件钩子用于业务注册和输出，不应自行启动执行 worker、保持 agent 实例或替代 Substrate 生命周期。
+
+CompanyMemoryNamespace 的运行时方法只接收完整 team_id（例如 `acme/research`），
+不会把短名称自动加上公司前缀。旧 manifest 的目录名仅在配置初始化时解析一次；
+TeamConfig 创建后，其 ID 经路由、工具和存储原样传递，物理目录保存在 source_dir 中。

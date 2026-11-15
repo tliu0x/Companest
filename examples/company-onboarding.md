@@ -277,3 +277,8 @@ owned workspaces, and inject model/tool credentials through scoped egress policy
 See [deployment and persistence](../deploy/substrate/README.md). Workspace entries
 require `company_id` and a matching persistent `storage_id`. Company/user/workspace
 identity is retained in scheduled jobs.
+
+Runtime calls use the complete team ID shown by the team API (for example,
+`acme/research`). Inline manifest team IDs describe company-local directories
+and are resolved when declarations are created. CompanyMemoryNamespace methods
+require the complete runtime ID and do not add a company prefix for callers.

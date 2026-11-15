@@ -22,3 +22,6 @@ workspace 单写锁由 [ActorWorkload](../runtime/actor.py) 在任务开始时�
 
 会话发送和会话读取都使用 `team_id` 参数；用户计划工具使用 `schedule_id`，
 不将计划误称为已执行的 job。新调用方应按这些统一字段构造请求。
+
+团队声明创建时即确定完整 ID；配置加载后不再修改 TeamConfig.id，
+也不再保存 local_id 与完整 ID 两套身份。source_dir 只表示实际配置/记忆目录。

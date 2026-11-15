@@ -33,7 +33,7 @@ class TeamConfig:
         cascade_skip_models: Optional[List[str]] = None,
     ):
         self.id = id
-        self.local_id: str = ""
+        self.source_dir: Optional[Path] = None
         self.role = role
         self.lead_pi = lead_pi
         self.mode, self.cascade, self.workflow = normalize_execution(mode or "default", cascade, workflow)
@@ -45,9 +45,9 @@ class TeamConfig:
         self.cascade_skip_models = cascade_skip_models or []
 
     @classmethod
-    def from_markdown(cls, path: Path) -> "TeamConfig":
+    def from_markdown(cls, path: Path, *, team_id: Optional[str] = None) -> "TeamConfig":
         text = path.read_text(encoding="utf-8")
-        team_id = path.parent.name
+        team_id = team_id or path.parent.name
 
         role = _extract_field(text, "role", "general")
         lead_pi = _extract_field(text, "lead_pi")
@@ -73,7 +73,7 @@ class TeamConfig:
                     if pi_dir.is_dir():
                         pis.append(PiConfig(id=pi_dir.name))
 
-        return cls(
+        config = cls(
             id=team_id,
             role=role,
             lead_pi=lead_pi,
@@ -87,6 +87,9 @@ class TeamConfig:
             cascade_cross_provider=cascade_cross_provider,
             cascade_skip_models=cascade_skip_models,
         )
+
+        config.source_dir = path.parent
+        return config
 
 
 class AgentTeam:
@@ -184,9 +187,9 @@ class TeamRegistry:
             team_md = team_dir / "team.md"
             if team_dir.is_dir() and team_md.exists():
                 try:
-                    config = TeamConfig.from_markdown(team_md)
-                    config.local_id = config.id  # physical directory name
-                    config.id = f"{company_id}/{config.id}"
+                    config = TeamConfig.from_markdown(
+                        team_md, team_id=f"{company_id}/{team_dir.name}",
+                    )
                     if config.enabled:
                         configs[config.id] = config
                         logger.info(f"Company team loaded: {config.id}")

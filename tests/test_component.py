@@ -70,13 +70,14 @@ def namespace(manager):
     return CompanyMemoryNamespace(manager, "acme")
 
 
-def test_namespace_scoped_team_id(namespace):
+def test_namespace_validates_canonical_team_id(namespace):
     assert namespace.company_id == "acme"
-    assert namespace._scoped_team_id("acme/marketing") == "acme/marketing"
-    assert namespace._scoped_team_id("company-acme") == "company-acme"
-    assert namespace._scoped_team_id("marketing") == "acme/marketing"
+    assert namespace._validate_team_id("acme/marketing") is None
+    assert namespace._validate_team_id("company-acme") is None
+    with pytest.raises(ValueError, match="full company-scoped team_id"):
+        namespace._validate_team_id("marketing")
     with pytest.raises(ValueError, match="cannot access"):
-        namespace._scoped_team_id("other/secret")
+        namespace._validate_team_id("other/secret")
 
 
 def test_namespace_shared_read_write(namespace, memory_dir):
@@ -100,11 +101,11 @@ def test_namespace_team_memory_delegation(namespace, manager, memory_dir):
     """Team memory operations delegate to MemoryManager with scoped team_id."""
     team_dir = Path(memory_dir) / "teams" / "acme" / "marketing" / "memory"
     team_dir.mkdir(parents=True)
-    namespace.write_team_memory("marketing", "data.json", {"price": 42})
-    result = namespace.read_team_memory("marketing", "data.json")
+    namespace.write_team_memory("acme/marketing", "data.json", {"price": 42})
+    result = namespace.read_team_memory("acme/marketing", "data.json")
     assert result == {"price": 42}
     assert manager.read_team_memory("acme/marketing", "data.json") == {"price": 42}
-    keys = namespace.list_team_memory("marketing")
+    keys = namespace.list_team_memory("acme/marketing")
     assert "data.json" in keys
 
 

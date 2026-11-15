@@ -218,3 +218,9 @@ Existing jobs.db and user_schedules.db primary-key columns migrate from `id` to
 `job_id` / `schedule_id` once at startup; their values and actor references are
 preserved. No runtime alias layer is kept. Update CLI/API consumers and actor
 images together when deploying this branch; do not run mixed contract versions.
+
+CompanyMemoryNamespace callers must pass the complete canonical team_id.
+Declarations and legacy seed directory names resolve once during configuration
+initialization; runtime memory methods only validate the ID and pass it through.
+TeamConfig stores the physical source_dir separately instead of keeping a second
+local_id and mutating the team ID after creation.
