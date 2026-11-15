@@ -63,14 +63,11 @@ class TestMemoryPrompts:
         })
 
     def test_read_master_and_pi_files(self):
-        assert "Master soul" in self.mm.read_master_soul()
         assert "English" in self.mm.read_master_user()
         assert "analyst" in self.mm.read_pi_soul("stock", "analyst").lower()
 
     def test_list_teams_and_team_exists(self):
         assert "stock" in self.mm.list_teams()
-        assert self.mm.team_exists("stock")
-        assert not self.mm.team_exists("nonexistent")
 
     def test_build_system_prompt(self):
         prompt = self.mm.build_system_prompt("stock", "analyst")

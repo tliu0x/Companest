@@ -506,8 +506,6 @@ def cmd_serve(args) -> int:
             await job_manager.stop()
             from .knowledge.feeds import close_client as close_feed_client
             await close_feed_client()
-            if hasattr(orchestrator, "cost_gate") and orchestrator.cost_gate.litellm_client:
-                await orchestrator.cost_gate.litellm_client.close()
 
     try:
         asyncio.run(_start())

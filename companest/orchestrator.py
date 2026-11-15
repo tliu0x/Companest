@@ -11,7 +11,6 @@ from .router import SmartRouter, RoutingDecision, TeamAssignment
 from .cost_gate import CostGate, UserNotifier
 from .cascade import CascadeEngine
 from .modes import build_default_registry, ModeRegistry
-from .litellm_client import LiteLLMClient
 from .scheduler import Scheduler
 from .archiver import MemoryArchiver
 from .events import EventBus, EventType
@@ -157,20 +156,12 @@ class CompanestOrchestrator:
         _US = _import_user_scheduler()
         self.user_scheduler = _US(data_dir=Path(base_path)) if _US else None
 
-        litellm_client = None
-        if self.config.proxy.enabled and self.config.proxy.master_key:
-            litellm_client = LiteLLMClient(
-                base_url=self.config.proxy.base_url,
-                master_key=self.config.proxy.master_key,
-            )
-            logger.info(f"LiteLLM client initialized: {self.config.proxy.base_url}")
-
         # Proxy env vars for the raw provider clients (router, Dreamer)
         if self.config.proxy.enabled:
             Pi.configure_proxy(self.config.proxy)
 
         self.cost_gate = CostGate(
-            self.memory, notifier=UserNotifier(), litellm_client=litellm_client,
+            self.memory, notifier=UserNotifier(),
             event_bus=self.events,
         )
         self.scheduler = Scheduler()

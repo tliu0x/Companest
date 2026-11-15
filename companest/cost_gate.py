@@ -138,12 +138,10 @@ class CostGate:
         self,
         memory: MemoryManager,
         notifier: Optional["UserNotifier"] = None,
-        litellm_client: Optional[Any] = None,
         event_bus: Optional[Any] = None,
     ):
         self.memory = memory
         self.notifier = notifier
-        self.litellm_client = litellm_client
         self._event_bus = event_bus
         self._pending: Dict[str, asyncio.Future] = {}
         self._pending_metadata: Dict[str, Dict[str, Any]] = {}
@@ -527,7 +525,7 @@ class CostGate:
         budget = self._load_budget()
         pending = self.get_pending_approvals()
         status = {
-            "source": "litellm" if self.litellm_client else "local",
+            "source": "local",
             "mode": budget["mode"],
             "circuit_breaker": self._circuit_breaker.get_status(),
             "pending_approvals": pending,
