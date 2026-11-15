@@ -199,3 +199,22 @@ The PR review additionally simulated priority ceilings, revocation during
 approval, cancellation-safe actor acceptance, nested scope inheritance,
 one-shot schedule claims, hot schedule registration, and Qdrant read/write/delete
 isolation using the canonical team ID with fake embeddings.
+
+## Execution field contract
+
+Execution uses one field name and value per entity across API, CLI, Python
+services, actor payloads, events and storage:
+
+- Jobs use `job_id` in submission, detail/list responses and the Job model.
+  New actor resource names use that same ID without a `job-` rewrite. Saved
+  references for existing actors remain valid.
+- User schedules use `schedule_id` and the `Schedule` model. UserScheduler and
+  ActorServices expose `add_schedule`, `list_schedules`, `cancel_schedule`.
+  Cancellation requires the exact ID; new schedules use full UUIDs.
+- Budget requests/estimates/approval metadata use `team_id` and `model`, replacing
+  target_team/target_team_id/target_model. The sessions_send tool takes `team_id`.
+
+Existing jobs.db and user_schedules.db primary-key columns migrate from `id` to
+`job_id` / `schedule_id` once at startup; their values and actor references are
+preserved. No runtime alias layer is kept. Update CLI/API consumers and actor
+images together when deploying this branch; do not run mixed contract versions.

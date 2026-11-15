@@ -33,7 +33,7 @@ class JobStatus(str, Enum):
 
 @dataclass
 class Job:
-    id: str
+    job_id: str
     task: str
     status: JobStatus = JobStatus.PENDING
     context: Dict[str, Any] = field(default_factory=dict)
@@ -58,7 +58,7 @@ class Job:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id,
+            "job_id": self.job_id,
             "task": self.task,
             "status": self.status.value,
             "context": self.context,
@@ -167,20 +167,20 @@ class JobManager:
                 if existing.task != task or existing.context != ctx:
                     raise JobError("Idempotency key already used with a different task/context")
                 return job_id
-            job = Job(id=job_id, task=task, context=ctx,
+            job = Job(job_id=job_id, task=task, context=ctx,
                       company_id=company_id, submitted_by=submitted_by, status=JobStatus.DISPATCHED,
                       capability=secrets.token_urlsafe(32))
             workspace = self.orchestrator.workspace_registry.get(ctx["workspace_id"]) if ctx.get("workspace_id") else None
             job.execution = {
-                "atespace": binding.atespace, "name": "job-" + job.id,
+                "atespace": binding.atespace, "name": job.job_id,
                 "template": binding.template, "phase": "creating",
                 "storage_id": self.settings.storage_id,
                 "workspace_storage_id": workspace.storage_id if workspace else None,
             }
             # Record intent before creating an actor or issuing any task request.
             await self._persist_job(job)
-            self._jobs[job.id] = job
-        async with self._locks.setdefault(job.id, asyncio.Lock()):
+            self._jobs[job.job_id] = job
+        async with self._locks.setdefault(job.job_id, asyncio.Lock()):
             try:
                 resource = await self.client.create_actor(self._ref(job), binding.template)
                 self._bind(job, resource)
@@ -189,7 +189,7 @@ class JobManager:
             except (SubstrateError, ValueError) as exc:
                 job.execution["error"] = str(exc)
                 await self._persist_job(job)
-        return job.id
+        return job.job_id
 
     @staticmethod
     def _ref(job):
@@ -213,7 +213,7 @@ class JobManager:
         job.execution["phase"] = "submitting"
         await self._persist_job(job)
         response = await self.client.request(self._ref(job), "POST", "/task", port=8080, payload={
-            "job_id": job.id, "task": job.task, "company_id": job.company_id,
+            "job_id": job.job_id, "task": job.task, "company_id": job.company_id,
             "context": job.context, "storage_id": job.execution["storage_id"],
             "workspace_storage_id": job.execution.get("workspace_storage_id"),
             "capability": job.capability,
@@ -226,7 +226,7 @@ class JobManager:
         record = response.json()
         if not isinstance(record, dict):
             raise SubstrateError("Actor returned an invalid job record")
-        if record.get("job_id") != job.id or record.get("company_id") != job.company_id:
+        if record.get("job_id") != job.job_id or record.get("company_id") != job.company_id:
             raise SubstrateError("Actor returned a different job/company")
         if record.get("status") not in ("running", "completed", "failed"):
             raise SubstrateError("Actor returned an invalid job status")
@@ -249,7 +249,7 @@ class JobManager:
         job = self._jobs.get(job_id)
         if job is None:
             return None
-        async with self._locks.setdefault(job.id, asyncio.Lock()):
+        async with self._locks.setdefault(job.job_id, asyncio.Lock()):
             if not job.execution or job.execution.get("deleted"):
                 return job
             try:
@@ -359,7 +359,7 @@ class JobManager:
         job = self._jobs.get(job_id)
         if job is None:
             raise JobError(f"Job not found: {job_id}")
-        async with self._locks.setdefault(job.id, asyncio.Lock()):
+        async with self._locks.setdefault(job.job_id, asyncio.Lock()):
             if job.status in self.TERMINAL:
                 return False
             job.execution["cancel_requested"] = True
@@ -439,7 +439,7 @@ class JobManager:
         os.chmod(self._data_dir / "jobs.db", 0o600)
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
+                job_id TEXT PRIMARY KEY,
                 task TEXT NOT NULL,
                 status TEXT NOT NULL,
                 context TEXT,
@@ -455,6 +455,12 @@ class JobManager:
             )
         """)
         await self._db.commit()
+
+        # One-time schema migration; runtime reads/writes only job_id.
+        columns = await (await self._db.execute("PRAGMA table_info(jobs)")).fetchall()
+        if "id" in {row[1] for row in columns}:
+            await self._db.execute("ALTER TABLE jobs RENAME COLUMN id TO job_id")
+            await self._db.commit()
 
         # Databases created before these columns existed still need them added.
         for column in ("approval_reason", "company_id", "execution", "capability"):
@@ -472,13 +478,13 @@ class JobManager:
             await self._db.execute(
                 """
                 INSERT OR REPLACE INTO jobs
-                (id, task, status, context, subtasks, result, error,
+                (job_id, task, status, context, subtasks, result, error,
                  approval_reason, created_at, started_at, completed_at, submitted_by,
                  company_id, execution, capability)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    job.id,
+                    job.job_id,
                     job.task,
                     job.status.value,
                     json.dumps(job.context),
@@ -497,7 +503,7 @@ class JobManager:
             )
             await self._db.commit()
         except Exception as e:
-            raise JobError(f"Failed to persist job {job.id}") from e
+            raise JobError(f"Failed to persist job {job.job_id}") from e
 
     async def _load_jobs(self) -> None:
         if not self._db:
@@ -505,7 +511,7 @@ class JobManager:
 
         try:
             async with self._db.execute(
-                "SELECT id, task, status, context, subtasks, result, error, "
+                "SELECT job_id, task, status, context, subtasks, result, error, "
                 "approval_reason, created_at, started_at, completed_at, submitted_by, "
                 "company_id, execution, capability "
                 "FROM jobs ORDER BY created_at DESC"
@@ -514,7 +520,7 @@ class JobManager:
 
             for row in rows:
                 job = Job(
-                    id=row[0],
+                    job_id=row[0],
                     task=row[1],
                     status=JobStatus(row[2]),
                     context=json.loads(row[3]) if row[3] else {},
@@ -530,7 +536,7 @@ class JobManager:
                     execution=json.loads(row[13]) if row[13] else {},
                     capability=row[14] or "",
                 )
-                self._jobs[job.id] = job
+                self._jobs[job.job_id] = job
 
             logger.info(f"Loaded {len(rows)} jobs from database")
         except Exception as e:

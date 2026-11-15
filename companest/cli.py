@@ -707,7 +707,7 @@ def cmd_job_list(args, call):
             status = job["status"]
             print(
                 f"  {colored(status.upper().ljust(10), status_colors.get(status, Colors.BLUE))} "
-                f"{job['id'][:8]}... "
+                f"{job['job_id'][:8]}... "
                 f"{job['task'][:50]}"
             )
 

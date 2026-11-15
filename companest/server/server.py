@@ -41,10 +41,9 @@ class CompanestAPIServer:
         company_id = event.get("company_id")
         if isinstance(company_id, str) and company_id:
             return company_id
-        for key in ("team_id", "target_team"):
-            team_id = event.get(key)
-            if isinstance(team_id, str) and "/" in team_id:
-                return team_id.split("/", 1)[0]
+        team_id = event.get("team_id")
+        if isinstance(team_id, str) and "/" in team_id:
+            return team_id.split("/", 1)[0]
         job_id = event.get("job_id")
         if isinstance(job_id, str) and job_id:
             job = self.job_manager._jobs.get(job_id)
@@ -231,7 +230,7 @@ class CompanestAPIServer:
                     team_id = body.get("team_id")
                     if team_id and not self.orchestrator.can_access_team(job.company_id, team_id):
                         raise JobError("Team is outside this job's company scope")
-                    scheduled = await scheduler.add_job(
+                    scheduled = await scheduler.add_schedule(
                         user_id=user_id, chat_id=job.context.get("chat_id", ""),
                         channel=job.context.get("channel", "api"), company_id=job.company_id,
                         workspace_id=job.context.get("workspace_id"),
@@ -240,15 +239,15 @@ class CompanestAPIServer:
                         team_id=team_id, mode=body.get("mode", "default"),
                     )
                     return scheduled.to_dict()
-                jobs = await scheduler.list_jobs(user_id=user_id)
+                jobs = await scheduler.list_schedules(user_id=user_id)
                 owned = [j for j in jobs if j.company_id == job.company_id]
                 if action == "list":
                     return [j.to_dict() for j in owned]
                 if action == "cancel":
-                    target = body.get("job_id")
-                    if not any(j.id == target for j in owned):
+                    target = body.get("schedule_id")
+                    if not any(j.schedule_id == target for j in owned):
                         raise JobError("Schedule is outside this job's scope")
-                    return await scheduler.cancel_job(target, user_id=user_id)
+                    return await scheduler.cancel_schedule(target, user_id=user_id)
                 raise JobError("Unknown schedule action")
             except (KeyError, ValueError, JobError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
@@ -261,7 +260,7 @@ class CompanestAPIServer:
                 raise HTTPException(status_code=400, detail="Unsupported actor business event")
             await self._broadcast_event({
                 **body.get("data", {}), "type": body["type"],
-                "job_id": job.id, "company_id": job.company_id,
+                "job_id": job.job_id, "company_id": job.company_id,
             })
             return {"accepted": True}
 
@@ -466,7 +465,7 @@ class CompanestAPIServer:
                     })
                     return {
                         "job_id": job_id,
-                        "status": "queued",
+                        "status": self.job_manager._jobs[job_id].status.value,
                         "message": "Job submitted via n8n webhook",
                     }
                 except Exception as e:
@@ -687,7 +686,7 @@ class CompanestAPIServer:
                     "status": {"started": False, "db_path": "", "active_jobs": 0, "next_run": None},
                     "note": "UserScheduler not initialized",
                 }
-            jobs = await scheduler.list_jobs(user_id=user_id)
+            jobs = await scheduler.list_schedules(user_id=user_id)
             return {
                 "schedules": [j.to_dict() for j in jobs],
                 "total": len(jobs),
@@ -699,7 +698,7 @@ class CompanestAPIServer:
             scheduler = getattr(self.orchestrator, "user_scheduler", None)
             if scheduler is None:
                 raise HTTPException(status_code=503, detail="UserScheduler not initialized")
-            ok = await scheduler.cancel_job(schedule_id, user_id=user_id)
+            ok = await scheduler.cancel_schedule(schedule_id, user_id=user_id)
             if not ok:
                 raise HTTPException(status_code=404, detail=f"Schedule not found: {schedule_id}")
             await self._broadcast_event({

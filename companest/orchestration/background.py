@@ -7,7 +7,7 @@ from ..utils import run_sync
 from ..events import EventBus, EventType
 
 if TYPE_CHECKING:
-    from ..jobs.user_scheduler import ScheduledJob
+    from ..jobs.user_scheduler import Schedule
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class BackgroundManager:
         except Exception as e:
             logger.warning(f"[{team_id}] On-demand refresh failed: {e}")
 
-    async def execute_scheduled_job(self, job: ScheduledJob) -> str:
+    async def execute_scheduled_job(self, job: Schedule) -> str:
         """Execution callback for UserScheduler."""
         user_context = {
             "user_id": job.user_id,

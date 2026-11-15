@@ -6,7 +6,7 @@ import ssl
 import httpx
 
 from ..orchestration.cost_gate import CostDecision, CostEstimate
-from ..jobs.user_scheduler import ScheduledJob
+from ..jobs.user_scheduler import Schedule
 
 
 class ActorServices:
@@ -27,10 +27,10 @@ class ActorServices:
                 raise RuntimeError(f"Control-plane {operation} refused (HTTP {response.status_code})")
             return response.json()
 
-    async def evaluate(self, task, target_team_id, target_model, priority="normal", **_):
+    async def evaluate(self, task, team_id, model, priority="normal", **_):
         value = await self.call("authorize", {
-            "request_id": str(uuid.uuid4()), "task": task, "team_id": target_team_id,
-            "model": target_model, "priority": priority,
+            "request_id": str(uuid.uuid4()), "task": task, "team_id": team_id,
+            "model": model, "priority": priority,
         })
         value["estimate"] = CostEstimate(**value["estimate"])
         return CostDecision(**value)
@@ -39,11 +39,11 @@ class ActorServices:
         if event.type.value in {"task_started", "task_completed", "task_failed", "task_routed"}:
             await self.call("events", {"type": event.type.value, "data": event.data})
 
-    async def add_job(self, **kwargs):
-        return ScheduledJob(**await self.call("schedule", {"action": "add", **kwargs}))
+    async def add_schedule(self, **kwargs):
+        return Schedule(**await self.call("schedule", {"action": "add", **kwargs}))
 
-    async def list_jobs(self, **kwargs):
-        return [ScheduledJob(**item) for item in await self.call("schedule", {"action": "list", **kwargs})]
+    async def list_schedules(self, **kwargs):
+        return [Schedule(**item) for item in await self.call("schedule", {"action": "list", **kwargs})]
 
-    async def cancel_job(self, job_id, **kwargs):
-        return await self.call("schedule", {"action": "cancel", "job_id": job_id, **kwargs})
+    async def cancel_schedule(self, schedule_id, **kwargs):
+        return await self.call("schedule", {"action": "cancel", "schedule_id": schedule_id, **kwargs})

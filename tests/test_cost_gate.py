@@ -28,7 +28,7 @@ class TestCostGate:
     def test_cost_estimate(self):
         est = self.cg.estimate_cost("short task", "claude-haiku-4-5-20251001", "stock")
         assert est.estimated_cost_usd > 0
-        assert est.target_model == "claude-haiku-4-5-20251001"
+        assert est.model == "claude-haiku-4-5-20251001"
         # Haiku is the cheapest Anthropic model: no same-provider downgrade
         assert est.suggested_downgrade is None
 

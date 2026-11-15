@@ -5,9 +5,9 @@ Substrate 管理执行实例的生命周期，Companest 的计划只决定业务
 
 | 文件 | 做什么 | 保存在哪里 |
 | --- | --- | --- |
-| [jobs.py](jobs.py) | Job/JobManager；持久化提交意图、绑定 actor UID、发送单次任务、重连查询、保存完整结果、确认取消后清理。 | 控制面 `jobs.db`；同一数据库只能有一个 owner。 |
+| [jobs.py](jobs.py) | Job/JobManager（统一 `job_id`）；持久化提交意图、绑定 actor UID、发送单次任务、重连查询、保存完整结果、确认取消后清理。 | 控制面 `jobs.db`；同一数据库只能有一个 owner。 |
 | [scheduler.py](scheduler.py) | 系统 interval 计划；支持启动、停止、立即运行和公司热加载时增删计划。 | 进程内声明；启动时从配置重建。 |
-| [user_scheduler.py](user_scheduler.py) | 用户 cron/interval/date 计划；保存归属和触发计数，用 APScheduler 触发异步回调。 | `user_schedules.db`；APScheduler 本身只保留内存调度器。 |
+| [user_scheduler.py](user_scheduler.py) | Schedule/UserScheduler（统一 `schedule_id`）；用户 cron/interval/date 计划；保存归属和触发计数，用 APScheduler 触发异步回调。 | `user_schedules.db`；APScheduler 本身只保留内存调度器。 |
 | [__init__.py](__init__.py) | 包入口。 | 无。 |
 
 ## 每类执行 job 做什么
@@ -62,3 +62,7 @@ Substrate 管理执行实例的生命周期，Companest 的计划只决定业务
 公司计划的 API 名称从 `company_<id>_<name>` 改为 `company/<id>/<name>`，
 信息补全计划改为 `enrichment/<team_id>`，避免含下划线/连字符的 ID 相互覆盖。
 公司状态按保存的 scope_id 精确筛选计划，不使用名称前缀推断归属。
+
+任务提交、详情、列表和事件均返回 `job_id`，用户计划均返回 `schedule_id`。
+新计划使用完整 UUID，取消要求完整 schedule_id，不做前缀解析。
+旧 jobs.db / user_schedules.db 的 id 主键列一次性更名，保留已有 ID 和执行引用。

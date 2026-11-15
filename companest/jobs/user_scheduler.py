@@ -10,13 +10,13 @@ from ..exceptions import SchedulerError
 
 logger = logging.getLogger(__name__)
 
-ExecutionCallback = Callable[["ScheduledJob"], Coroutine[Any, Any, str]]
+ExecutionCallback = Callable[["Schedule"], Coroutine[Any, Any, str]]
 
 NotificationCallback = Callable[[str, str, str, str], Coroutine[Any, Any, None]]
 
 _METADATA_SCHEMA = """
 CREATE TABLE IF NOT EXISTS scheduled_jobs (
-    id TEXT PRIMARY KEY,
+    schedule_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     chat_id TEXT NOT NULL,
     channel TEXT NOT NULL DEFAULT 'telegram',
@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
 
 
 @dataclass
-class ScheduledJob:
-    id: str
+class Schedule:
+    schedule_id: str
     user_id: str
     chat_id: str
     channel: str
@@ -55,7 +55,7 @@ class ScheduledJob:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id,
+            "schedule_id": self.schedule_id,
             "user_id": self.user_id,
             "chat_id": self.chat_id,
             "channel": self.channel,
@@ -96,12 +96,14 @@ class UserScheduler:
         self._db = await aiosqlite.connect(str(self._db_path))
         await self._db.execute(_METADATA_SCHEMA)
         columns = await (await self._db.execute("PRAGMA table_info(scheduled_jobs)")).fetchall()
+        if "id" in {row[1] for row in columns}:
+            await self._db.execute("ALTER TABLE scheduled_jobs RENAME COLUMN id TO schedule_id")
         for column in ("company_id", "workspace_id"):
             if column not in {row[1] for row in columns}:
                 await self._db.execute(f"ALTER TABLE scheduled_jobs ADD COLUMN {column} TEXT")
         await self._db.commit()
 
-        # APScheduler jobs live in memory only; _restore_jobs rebuilds them from SQLite (no pickling).
+        # APScheduler jobs live in memory only; _restore_schedules rebuilds them from SQLite (no pickling).
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
         self._scheduler = AsyncIOScheduler(
@@ -110,7 +112,7 @@ class UserScheduler:
         self._scheduler.start()
         self._started = True
 
-        await self._restore_jobs()
+        await self._restore_schedules()
 
         logger.info(f"UserScheduler started (db={self._db_path})")
 
@@ -132,7 +134,7 @@ class UserScheduler:
     def set_notification_callback(self, callback: NotificationCallback) -> None:
         self._notification_callback = callback
 
-    async def add_job(
+    async def add_schedule(
         self,
         user_id: str,
         chat_id: str,
@@ -145,17 +147,17 @@ class UserScheduler:
         mode: str = "default",
         company_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
-    ) -> ScheduledJob:
+    ) -> Schedule:
         if not self._started:
             raise SchedulerError("UserScheduler not started")
 
         if trigger_type not in ("cron", "interval", "date"):
             raise SchedulerError(f"Invalid trigger_type: {trigger_type}")
 
-        job_id = str(uuid.uuid4())[:8]
+        schedule_id = str(uuid.uuid4())
 
-        job = ScheduledJob(
-            id=job_id,
+        schedule = Schedule(
+            schedule_id=schedule_id,
             user_id=user_id,
             chat_id=chat_id,
             channel=channel,
@@ -169,52 +171,51 @@ class UserScheduler:
             workspace_id=workspace_id,
         )
 
-        await self._save_job_metadata(job)
+        await self._save_schedule_metadata(schedule)
 
         self._scheduler.add_job(
-            self._fire_job,
+            self._fire_schedule,
             trigger=trigger_type,
-            id=job_id,
-            args=[job_id],
+            id=schedule_id,
+            args=[schedule_id],
             replace_existing=True,
             **trigger_args,
         )
 
         logger.info(
-            f"Scheduled job {job_id}: trigger={trigger_type}, "
+            f"Scheduled schedule {schedule_id}: trigger={trigger_type}, "
             f"user={user_id}, task={task[:50]}"
         )
-        return job
+        return schedule
 
-    async def cancel_job(self, job_id: str, user_id: Optional[str] = None) -> bool:
-        """Cancel a scheduled job. Supports partial ID match. If user_id is provided, enforces ownership."""
+    async def cancel_schedule(self, schedule_id: str, user_id: Optional[str] = None) -> bool:
+        """Cancel a schedule by its exact schedule_id. If user_id is provided, enforces ownership."""
         if not self._started:
             raise SchedulerError("UserScheduler not started")
 
-        full_id = await self._resolve_job_id(job_id, user_id)
-        if not full_id:
+        if not await self._resolve_schedule_id(schedule_id, user_id):
             return False
 
         if user_id:
-            row = await self._get_job_row(full_id)
+            row = await self._get_schedule_row(schedule_id)
             if row and row["user_id"] != user_id:
                 return False
 
         try:
-            self._scheduler.remove_job(full_id)
+            self._scheduler.remove_job(schedule_id)
         except Exception:
             pass  # May already be gone (date trigger fired)
 
         await self._db.execute(
-            "UPDATE scheduled_jobs SET active = 0 WHERE id = ?",
-            (full_id,),
+            "UPDATE scheduled_jobs SET active = 0 WHERE schedule_id = ?",
+            (schedule_id,),
         )
         await self._db.commit()
 
-        logger.info(f"Cancelled job {full_id}")
+        logger.info(f"Cancelled schedule {schedule_id}")
         return True
 
-    async def list_jobs(self, user_id: Optional[str] = None) -> List[ScheduledJob]:
+    async def list_schedules(self, user_id: Optional[str] = None) -> List[Schedule]:
         """List active scheduled jobs, optionally filtered by user."""
         if not self._db:
             return []
@@ -231,7 +232,7 @@ class UserScheduler:
 
         rows = await cursor.fetchall()
         columns = [d[0] for d in cursor.description]
-        return [self._row_to_job(dict(zip(columns, row))) for row in rows]
+        return [self._row_to_schedule(dict(zip(columns, row))) for row in rows]
 
     def get_status(self) -> Dict[str, Any]:
         status = {
@@ -244,27 +245,27 @@ class UserScheduler:
             status["next_run"] = str(jobs[0].next_run_time) if jobs else None
         return status
 
-    async def _fire_job(self, job_id: str) -> None:
+    async def _fire_schedule(self, schedule_id: str) -> None:
         # APScheduler awaits coroutine jobs on its owning loop. Do not detach
         # work: max_instances/coalescing must cover the complete remote task.
-        await self._fire_job_async(job_id)
+        await self._fire_schedule_async(schedule_id)
 
-    async def _fire_job_async(self, job_id: str) -> None:
-        row = await self._get_job_row(job_id)
+    async def _fire_schedule_async(self, schedule_id: str) -> None:
+        row = await self._get_schedule_row(schedule_id)
         if not row or not row["active"]:
-            logger.info(f"Job {job_id} is missing or inactive, skipping")
+            logger.info(f"Job {schedule_id} is missing or inactive, skipping")
             return
 
-        job = self._row_to_job(row)
-        logger.info(f"Firing job {job_id}: {job.task[:60]}")
+        schedule = self._row_to_schedule(row)
+        logger.info(f"Firing schedule {schedule_id}: {schedule.task[:60]}")
 
         # Claim one-shot schedules before dispatch: restart must not replay
         # an occurrence whose remote effects may already exist.
         now = datetime.now(timezone.utc).isoformat()
         cursor = await self._db.execute(
             "UPDATE scheduled_jobs SET fire_count = fire_count + 1, last_fired = ?, "
-            "active = CASE WHEN trigger_type = 'date' THEN 0 ELSE active END WHERE id = ? AND active = 1",
-            (now, job_id),
+            "active = CASE WHEN trigger_type = 'date' THEN 0 ELSE active END WHERE schedule_id = ? AND active = 1",
+            (now, schedule_id),
         )
         await self._db.commit()
         if cursor.rowcount != 1:
@@ -273,22 +274,22 @@ class UserScheduler:
         result = None
         if self._execution_callback:
             try:
-                result = await self._execution_callback(job)
+                result = await self._execution_callback(schedule)
             except Exception as e:
-                logger.error(f"Job {job_id} execution failed: {e}")
+                logger.error(f"Job {schedule_id} execution failed: {e}")
                 result = f"Scheduled task failed: {e}"
 
         if result and self._notification_callback:
             try:
-                header = f"[Scheduled] {job.description or job.task[:50]}\n\n"
+                header = f"[Scheduled] {schedule.description or schedule.task[:50]}\n\n"
                 await self._notification_callback(
-                    job.chat_id, job.channel, job.user_id,
+                    schedule.chat_id, schedule.channel, schedule.user_id,
                     header + result,
                 )
             except Exception as e:
-                logger.error(f"Job {job_id} notification failed: {e}")
+                logger.error(f"Job {schedule_id} notification failed: {e}")
 
-    async def _restore_jobs(self) -> None:
+    async def _restore_schedules(self) -> None:
         cursor = await self._db.execute(
             "SELECT * FROM scheduled_jobs WHERE active = 1",
         )
@@ -297,50 +298,50 @@ class UserScheduler:
 
         restored = 0
         for row in rows:
-            job = self._row_to_job(dict(zip(columns, row)))
+            schedule = self._row_to_schedule(dict(zip(columns, row)))
             try:
                 self._scheduler.add_job(
-                    self._fire_job,
-                    trigger=job.trigger_type,
-                    id=job.id,
-                    args=[job.id],
+                    self._fire_schedule,
+                    trigger=schedule.trigger_type,
+                    id=schedule.schedule_id,
+                    args=[schedule.schedule_id],
                     replace_existing=True,
-                    **job.trigger_args,
+                    **schedule.trigger_args,
                 )
                 restored += 1
             except Exception as e:
                 # Date triggers in the past fail to schedule; deactivate them.
-                logger.debug(f"Could not restore job {job.id}: {e}")
+                logger.debug(f"Could not restore schedule {schedule.schedule_id}: {e}")
                 await self._db.execute(
-                    "UPDATE scheduled_jobs SET active = 0 WHERE id = ?",
-                    (job.id,),
+                    "UPDATE scheduled_jobs SET active = 0 WHERE schedule_id = ?",
+                    (schedule.schedule_id,),
                 )
 
         await self._db.commit()
         if restored:
-            logger.info(f"Restored {restored} persisted job(s)")
+            logger.info(f"Restored {restored} persisted schedule(s)")
 
-    async def _save_job_metadata(self, job: ScheduledJob) -> None:
+    async def _save_schedule_metadata(self, schedule: Schedule) -> None:
         await self._db.execute(
             """INSERT INTO scheduled_jobs
-               (id, user_id, chat_id, channel, task, description,
+               (schedule_id, user_id, chat_id, channel, task, description,
                 trigger_type, trigger_args, team_id, mode,
                 fire_count, last_fired, created_at, active, company_id, workspace_id)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                job.id, job.user_id, job.chat_id, job.channel,
-                job.task, job.description,
-                job.trigger_type, json.dumps(job.trigger_args),
-                job.team_id, job.mode,
-                job.fire_count, job.last_fired, job.created_at,
-                1 if job.active else 0, job.company_id, job.workspace_id,
+                schedule.schedule_id, schedule.user_id, schedule.chat_id, schedule.channel,
+                schedule.task, schedule.description,
+                schedule.trigger_type, json.dumps(schedule.trigger_args),
+                schedule.team_id, schedule.mode,
+                schedule.fire_count, schedule.last_fired, schedule.created_at,
+                1 if schedule.active else 0, schedule.company_id, schedule.workspace_id,
             ),
         )
         await self._db.commit()
 
-    async def _get_job_row(self, job_id: str) -> Optional[Dict]:
+    async def _get_schedule_row(self, schedule_id: str) -> Optional[Dict]:
         cursor = await self._db.execute(
-            "SELECT * FROM scheduled_jobs WHERE id = ?", (job_id,),
+            "SELECT * FROM scheduled_jobs WHERE schedule_id = ?", (schedule_id,),
         )
         row = await cursor.fetchone()
         if not row:
@@ -348,26 +349,26 @@ class UserScheduler:
         columns = [d[0] for d in cursor.description]
         return dict(zip(columns, row))
 
-    async def _resolve_job_id(
-        self, partial_id: str, user_id: Optional[str] = None,
+    async def _resolve_schedule_id(
+        self, schedule_id: str, user_id: Optional[str] = None,
     ) -> Optional[str]:
         if user_id:
             cursor = await self._db.execute(
-                "SELECT id FROM scheduled_jobs WHERE id LIKE ? AND user_id = ? AND active = 1",
-                (f"{partial_id}%", user_id),
+                "SELECT schedule_id FROM scheduled_jobs WHERE schedule_id = ? AND user_id = ? AND active = 1",
+                (schedule_id, user_id),
             )
         else:
             cursor = await self._db.execute(
-                "SELECT id FROM scheduled_jobs WHERE id LIKE ? AND active = 1",
-                (f"{partial_id}%",),
+                "SELECT schedule_id FROM scheduled_jobs WHERE schedule_id = ? AND active = 1",
+                (schedule_id,),
             )
         row = await cursor.fetchone()
         return row[0] if row else None
 
     @staticmethod
-    def _row_to_job(row: Dict) -> ScheduledJob:
-        return ScheduledJob(
-            id=row["id"],
+    def _row_to_schedule(row: Dict) -> Schedule:
+        return Schedule(
+            schedule_id=row["schedule_id"],
             user_id=row["user_id"],
             chat_id=row["chat_id"],
             channel=row["channel"],

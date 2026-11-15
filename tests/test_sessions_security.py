@@ -32,7 +32,7 @@ def test_sessions_without_company_context_cannot_touch_private_team(tmp_path):
     history = _get_handler(defs, "sessions_history")
     listed = _get_handler(defs, "sessions_list")
 
-    send_result = asyncio.run(send({"target_team": "other-team/private", "message": "hi"}))
+    send_result = asyncio.run(send({"team_id": "other-team/private", "message": "hi"}))
     history_result = asyncio.run(history({"team_id": "other-team/private"}))
     list_result = json.loads(asyncio.run(listed({})))
 
@@ -58,7 +58,7 @@ def test_sessions_respect_shared_team_whitelist_for_company(tmp_path):
     send = _get_handler(defs, "sessions_send")
     listed = _get_handler(defs, "sessions_list")
 
-    send_result = asyncio.run(send({"target_team": "general", "message": "hello"}))
+    send_result = asyncio.run(send({"team_id": "general", "message": "hello"}))
     list_result = json.loads(asyncio.run(listed({})))
 
     assert "Access denied" in send_result

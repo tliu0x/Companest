@@ -25,3 +25,6 @@ CostGate 在每次团队调用前由 actor 回调控制面。控制面依据当�
 所有分支都经过预算检查，旧 skip_cost_check 参数仅为兼容保留。
 
 业务周期在 [jobs 清单](../jobs/README.md) 中列出。新工作流应组合已有团队调用，不要另写 scheduler、进程恢复或持久化执行状态机。
+
+预算服务、CostEstimate、审批元数据和 actor 回调统一使用 `team_id` 与 `model`；
+不保留 target_team/target_team_id/target_model 运行时别名。

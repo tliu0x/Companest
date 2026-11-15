@@ -42,3 +42,18 @@ Companest 保存公司、团队、任务、记忆和业务计划；Agent Substra
 公司数据在公司目录中，跨公司可见的团队必须显式出现在 `shared_teams` 中。
 actor 的模板、挂载与回调能力都绑定已接受任务的 scope；嵌套任务继承该公司的用户和 workspace。
 完整布局见 [持久化部署](../deploy/substrate/storage.md)，验证范围见 [测试说明](../tests/README.md)。
+
+## 执行链路字段约定
+
+同一实体在请求、服务调用、actor 回调、事件和持久记录中使用同名字段、同一 ID 值。
+
+| 字段 | 贯穿哪些位置 |
+| --- | --- |
+| `job_id` | 提交/查询/列表/事件、Job、jobs.db、actor task journal；新 actor 的资源名称直接使用该值。 |
+| `schedule_id` | 用户计划工具、API/actor 回调、Schedule、user_schedules.db；创建后原样返回并用完整值取消。 |
+| `company_id` / `team_id` / `workspace_id` | 执行上下文与所有跨进程服务请求；不替换分隔符、不追加另一层 scope ID。 |
+| `model` | 模型配置、预算调用、CostEstimate 和审批响应；不在边界改名为 target_model。 |
+
+外部协议的原生字段（如 Substrate 的 metadata.name/uid、APScheduler 的 id 参数）在适配器中使用；不生成第二份业务 ID。
+旧数据库的主键列在启动时一次性改名为 job_id/schedule_id，已有 ID 值保持不变；运行时不同时支持两套字段。
+旧客户端需要与本分支同步更新，具体变更见 [部署升级说明](../deploy/substrate/README.md#execution-field-contract)。

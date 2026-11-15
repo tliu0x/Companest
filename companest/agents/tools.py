@@ -277,7 +277,7 @@ def create_scheduler_tool_defs(
         except (json.JSONDecodeError, TypeError):
             return "Error: trigger_args must be valid JSON"
         try:
-            job = await user_scheduler.add_job(
+            schedule = await user_scheduler.add_schedule(
                 user_id=user_id,
                 chat_id=chat_id,
                 channel=channel,
@@ -288,27 +288,27 @@ def create_scheduler_tool_defs(
                 team_id=args.get("team_id"),
             )
             return (
-                f"Scheduled! Job ID: {job.id}\n"
-                f"Type: {job.trigger_type}\n"
-                f"Task: {job.task[:100]}\n"
-                f"Trigger: {json.dumps(job.trigger_args)}"
+                f"Scheduled! Schedule ID: {schedule.schedule_id}\n"
+                f"Type: {schedule.trigger_type}\n"
+                f"Task: {schedule.task[:100]}\n"
+                f"Trigger: {json.dumps(schedule.trigger_args)}"
             )
         except Exception as e:
             return f"Scheduling failed: {e}"
 
     async def list_schedules(args):
-        jobs = await user_scheduler.list_jobs(user_id=user_id)
-        if not jobs:
+        schedules = await user_scheduler.list_schedules(user_id=user_id)
+        if not schedules:
             return "No active scheduled tasks."
         return "\n".join(
-            f"- [{j.id}] {j.description or j.task[:60]} "
-            f"({j.trigger_type}: {json.dumps(j.trigger_args)}) "
-            f"fires={j.fire_count}"
-            for j in jobs
+            f"- [{schedule.schedule_id}] {schedule.description or schedule.task[:60]} "
+            f"({schedule.trigger_type}: {json.dumps(schedule.trigger_args)}) "
+            f"fires={schedule.fire_count}"
+            for schedule in schedules
         )
 
     async def cancel_schedule(args):
-        ok = await user_scheduler.cancel_job(args["schedule_id"], user_id=user_id)
+        ok = await user_scheduler.cancel_schedule(args["schedule_id"], user_id=user_id)
         if ok:
             return f"Cancelled schedule {args['schedule_id']}"
         return f"Schedule not found: {args['schedule_id']}"
@@ -514,7 +514,7 @@ def create_sessions_tool_defs(
 
     @offload
     def sessions_send(args):
-        target = args["target_team"]
+        target = args["team_id"]
         if not _can_access_target(target):
             return f"Access denied: cannot send to {target} (cross-company)"
         entry = {
@@ -545,7 +545,7 @@ def create_sessions_tool_defs(
             name="sessions_send",
             description="Send a message to another team's inbox. Used for cross-team collaboration.",
             parameters={
-                "target_team": {"type": "string", "description": "Team ID to send the message to"},
+                "team_id": {"type": "string", "description": "Team ID to send the message to"},
                 "message": {"type": "string", "description": "The message content"},
             },
             handler=sessions_send,

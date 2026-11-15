@@ -19,3 +19,6 @@
 workspace 单写锁由 [ActorWorkload](../runtime/actor.py) 在任务开始时持有，锁文件在独立共享锁目录，不能放进可能被 Git 清理的工作区。
 工具可见性还要经过 Pi 的 allow/deny 与公司共享团队检查。CEO 工具只能在当前任务的公司、用户和工作区中委派。
 新增工具时同时检查默认权限、外部 MCP 的公司作用域和路径逃逸；相关契约在 `test_pi_runtime.py`、`test_coding.py`、`test_sessions_security.py`。
+
+会话发送和会话读取都使用 `team_id` 参数；用户计划工具使用 `schedule_id`，
+不将计划误称为已执行的 job。新调用方应按这些统一字段构造请求。

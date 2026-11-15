@@ -58,7 +58,8 @@ python -m compileall companest tests -q
 - For memory or knowledge (feeds, digests, public knowledge) changes, run the focused tests such as `tests/test_memory_*`, `tests/test_feeds.py`, `tests/test_digests.py`, and `tests/test_public_knowledge.py`.
 - Keep changes scoped. Do not mix provider, scheduler, and API refactors unless the task truly spans them.
 - Update the affected unit README when responsibilities, data boundaries, or modules change; update `companest/jobs/README.md` when adding or changing a job.
-- Reuse the canonical `team_id` across routing, tools, files and vector filters; do not rewrite it into a second tenant identifier.
+- Keep execution fields in snake_case end to end: `job_id`, `schedule_id`, `company_id`, `team_id`, `workspace_id`, and `model`. Do not translate them into `id`/`target_team`/`target_team_id`/`target_model` at API or actor boundaries.
+- Create each ID once and pass its value unchanged. Reuse the canonical `team_id` across routing, tools, files and vector filters; do not rewrite it into a second tenant identifier. Migrate old persisted schemas once instead of maintaining runtime aliases.
 
 ## Code Conventions
 
