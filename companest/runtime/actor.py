@@ -6,7 +6,7 @@ Companest control plane may reach this listener through the Substrate router.
 
 import argparse
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, ExitStack
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from ..config import CompanestConfig
 from ..orchestration.orchestrator import CompanestOrchestrator
 from ..utils import run_sync
+from .storage import FileLock, check_identity
 
 
 class TaskRequest(BaseModel):
@@ -27,20 +28,26 @@ class TaskRequest(BaseModel):
     task: str = Field(min_length=1)
     company_id: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
+    storage_id: str = Field(min_length=1)
+    workspace_storage_id: str | None = None
 
     model_config = {"extra": "forbid"}
 
 
 class ActorWorkload:
-    def __init__(self, config: CompanestConfig, company_id: str | None, journal: Path):
+    def __init__(self, config: CompanestConfig, company_id: str | None, journal: Path, storage_id: str):
         self.config = config
         self.company_id = company_id
         self.journal = journal
+        self.storage_id = storage_id
         self.record: dict | None = None
         self.task: asyncio.Task | None = None
         self.lock = asyncio.Lock()
 
     async def start(self):
+        if not self.config.storage_lock_dir:
+            raise ValueError("Actor requires storage_lock_dir on a persistent shared mount")
+        await run_sync(check_identity, Path(self.config.storage_lock_dir), self.storage_id)
         if self.journal.exists():
             self.record = json.loads(await run_sync(self.journal.read_text))
             if self.record.get("company_id") != self.company_id:
@@ -71,6 +78,8 @@ class ActorWorkload:
         await run_sync(write)
 
     async def submit(self, request: TaskRequest):
+        if request.storage_id != self.storage_id:
+            raise HTTPException(status_code=409, detail="Actor persistent storage identity mismatch")
         if request.company_id != self.company_id or request.context.get("company_id", self.company_id) != self.company_id:
             raise HTTPException(status_code=403, detail="Task company does not match this actor's scope")
         digest = hashlib.sha256(json.dumps(request.model_dump(), sort_keys=True).encode()).hexdigest()
@@ -101,13 +110,25 @@ class ActorWorkload:
             async with asyncio.timeout(self.config.global_timeout):
                 orchestrator = CompanestOrchestrator(self.config)
                 await orchestrator.init_teams_async(self.config.data_dir)
+                self.validate_scope(orchestrator)
                 context = dict(request.context)
                 context["company_id"] = self.company_id
                 team_id = context.get("team_id")
-                if team_id:
-                    result = await orchestrator.run_team(request.task, team_id, user_context=context)
-                else:
-                    result, _ = await orchestrator.run_auto(request.task, user_context=context)
+                with ExitStack() as locks:
+                    workspace_id = context.get("workspace_id")
+                    if workspace_id:
+                        ws = orchestrator.workspace_registry.get(workspace_id)
+                        if not ws or ws.storage_id != request.workspace_storage_id:
+                            raise ValueError("Actor workspace is missing or has a different storage identity")
+                        await run_sync(ws.validate_storage, self.company_id)
+                        try:
+                            locks.enter_context(FileLock(Path(ws.path) / ".companest-execution.lock", blocking=False))
+                        except BlockingIOError as exc:
+                            raise ValueError("Workspace is busy with another task") from exc
+                    if team_id:
+                        result = await orchestrator.run_team(request.task, team_id, mode=context.get("mode"), user_context=context)
+                    else:
+                        result, _ = await orchestrator.run_auto(request.task, mode=context.get("mode"), user_context=context)
             self.record.update(status="completed", result=result)
         except asyncio.CancelledError:
             self.record.update(status="failed", error="Actor process stopped during execution; outcome may be unknown")
@@ -117,6 +138,24 @@ class ActorWorkload:
         finally:
             self.record["completed_at"] = datetime.now(timezone.utc).isoformat()
             await self.persist()
+
+    def validate_scope(self, orchestrator):
+        """Fail closed on an accidentally over-broad operator mount."""
+        companies = orchestrator.company_registry.list_companies()
+        if any(cid != self.company_id for cid in companies):
+            raise ValueError("Actor filesystem exposes another company's configuration")
+        if self.company_id:
+            company = orchestrator.company_registry.get(self.company_id)
+            if not company or not company.enabled:
+                raise ValueError("Actor company is missing or disabled")
+        for tid in orchestrator.team_registry.list_teams():
+            if tid == f"company-{self.company_id}":
+                continue
+            if not orchestrator.can_access_team(self.company_id, tid):
+                raise ValueError("Actor filesystem exposes an unauthorized team")
+        for wid in orchestrator.workspace_registry.list_workspaces():
+            if orchestrator.workspace_registry.get(wid).company_id != self.company_id:
+                raise ValueError("Actor filesystem exposes another company's workspace")
 
 
 def create_app(workload: ActorWorkload) -> FastAPI:
@@ -152,13 +191,14 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--company", required=True, help="Company ID, or @shared for the shared scope")
     parser.add_argument("--journal", type=Path, default=Path("/data/task.json"))
+    parser.add_argument("--storage-id", required=True, help="Identity of the mounted persistent storage")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
     config = (CompanestConfig.from_markdown(args.config) if args.config.suffix == ".md"
               else CompanestConfig.from_json_file(args.config))
     company_id = None if args.company == "@shared" else args.company
     import uvicorn
-    uvicorn.run(create_app(ActorWorkload(config, company_id, args.journal)), host="0.0.0.0", port=args.port)
+    uvicorn.run(create_app(ActorWorkload(config, company_id, args.journal, args.storage_id)), host="0.0.0.0", port=args.port)
 
 
 if __name__ == "__main__":

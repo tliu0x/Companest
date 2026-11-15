@@ -157,7 +157,7 @@ class CompanestOrchestrator:
         *, _defer_companies: bool = False,
     ) -> None:
         proxy = self.config.proxy if self.config.proxy.enabled else None
-        self.memory = MemoryManager(base_path)
+        self.memory = MemoryManager(base_path, lock_dir=self.config.storage_lock_dir)
 
         requested_backend = (self.config.memory_backend or "file").strip().lower()
         if requested_backend == "file":

@@ -114,7 +114,36 @@ class MCPServerConfig(BaseModel):
             return cfg
 
 
+class ActorBinding(BaseModel):
+    atespace: str
+    template: str
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_names(self):
+        from .runtime.substrate import ActorRef
+        ActorRef(self.atespace, self.template)
+        return self
+
+
+class SubstrateConfig(BaseModel):
+    executable: str = "kubectl-ate"
+    kubeconfig: Optional[str] = None
+    context: Optional[str] = None
+    token_file: Optional[str] = None
+    timeout: float = Field(default=30, gt=0, le=300)
+    poll_interval: float = Field(default=1, gt=0, le=60)
+    storage_id: str = Field(min_length=1)
+    # Keys are company IDs; @shared is explicitly opt-in for global tasks.
+    scopes: Dict[str, ActorBinding] = Field(default_factory=dict)
+
+    model_config = {"extra": "forbid"}
+
+
 class CompanestConfig(BaseModel):
+    substrate: Optional[SubstrateConfig] = None
+    storage_lock_dir: Optional[str] = None
     api: APIConfig = Field(
         default_factory=APIConfig,
         description="API server configuration"

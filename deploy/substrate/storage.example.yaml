@@ -1,0 +1,59 @@
+# Install/configure the upstream NFS CSI integration first. Replace the server.
+# Fixed subDir + onDelete: retain preserves the backing directory when an actor
+# is deleted. Do not use a per-actor directory for shared business state.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: companest-shared
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <NFS_SERVER>
+  share: /companest
+  subDir: shared
+  onDelete: retain
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+mountOptions: [nfsvers=4.1]
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: companest-locks
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <NFS_SERVER>
+  share: /companest
+  subDir: locks
+  onDelete: retain
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+mountOptions: [nfsvers=4.1]
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: companest-workspace
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <NFS_SERVER>
+  share: /companest
+  subDir: workspaces/code
+  onDelete: retain
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+mountOptions: [nfsvers=4.1]
+---
+# Unique directory per actor, independent of snapshots; removed only after
+# the control plane has durably saved the result or requested cancellation.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: companest-journals
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <NFS_SERVER>
+  share: /companest
+  onDelete: delete
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+mountOptions: [nfsvers=4.1]

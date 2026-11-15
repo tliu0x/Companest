@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import tempfile
-import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from ..utils import synchronized
 from ..exceptions import CompanestError
+from ..runtime.storage import FileLock
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +61,10 @@ class EnrichmentSource:
 class MemoryManager:
     _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_./-]*$")
 
-    def __init__(self, base_path: str = ".companest"):
+    def __init__(self, base_path: str = ".companest", lock_dir: Optional[str] = None):
         self.base_path = Path(base_path).resolve()
-        self._io_lock = self._append_lock = threading.RLock()
+        locks = Path(lock_dir) if lock_dir else self.base_path / ".locks"
+        self._io_lock = self._append_lock = FileLock(locks / "memory.lock")
         self._file_cache: Dict[Path, _FileCacheEntry] = {}
         self._prompt_cache: Dict[Tuple[str, str], _PromptCacheEntry] = {}
         self._dir_cache: Dict[Path, _DirCacheEntry] = {}

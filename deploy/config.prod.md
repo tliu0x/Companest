@@ -49,3 +49,7 @@ Use these only if you enable the related features:
 |----------|---------|
 | `COMPANEST_MASTER_TOKEN` | Gateway authentication |
 | `LITELLM_MASTER_KEY` | LiteLLM proxy administration |
+
+Substrate actor storage must be provisioned before enabling execution. Set
+`storage_lock_dir` to the shared lock mount; use retained shared memory/workspace
+directories and separate per-actor journals. See [storage setup](substrate/storage.md).

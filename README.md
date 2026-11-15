@@ -206,3 +206,7 @@ For a documented production baseline, start from [`deploy/config.prod.md`](./dep
 ## License
 
 Apache License 2.0
+
+Substrate actors require persistent shared memory and workspace mounts. See the
+[storage setup](deploy/substrate/storage.md) for retained CSI directories,
+workspace ownership, identity checks and process-shared memory locks.

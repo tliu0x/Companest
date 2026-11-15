@@ -130,3 +130,11 @@ company rejection, result retrieval and cold-start failure without replay.
 The inherited suite passed with 523 tests and 3 live-network tests deselected.
 These checks do not establish a completed API migration or real model/tool
 acceptance, which is outside this task's scope.
+
+## Persistent mounts
+
+The current actor now requires persistent business mounts and storage identities;
+see [storage.md](storage.md) and `storage.example.yaml`. The template uses CSI
+volumes with retained shared directories and a separate per-actor journal. Create
+it with `--preview` against a server with `ExternalVolumes` enabled. The image's
+sample files are not the authoritative company/workspace state.

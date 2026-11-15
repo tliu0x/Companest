@@ -92,7 +92,7 @@ class SubstrateClient:
     async def create_actor(self, actor: ActorRef, template: str) -> dict:
         ActorRef(actor.atespace, template)
         return await self._command(
-            "create", "actor", actor.name, "-a", actor.atespace, "--template", template,
+            "create", "actor", actor.name, "-a", actor.atespace, "--template", template, "--preview",
         )
 
     async def get_actor(self, actor: ActorRef) -> dict:
