@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
 
+from ..utils import run_sync
 from ..config import CompanestConfig
 from ..memory import MemoryManager, Dreamer, EnrichmentSource, FileBackend, QdrantBackend
 from ..agents.team import TeamConfig, TeamRegistry
@@ -135,6 +136,12 @@ class CompanestOrchestrator:
         return {
             "teams_initialized": hasattr(self, "team_registry"),
             **self.get_teams_status(),
+        }
+
+    async def get_status_async(self) -> Dict[str, Any]:
+        return {
+            "teams_initialized": hasattr(self, "team_registry"),
+            **await self.get_teams_status_async(),
         }
 
     def init_teams(
@@ -448,9 +455,9 @@ class CompanestOrchestrator:
 
         self.scheduler.remove_by_scope("company", company_id)
         self._smart_router.remove_bindings_by_owner(company_id)
-        self.memory.remove_enrichments_by_company(company_id)
+        await run_sync(self.memory.remove_enrichments_by_company, company_id)
         self.team_registry.unregister_company(company_id)
-        self.memory.unregister_company_paths(company_id)
+        await run_sync(self.memory.unregister_company_paths, company_id)
         self.tool_registry.unregister_company_mcp(company_id)
         self._ceo_pis.pop(company_id, None)
         self._output_sinks.pop(company_id, None)
@@ -584,7 +591,7 @@ class CompanestOrchestrator:
             for cid in removed:
                 logger.info(f"[Company] Company {cid} removed, already torn down")
 
-            self.memory.clear_cache()
+            await run_sync(self.memory.clear_cache)
 
     def set_notification_callback(self, callback) -> None:
         if not hasattr(self, "background"):
@@ -678,7 +685,7 @@ class CompanestOrchestrator:
         ws = self.workspace_registry.get(workspace_id) if workspace_id else None
         if ws:
             extra_context["workspace_path"] = ws.path
-            extra_context["workspace_context"] = self.workspace_registry.build_context(workspace_id)
+            extra_context["workspace_context"] = await run_sync(self.workspace_registry.build_context, workspace_id)
         extra_context["company_shared_teams"] = self._get_company_shared_teams(company_id)
         for pi in team.pis.values():
             pi.user_scheduler = self.user_scheduler
@@ -727,7 +734,7 @@ class CompanestOrchestrator:
                 lead_config = team.get_lead_config()
                 model = lead_config.model if lead_config else "deepseek-chat"
                 estimate = self.cost_gate.estimate_cost(task, model, team_id)
-                self.cost_gate.record_spending(
+                await run_sync(self.cost_gate.record_spending,
                     team_id=team_id,
                     task=task,
                     tokens={
@@ -846,11 +853,21 @@ class CompanestOrchestrator:
         return result, decision
 
     def get_teams_status(self) -> Dict[str, Any]:
+        status = self._get_runtime_status()
+        if hasattr(self, "cost_gate"):
+            status["finance"] = self.cost_gate.get_spending_summary()
+        return status
+
+    async def get_teams_status_async(self) -> Dict[str, Any]:
+        status = self._get_runtime_status()
+        if hasattr(self, "cost_gate"):
+            status["finance"] = await run_sync(self.cost_gate.get_spending_summary)
+        return status
+
+    def _get_runtime_status(self) -> Dict[str, Any]:
         status = {}
         if hasattr(self, "team_registry"):
             status["teams"] = self.team_registry.get_fleet_status()
-        if hasattr(self, "cost_gate"):
-            status["finance"] = self.cost_gate.get_spending_summary()
         if hasattr(self, "scheduler"):
             status["scheduler"] = self.scheduler.get_status()
         return status

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import tarfile
@@ -6,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from ..utils import run_sync
 from . import MemoryManager
 from ..exceptions import ArchiverError
 
@@ -29,6 +31,7 @@ class MemoryArchiver:
         self.region = region
         self.retention_days = retention_days
         self._s3 = None
+        self._operation_lock = asyncio.Lock()
 
     def _get_s3(self):
         if self._s3 is None:
@@ -41,17 +44,21 @@ class MemoryArchiver:
 
     async def backup_snapshot(self) -> Dict[str, Any]:
         """Create a full tar.gz snapshot and upload to S3."""
+        async with self._operation_lock:
+            return await run_sync(self._backup_snapshot)
+
+    def _backup_snapshot(self) -> Dict[str, Any]:
         s3 = self._get_s3()
         base = self.memory.base_path
         now = datetime.now(timezone.utc)
-        timestamp = now.strftime("%Y%m%d-%H%M%S")
+        timestamp = now.strftime("%Y%m%d-%H%M%S-%f")
         key = f"{self.prefix}/snapshots/{timestamp}.tar.gz"
 
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
-            with tarfile.open(tmp_path, "w:gz") as tar:
+            with self.memory._append_lock, tarfile.open(tmp_path, "w:gz") as tar:
                 tar.add(str(base), arcname=".companest")
 
             file_size = os.path.getsize(tmp_path)
@@ -80,6 +87,10 @@ class MemoryArchiver:
 
     async def restore_snapshot(self, s3_key: str, target_path: str) -> Path:
         """Restore into a new target directory and return its .companest path."""
+        async with self._operation_lock:
+            return await run_sync(self._restore_snapshot, s3_key, target_path)
+
+    def _restore_snapshot(self, s3_key: str, target_path: str) -> Path:
         target = Path(target_path).absolute()
         if target.exists() or target.is_symlink():
             raise ArchiverError(f"Restore target already exists: {target}")

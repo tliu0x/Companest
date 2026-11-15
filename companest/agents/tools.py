@@ -1,3 +1,4 @@
+
 import inspect
 import json
 import logging
@@ -7,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from ..utils import offload
 from ..memory import MemoryManager, MemoryBackend, FileBackend, MemorySearchService
 
 logger = logging.getLogger(__name__)
@@ -154,11 +156,13 @@ def create_memory_tool_defs(
     _backend = memory_backend if memory_backend is not None else FileBackend(memory)
     _search_service = MemorySearchService(_backend)
 
-    async def memory_read(args):
+    @offload
+    def memory_read(args):
         data = _backend.read(team_id, args["key"])
         return json.dumps(data, ensure_ascii=False, indent=2) if data is not None else "null"
 
-    async def memory_write(args):
+    @offload
+    def memory_write(args):
         key = args["key"]
         try:
             data = json.loads(args["value"])
@@ -167,13 +171,16 @@ def create_memory_tool_defs(
         _backend.write(team_id, key, data)
         return f"Written to {team_id}/memory/{key}"
 
-    async def memory_list(args):
+    @offload
+    def memory_list(args):
         return json.dumps(_backend.list_keys(team_id))
 
-    async def memory_index(args):
+    @offload
+    def memory_index(args):
         return json.dumps(_backend.get_index(team_id), indent=2, ensure_ascii=False)
 
-    async def memory_search(args):
+    @offload
+    def memory_search(args):
         include_archive = args.get("include_archive", True)
         explain = args.get("explain", False)
         # Models sometimes send booleans as strings
@@ -505,7 +512,8 @@ def create_sessions_tool_defs(
             return company_id is None or shared_teams is None or target in shared_teams
         return company_id is not None and company_id == target.split("/", 1)[0]
 
-    async def sessions_send(args):
+    @offload
+    def sessions_send(args):
         target = args["target_team"]
         if not _can_access_target(target):
             return f"Access denied: cannot send to {target} (cross-company)"
@@ -518,10 +526,12 @@ def create_sessions_tool_defs(
         memory.append_team_memory(target, "inbox.json", entry)
         return f"Message sent to {target}/inbox.json"
 
-    async def sessions_list(args):
+    @offload
+    def sessions_list(args):
         return json.dumps([t for t in memory.list_teams() if _can_access_target(t)])
 
-    async def sessions_history(args):
+    @offload
+    def sessions_history(args):
         target = args.get("team_id", team_id)
         if not _can_access_target(target):
             return json.dumps({"error": f"Access denied: cannot read {target} (cross-company)"})

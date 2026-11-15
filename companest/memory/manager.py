@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from ..utils import synchronized
 from ..exceptions import CompanestError
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class MemoryManager:
 
     def __init__(self, base_path: str = ".companest"):
         self.base_path = Path(base_path).resolve()
-        self._append_lock = threading.Lock()
+        self._io_lock = self._append_lock = threading.RLock()
         self._file_cache: Dict[Path, _FileCacheEntry] = {}
         self._prompt_cache: Dict[Tuple[str, str], _PromptCacheEntry] = {}
         self._dir_cache: Dict[Path, _DirCacheEntry] = {}
@@ -86,17 +87,21 @@ class MemoryManager:
         if not self.base_path.exists():
             logger.warning(f"Memory base path does not exist: {self.base_path}")
 
+    @synchronized
     def register_enrichment(self, source: EnrichmentSource) -> None:
         self._enrichment_sources.append(source)
 
+    @synchronized
     def remove_enrichments_by_company(self, company_id: str) -> int:
         before = len(self._enrichment_sources)
         self._enrichment_sources = [s for s in self._enrichment_sources if s.company_id != company_id]
         return before - len(self._enrichment_sources)
 
+    @synchronized
     def read_master_user(self) -> str:
         return self._read_file(self.base_path / "user.md")
 
+    @synchronized
     def _validate_path_component(self, value: str, label: str) -> str:
         """Validate a path component to prevent path traversal."""
         if not value:
@@ -107,30 +112,36 @@ class MemoryManager:
             raise MemoryError(f"Invalid {label}: {value!r} (alphanumeric, dash, underscore, dot only)")
         return value
 
+    @synchronized
     def register_team_path(self, team_id: str, path: Path) -> None:
         """Register a physical path override for a namespaced team."""
         self._team_path_overrides[team_id] = path.resolve()
 
+    @synchronized
     def unregister_company_paths(self, company_id: str) -> None:
         to_remove = [k for k in self._team_path_overrides if k.startswith(f"{company_id}/")]
         for k in to_remove:
             del self._team_path_overrides[k]
 
+    @synchronized
     def team_path(self, team_id: str) -> Path:
         if team_id in self._team_path_overrides:
             return self._team_path_overrides[team_id]
         self._validate_path_component(team_id, "team_id")
         return self.base_path / "teams" / team_id
 
+    @synchronized
     def read_team_soul(self, team_id: str) -> str:
         return self._read_file(self.team_path(team_id) / "soul.md")
 
+    @synchronized
     def read_team_memory(self, team_id: str, key: str) -> Any:
         self._validate_path_component(key, "key")
         data = self._read_json(self.team_path(team_id) / "memory" / key)
         self._update_index_on_read(team_id, key)
         return data
 
+    @synchronized
     def write_team_memory(self, team_id: str, key: str, data: Any) -> None:
         self._validate_path_component(key, "key")
         path = self.team_path(team_id) / "memory" / key
@@ -140,6 +151,7 @@ class MemoryManager:
         self._invalidate_prompt_cache_for_team(team_id)
         self._update_index_on_write(team_id, key, data)
 
+    @synchronized
     def append_team_memory(self, team_id: str, key: str, entry: Any) -> None:
         """Append an entry to a JSON array in team memory (thread-safe)."""
         self._validate_path_component(key, "key")
@@ -155,6 +167,7 @@ class MemoryManager:
             self._invalidate_prompt_cache_for_team(team_id)
             self._update_index_on_write(team_id, key, existing)
 
+    @synchronized
     def list_team_memory(self, team_id: str) -> List[str]:
         mem_dir = self.team_path(team_id) / "memory"
         resolved = mem_dir.resolve()
@@ -171,6 +184,7 @@ class MemoryManager:
         self._dir_cache[resolved] = _DirCacheEntry(mtime=st.st_mtime, entries=entries)
         return entries
 
+    @synchronized
     def list_teams(self) -> List[str]:
         teams_dir = self.base_path / "teams"
         if not teams_dir.exists():
@@ -180,9 +194,11 @@ class MemoryManager:
             if d.is_dir() and (d / "team.md").exists()
         ]
 
+    @synchronized
     def _index_path(self, team_id: str) -> Path:
         return self.team_path(team_id) / "memory" / INDEX_FILENAME
 
+    @synchronized
     def _read_index(self, team_id: str) -> Dict[str, dict]:
         path = self._index_path(team_id)
         if not path.exists():
@@ -190,6 +206,7 @@ class MemoryManager:
         data = self._read_json(path)
         return data if isinstance(data, dict) else {}
 
+    @synchronized
     def _write_index(self, team_id: str, index: Dict[str, dict]) -> None:
         path = self._index_path(team_id)
         self._write_json(path, index)
@@ -209,6 +226,7 @@ class MemoryManager:
             "summary": "",
         }
 
+    @synchronized
     def _rebuild_index(self, team_id: str) -> Dict[str, dict]:
         """Rebuild the index from the memory files on disk."""
         mem_dir = self.team_path(team_id) / "memory"
@@ -232,6 +250,7 @@ class MemoryManager:
         self._write_index(team_id, index)
         return index
 
+    @synchronized
     def _update_index_on_write(self, team_id: str, key: str, data: Any) -> None:
         try:
             index = self._read_index(team_id)
@@ -251,6 +270,7 @@ class MemoryManager:
         except Exception as e:
             logger.debug(f"Index update on write failed (non-blocking): {e}")
 
+    @synchronized
     def _update_index_on_read(self, team_id: str, key: str) -> None:
         try:
             index = self._read_index(team_id)
@@ -261,18 +281,22 @@ class MemoryManager:
         except Exception:
             pass  # best-effort
 
+    @synchronized
     def _remove_from_index(self, team_id: str, key: str) -> None:
         index = self._read_index(team_id)
         if key in index:
             del index[key]
             self._write_index(team_id, index)
 
+    @synchronized
     def get_memory_index(self, team_id: str) -> Dict[str, dict]:
         return self._read_index(team_id)
 
+    @synchronized
     def get_entry_meta(self, team_id: str, key: str) -> Optional[dict]:
         return self._read_index(team_id).get(key)
 
+    @synchronized
     def delete_team_memory(self, team_id: str, key: str) -> None:
         self._validate_path_component(key, "key")
         path = self.team_path(team_id) / "memory" / key
@@ -283,6 +307,7 @@ class MemoryManager:
         self._remove_from_index(team_id, key)
         self._invalidate_prompt_cache_for_team(team_id)
 
+    @synchronized
     def archive_team_memory(self, team_id: str, key: str) -> None:
         """Move a memory file to archive/ and update indices."""
         self._validate_path_component(key, "key")
@@ -306,6 +331,7 @@ class MemoryManager:
         self._dir_cache.pop(src.parent.resolve(), None)
         self._invalidate_prompt_cache_for_team(team_id)
 
+    @synchronized
     def search_archive(self, team_id: str, query: str, limit: int = 10) -> List[dict]:
         """Search archive entries by summary and tags (case-insensitive substring)."""
         archive_index = self._read_archive_index(team_id)
@@ -321,9 +347,11 @@ class MemoryManager:
         )
         return results[:limit]
 
+    @synchronized
     def read_overview(self, team_id: str) -> str:
         return self._read_file(self.team_path(team_id) / "memory" / ".overview.md")
 
+    @synchronized
     def _read_archive_index(self, team_id: str) -> Dict[str, dict]:
         path = self.team_path(team_id) / "archive" / INDEX_FILENAME
         if not path.exists():
@@ -331,11 +359,13 @@ class MemoryManager:
         data = self._read_json(path)
         return data if isinstance(data, dict) else {}
 
+    @synchronized
     def _write_archive_index(self, team_id: str, index: Dict[str, dict]) -> None:
         path = self.team_path(team_id) / "archive" / INDEX_FILENAME
         self._write_json(path, index)
         self._file_cache.pop(path.resolve(), None)
 
+    @synchronized
     def update_entry_meta(self, team_id: str, key: str, **fields) -> None:
         allowed = {"importance", "tier", "summary", "tags"}
         invalid = set(fields) - allowed
@@ -347,12 +377,14 @@ class MemoryManager:
         index[key].update(fields)
         self._write_index(team_id, index)
 
+    @synchronized
     def read_pi_soul(self, team_id: str, pi_id: str) -> str:
         self._validate_path_component(pi_id, "pi_id")
         return self._read_file(
             self.team_path(team_id) / "pis" / pi_id / "soul.md"
         )
 
+    @synchronized
     def build_system_prompt(
         self, team_id: str, pi_id: str, company_context: Optional[str] = None,
     ) -> str:
@@ -444,6 +476,7 @@ class MemoryManager:
 
     _MAX_BRIEFING_ITEMS = 15
 
+    @synchronized
     def _format_research_briefing(self, data: Any) -> Optional[str]:
         if not isinstance(data, dict):
             return None
@@ -477,6 +510,7 @@ class MemoryManager:
 
     _MAX_FEED_ITEMS = 20
 
+    @synchronized
     def _format_info_feed(self, data: Any) -> Optional[str]:
         if not isinstance(data, dict):
             return None
@@ -506,6 +540,7 @@ class MemoryManager:
             + "\n".join(lines)
         )
 
+    @synchronized
     def get_all_memory_stats(self) -> Dict[str, Any]:
         stats = {}
         for team_id in self.list_teams():
@@ -523,17 +558,20 @@ class MemoryManager:
                 }
         return stats
 
+    @synchronized
     def clear_cache(self) -> None:
         self._file_cache.clear()
         self._prompt_cache.clear()
         self._dir_cache.clear()
 
+    @synchronized
     def _stat_safe(self, path: Path) -> Optional[os.stat_result]:
         try:
             return path.stat()
         except OSError:
             return None
 
+    @synchronized
     def _collect_prompt_dependency_stats(
         self, team_id: str, pi_id: str,
     ) -> Dict[str, float]:
@@ -565,6 +603,7 @@ class MemoryManager:
             stats[str(resolved)] = st.st_mtime if st else 0.0
         return stats
 
+    @synchronized
     def _invalidate_prompt_cache_for_team(self, team_id: str) -> None:
         keys_to_remove = [k for k in self._prompt_cache if k[0] == team_id]
 
@@ -580,6 +619,7 @@ class MemoryManager:
         for k in set(keys_to_remove):
             self._prompt_cache.pop(k, None)
 
+    @synchronized
     def _read_file(self, path: Path) -> str:
         resolved = path.resolve()
         st = self._stat_safe(resolved)
@@ -602,6 +642,7 @@ class MemoryManager:
             logger.warning(f"Failed to read {path}: {e}")
             return ""
 
+    @synchronized
     def _read_json(self, path: Path) -> Any:
         resolved = path.resolve()
         st = self._stat_safe(resolved)
@@ -629,12 +670,15 @@ class MemoryManager:
             logger.warning(f"Failed to read {path}: {e}")
             return None
 
+    @synchronized
     def _write_json(self, path: Path, data: Any) -> None:
         self._atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
+    @synchronized
     def _write_file(self, path: Path, content: str) -> None:
         self._atomic_write(path, content)
 
+    @synchronized
     def _atomic_write(self, path: Path, content: str) -> None:
         """Write content to path atomically via temp file + os.replace()."""
         path.parent.mkdir(parents=True, exist_ok=True)

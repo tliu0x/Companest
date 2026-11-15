@@ -61,13 +61,14 @@ def print_info(msg: str):
     print(colored(f"  {msg}", Colors.BLUE))
 
 
-def _api_auth_headers() -> dict[str, str]:
+def _api_auth_headers(warn: bool = True) -> dict[str, str]:
     token = os.getenv("COMPANEST_API_TOKEN")
     if not token:
-        logger.warning(
-            "COMPANEST_API_TOKEN not set. API calls to an authenticated server will fail. "
-            "Set it with: export COMPANEST_API_TOKEN=<your-token>"
-        )
+        if warn:
+            logger.warning(
+                "COMPANEST_API_TOKEN not set. API calls to an authenticated server will fail. "
+                "Set it with: export COMPANEST_API_TOKEN=<your-token>"
+            )
         return {}
     return {"Authorization": f"Bearer {token}"}
 
@@ -89,7 +90,7 @@ def _api_command(failure: str = ""):
     def decorator(body):
         def command(args) -> int:
             api_url = args.api_url.rstrip("/")
-            headers = _api_auth_headers()
+            headers = _api_auth_headers(warn=not getattr(args, "json", False))
             import httpx  # resolved per call: tests swap sys.modules["httpx"]
 
             def call(method: str, path: str, **kwargs):
@@ -101,12 +102,22 @@ def _api_command(failure: str = ""):
                 body(args, call)
                 return ExitCode.SUCCESS
             except Exception as e:
+                if getattr(args, "json", False):
+                    print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
+                    return ExitCode.ERROR
                 if not failure:
                     return _handle_api_error(e)
                 print_error(f"{failure}: {e}")
                 return ExitCode.ERROR
         return command
     return decorator
+
+
+def _print_json(args, data) -> bool:
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False))
+        return True
+    return False
 
 
 ENV_KEYS = [
@@ -518,6 +529,8 @@ def cmd_serve(args) -> int:
 @_api_command()
 def cmd_team_list(args, call):
     data = call("get", "/api/teams", timeout=10)
+    if _print_json(args, data):
+        return
 
     print(colored("\n=== Agent Teams ===\n", Colors.BOLD))
 
@@ -622,10 +635,20 @@ def cmd_fleet_status(args, call):
 def cmd_job_submit(args, call):
     payload = {
         "task": args.task,
-        "submitted_by": "cli",
+        "submitted_by": getattr(args, "submitted_by", "cli"),
     }
+    if getattr(args, "company_id", None):
+        payload["company_id"] = args.company_id
+    context = {}
+    for key in ("team_id", "workspace_id"):
+        if getattr(args, key, None):
+            context[key] = getattr(args, key)
+    if context:
+        payload["context"] = context
 
     data = call("post", "/api/jobs", json=payload, timeout=30)
+    if _print_json(args, data):
+        return
 
     print_success(f"Job submitted: {data['job_id']}")
     print_info(f"Status: {data['status']}")
@@ -634,6 +657,8 @@ def cmd_job_submit(args, call):
 @_api_command("Failed to get job status")
 def cmd_job_status(args, call):
     data = call("get", f"/api/jobs/{args.job_id}", timeout=10)
+    if _print_json(args, data):
+        return
 
     print(colored(f"\n=== Job {args.job_id[:8]}... ===\n", Colors.BOLD))
     print(f"  Status:  {data['status']}")
@@ -660,8 +685,12 @@ def cmd_job_list(args, call):
     params = {"limit": args.limit}
     if args.status:
         params["status"] = args.status
+    if getattr(args, "company_id", None):
+        params["company_id"] = args.company_id
 
     data = call("get", "/api/jobs", params=params, timeout=10)
+    if _print_json(args, data):
+        return
 
     jobs = data.get("jobs", [])
     stats = data.get("stats", {})
@@ -682,6 +711,13 @@ def cmd_job_list(args, call):
             )
 
     print()
+
+
+@_api_command("Failed to cancel job")
+def cmd_job_cancel(args, call):
+    data = call("post", f"/api/jobs/{args.job_id}/cancel", timeout=10)
+    if not _print_json(args, data):
+        print_info(f"Job {args.job_id}: {data.get('status', data)}")
 
 
 def _get_company_registry(data_dir: str):
@@ -927,7 +963,10 @@ def main():
         return groups[name].add_subparsers(dest=f"{name}_command")
 
     def api_url(p, help="Companest API URL"):
-        p.add_argument("--api-url", default="http://localhost:8000", help=help)
+        p.add_argument("--api-url", default=os.getenv("COMPANEST_API_URL", "http://localhost:8000"), help=help)
+
+    def json_output(p):
+        p.add_argument("--json", action="store_true", help="Print the complete API response as JSON")
 
     def data_dir(p):
         p.add_argument("--data-dir", default=".companest", help="Data directory (default: .companest)")
@@ -966,7 +1005,9 @@ def main():
     )
 
     team = group("team", "Pi Agent Team management")
-    api_url(command(team, "list", cmd_team_list, "List all teams"))
+    p = command(team, "list", cmd_team_list, "List all teams")
+    api_url(p)
+    json_output(p)
     p = command(team, "status", cmd_team_status, "Show team details")
     p.add_argument("team_id", help="Team ID")
     api_url(p)
@@ -982,14 +1023,26 @@ def main():
     job = group("job", "Job management")
     p = command(job, "submit", cmd_job_submit, "Submit a job")
     p.add_argument("task", help="Task description")
+    p.add_argument("--company-id", help="Company scope for this task")
+    p.add_argument("--team-id", help="Run a specific team; otherwise auto-route")
+    p.add_argument("--workspace-id", help="Registered workspace to use")
+    p.add_argument("--submitted-by", default="cli", help="Client label (not an authentication identity)")
     api_url(p)
+    json_output(p)
     p = command(job, "status", cmd_job_status, "Get job status")
     p.add_argument("job_id", help="Job ID")
     api_url(p)
+    json_output(p)
     p = command(job, "list", cmd_job_list, "List jobs")
     p.add_argument("--status", default=None, help="Filter by status")
     p.add_argument("--limit", type=int, default=20, help="Max results")
+    p.add_argument("--company-id", help="Filter by company")
     api_url(p)
+    json_output(p)
+    p = command(job, "cancel", cmd_job_cancel, "Cancel a queued or running job")
+    p.add_argument("job_id", help="Job ID")
+    api_url(p)
+    json_output(p)
 
     company = group("company", "Company lifecycle management")
     p = command(company, "create", cmd_company_create, "Create a new company")

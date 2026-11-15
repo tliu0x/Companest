@@ -1,6 +1,7 @@
 """Companest CostGate  Finance Department Approval System"""
 
 import asyncio
+import threading
 import logging
 import time
 from collections import deque
@@ -9,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
+from ..utils import run_sync, synchronized
 from ..memory import MemoryManager
 
 logger = logging.getLogger(__name__)
@@ -69,12 +71,14 @@ class CircuitBreaker:
         threshold_pct: float = 30.0,
         cooldown_minutes: float = 15,
     ):
+        self._io_lock = threading.RLock()
         self.window_minutes = window_minutes
         self.threshold_pct = threshold_pct
         self.cooldown_minutes = cooldown_minutes
         self._events: deque[SpendingVelocity] = deque()
         self._tripped_at: Optional[float] = None
 
+    @synchronized
     def record(self, amount: float, team_id: str) -> None:
         now = time.monotonic()
         self._events.append(SpendingVelocity(
@@ -82,11 +86,13 @@ class CircuitBreaker:
         ))
         self._prune(now)
 
+    @synchronized
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_minutes * 60
         while self._events and self._events[0].timestamp < cutoff:
             self._events.popleft()
 
+    @synchronized
     def is_tripped(self, daily_limit: float) -> bool:
         now = time.monotonic()
         if self._tripped_at is not None:
@@ -108,11 +114,13 @@ class CircuitBreaker:
             return True
         return False
 
+    @synchronized
     def reset(self) -> None:
         self._tripped_at = None
         self._events.clear()
         logger.info("[CircuitBreaker] Manually reset")
 
+    @synchronized
     def get_status(self) -> dict:
         now = time.monotonic()
         self._prune(now)
@@ -140,6 +148,8 @@ class CostGate:
         notifier: Optional["UserNotifier"] = None,
         event_bus: Optional[Any] = None,
     ):
+        self._io_lock = threading.RLock()
+        self._pending_lock = threading.RLock()
         self.memory = memory
         self.notifier = notifier
         self._event_bus = event_bus
@@ -154,6 +164,7 @@ class CostGate:
         self._background_tasks.add(t)
         t.add_done_callback(self._background_tasks.discard)
 
+    @synchronized
     def _load_budget(self) -> Dict[str, Any]:
         budget = self.memory.read_team_memory("finance", "budget.json")
         if not budget:
@@ -264,7 +275,7 @@ class CostGate:
         self, task: str, target_team_id: str, target_model: str, priority: str,
         company_id: Optional[str], company_budget_hourly: Optional[float],
     ) -> CostDecision:
-        budget = self._load_budget()
+        budget = await run_sync(self._load_budget)
         estimate = self.estimate_cost(task, target_model, target_team_id)
         cost = estimate.estimated_cost_usd
         daily_limit = budget.get("daily_limit", 10.0)
@@ -283,7 +294,7 @@ class CostGate:
             )
 
         if company_id and company_budget_hourly is not None and company_budget_hourly > 0:
-            company_spent = self._get_company_window_spending(company_id, hours=1.0)
+            company_spent = await run_sync(self._get_company_window_spending, company_id, hours=1.0)
             if company_spent + cost > company_budget_hourly:
                 return rejected(
                     f"Company '{company_id}' hourly budget exceeded "
@@ -300,16 +311,16 @@ class CostGate:
             reason = "Circuit breaker tripped  anomalous spending velocity"
             if self.notifier:
                 return await self._escalate(
-                    task, estimate, self._get_window_spending(hours), daily_limit, reason, priority,
+                    task, estimate, await run_sync(self._get_window_spending, hours), daily_limit, reason, priority,
                 )
             return rejected(reason)
 
         team_daily = budget["team_budgets"].get(target_team_id, {}).get("daily", 0)
         if team_daily > 0:
-            team_spent = self._get_team_window_spending(target_team_id, hours)
+            team_spent = await run_sync(self._get_team_window_spending, target_team_id, hours)
             if team_spent + cost > team_daily:
                 overflow_remaining = max(
-                    0.0, budget["overflow_pool"] - self._get_overflow_usage(budget, hours),
+                    0.0, budget["overflow_pool"] - await run_sync(self._get_overflow_usage, budget, hours),
                 )
                 overage = (team_spent + cost) - team_daily
                 if overage <= overflow_remaining:
@@ -327,7 +338,7 @@ class CostGate:
                     return rejected(reason)
 
         post_hoc = budget["mode"] == "post_hoc"
-        window_spent = self._get_window_spending(hours)
+        window_spent = await run_sync(self._get_window_spending, hours)
         # In post-hoc mode "high" priority is exempt from the rolling-window limit
         if window_spent + cost > daily_limit and not (post_hoc and priority == "high"):
             reason = f"Rolling window limit exceeded (${window_spent:.2f} + ${cost:.2f} > ${daily_limit:.2f})"
@@ -382,22 +393,23 @@ class CostGate:
     ) -> CostDecision:
         approval_id = f"approval-{uuid4().hex[:8]}"
         future = asyncio.get_running_loop().create_future()
-        self._pending[approval_id] = future
-        self._pending_metadata[approval_id] = {
-            "approval_id": approval_id,
-            "task": task,
-            "reason": reason,
-            "priority": priority,
-            "estimated_cost_usd": round(estimate.estimated_cost_usd, 4),
-            "estimated_input_tokens": estimate.estimated_input_tokens,
-            "estimated_output_tokens": estimate.estimated_output_tokens,
-            "target_team": estimate.target_team,
-            "target_model": estimate.target_model,
-            "suggested_downgrade": estimate.suggested_downgrade,
-            "today_spent": round(today_spent, 4),
-            "daily_limit": daily_limit,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        with self._pending_lock:
+            self._pending[approval_id] = future
+            self._pending_metadata[approval_id] = {
+                "approval_id": approval_id,
+                "task": task,
+                "reason": reason,
+                "priority": priority,
+                "estimated_cost_usd": round(estimate.estimated_cost_usd, 4),
+                "estimated_input_tokens": estimate.estimated_input_tokens,
+                "estimated_output_tokens": estimate.estimated_output_tokens,
+                "target_team": estimate.target_team,
+                "target_model": estimate.target_model,
+                "suggested_downgrade": estimate.suggested_downgrade,
+                "today_spent": round(today_spent, 4),
+                "daily_limit": daily_limit,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
 
         await self.notifier.request_approval(
             approval_id=approval_id,
@@ -415,8 +427,9 @@ class CostGate:
                 reason="Approval timeout (5 minutes)", approval_id=approval_id,
             )
         finally:
-            self._pending.pop(approval_id, None)
-            self._pending_metadata.pop(approval_id, None)
+            with self._pending_lock:
+                self._pending.pop(approval_id, None)
+                self._pending_metadata.pop(approval_id, None)
 
         if user_choice == "approve":
             return CostDecision(
@@ -445,10 +458,11 @@ class CostGate:
         return False
 
     def get_pending_approvals(self) -> List[Dict[str, Any]]:
-        pending = [
-            dict(metadata) for approval_id, metadata in self._pending_metadata.items()
-            if not self._pending[approval_id].done()
-        ]
+        with self._pending_lock:
+            pending = [
+                dict(metadata) for approval_id, metadata in self._pending_metadata.items()
+                if not self._pending[approval_id].done()
+            ]
         pending.sort(key=lambda item: item["created_at"], reverse=True)
         return pending
 

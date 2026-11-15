@@ -2,12 +2,14 @@
 
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Set, Type
 
 from pydantic import BaseModel, Field
 
+from ..utils import synchronized
 from ..companies.company import _SAFE_ID_RE
 from .s3 import S3JsonStore
 
@@ -183,7 +185,9 @@ class DigestIngestor:
     def __init__(self, s3_store: DigestS3Store) -> None:
         self._s3_store = s3_store
         self._seen_keys: Set[str] = set()
+        self._io_lock = threading.RLock()
 
+    @synchronized
     def ingest(self, digest: DigestEnvelope) -> IngestResult:
         def result(accepted: bool, reason: str) -> IngestResult:
             return IngestResult(accepted, reason, digest.digest_type, digest.company_id)
@@ -226,7 +230,7 @@ def create_digest_router(s3_store: DigestS3Store):
         return model_cls
 
     @router.post("/{company_id}/digests/{digest_type}")
-    async def ingest_digest(company_id: str, digest_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def ingest_digest(company_id: str, digest_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         model_cls = check(company_id, digest_type)
         # Path parameters are authoritative for the envelope fields.
         payload["company_id"] = company_id
@@ -247,7 +251,7 @@ def create_digest_router(s3_store: DigestS3Store):
         }
 
     @router.get("/{company_id}/digests/{digest_type}/latest")
-    async def get_latest_digest(company_id: str, digest_type: str) -> Dict[str, Any]:
+    def get_latest_digest(company_id: str, digest_type: str) -> Dict[str, Any]:
         check(company_id, digest_type)
         data = s3_store.get_latest_digest(company_id, digest_type)
         if data is None:

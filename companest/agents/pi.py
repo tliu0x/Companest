@@ -9,6 +9,7 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 
 ProgressCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 
+from ..utils import run_sync
 from ..memory import FileBackend, MemoryManager, MemorySearchService
 from .tools import ToolRegistry, ToolContext, DEFAULT_TOOLS_DENY
 from .cascade import CascadeEngine, CascadeMetrics
@@ -76,19 +77,19 @@ class Pi:
     ) -> str:
         context_token = self._user_context.set(user_context)
         try:
-            system = self.memory.build_system_prompt(
+            system = await run_sync(self.memory.build_system_prompt,
                 self.team_id, self.id,
                 company_context=user_context.get("company_context") if user_context else None,
             )
             retrieval_task = self._resolve_memory_task_hint(task, user_context)
-            relevant_memory = self._build_relevant_memory_section(retrieval_task)
+            relevant_memory = await run_sync(self._build_relevant_memory_section, retrieval_task)
             if relevant_memory:
                 system = system + "\n\n---\n\n" + relevant_memory if system else relevant_memory
             if not cascade:
                 return await self._run_single(task, system, timeout)
 
             engine = self.cascade_engine or CascadeEngine()
-            metrics = CascadeMetrics.load(self.memory, self.team_id)
+            metrics = await run_sync(CascadeMetrics.load, self.memory, self.team_id)
             chain = engine.get_effective_chain(self.model, task, metrics)
 
             if len(chain) <= 1:
@@ -112,7 +113,7 @@ class Pi:
                     adequate, quality = engine.check_adequate(result, task)
                     if is_last or adequate:
                         metrics.record(model, succeeded=True, quality=quality)
-                        metrics.save(self.memory, self.team_id)
+                        await run_sync(metrics.save, self.memory, self.team_id)
                         logger.info(
                             f"[Pi:{self.team_id}/{self.id}] Cascade accepted at "
                             f"{model} (step {i+1}/{len(chain)}, quality={quality:.2f})"
@@ -134,7 +135,7 @@ class Pi:
                 if on_progress and not is_last:
                     await on_progress(f"\u2b06\ufe0f \u2192 {short(chain[i + 1])} [{i+2}/{len(chain)}]")
 
-            metrics.save(self.memory, self.team_id)
+            await run_sync(metrics.save, self.memory, self.team_id)
             if last_result:
                 return last_result
             raise last_error

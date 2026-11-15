@@ -444,15 +444,15 @@ class MasterConnection:
     async def _handle_status(self, request_id: str) -> None:
         """Handle status  return orchestrator and teams info."""
         status = {
-            "orchestrator": self.orchestrator.get_status() if self.orchestrator else {},
+            "orchestrator": await self.orchestrator.get_status_async() if self.orchestrator else {},
             "master": {
                 "connected": self._client.is_connected if self._client else False,
                 "active_tasks": len(self._active_tasks),
                 "max_concurrent_tasks": self.config.max_concurrent_tasks,
             },
         }
-        if hasattr(self.orchestrator, "get_teams_status"):
-            status["teams"] = self.orchestrator.get_teams_status()
+        if hasattr(self.orchestrator, "get_teams_status_async"):
+            status["teams"] = await self.orchestrator.get_teams_status_async()
         await self._send_response(request_id, True, status)
 
     async def _send_response(

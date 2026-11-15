@@ -99,6 +99,8 @@ Environment variable interpolation supports `${VAR}` and `${VAR:-default}`.
 
 ## External Company Workflow
 
+Claude Code sessions can submit and track jobs directly through the CLI or HTTP API, without the message gateway. See [Claude session access](./examples/claude-session.md) for authenticated setup, JSON output, company/workspace scope and reconnecting to existing jobs.
+
 Companest can act as a shared control plane for external company repos that register themselves by manifest.
 
 - Registration guide: [`examples/company-onboarding.md`](./examples/company-onboarding.md)

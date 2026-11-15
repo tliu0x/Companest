@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 
+from ..utils import run_sync
 from ..config import CompanestConfig
 from .event_store import EventStore
 from ..jobs.jobs import JobManager, JobStatus
@@ -516,7 +517,7 @@ class CompanestAPIServer:
                     "pending_approvals_count": 0,
                     "note": "CostGate not initialized",
                 }
-            return self.orchestrator.cost_gate.get_spending_summary()
+            return await run_sync(self.orchestrator.cost_gate.get_spending_summary)
 
         @app.get("/api/finance/report")
         async def finance_report(hours: float = 24):
@@ -535,7 +536,7 @@ class CompanestAPIServer:
                     "pending_approvals_count": 0,
                     "note": "CostGate not initialized",
                 }
-            return self.orchestrator.cost_gate.get_daily_report(hours=hours)
+            return await run_sync(self.orchestrator.cost_gate.get_daily_report, hours=hours)
 
         @app.post("/api/finance/circuit-breaker/reset")
         async def reset_circuit_breaker():
@@ -624,7 +625,7 @@ class CompanestAPIServer:
         async def v2_status():
             if not self.orchestrator:
                 return {"note": "Orchestrator not available"}
-            return self.orchestrator.get_teams_status()
+            return await self.orchestrator.get_teams_status_async()
 
         class CompanyCreateRequest(BaseModel):
             id: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -771,8 +772,8 @@ class CompanestAPIServer:
                 data["finance"] = {
                     "hourly_budget_usd": config.preferences.budget_hourly_usd,
                     "monthly_budget_usd": config.preferences.budget_monthly_usd,
-                    "last_hour_spend": round(cost_gate._get_company_window_spending(company_id, 1.0), 4),
-                    "last_24h_spend": round(cost_gate._get_company_window_spending(company_id, 24.0), 4),
+                    "last_hour_spend": round(await run_sync(cost_gate._get_company_window_spending, company_id, 1.0), 4),
+                    "last_24h_spend": round(await run_sync(cost_gate._get_company_window_spending, company_id, 24.0), 4),
                 }
             return data
 

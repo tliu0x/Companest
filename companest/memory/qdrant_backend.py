@@ -1,6 +1,8 @@
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
+from ..utils import synchronized
 from .backend import MemoryBackend, FileBackend
 from .manager import MemoryManager
 
@@ -23,6 +25,7 @@ class QdrantBackend(MemoryBackend):
         prefer_grpc: bool = False,
         in_memory: bool = False,
     ) -> None:
+        self._io_lock = threading.RLock()
         self._file_backend = FileBackend(manager)
         self._qdrant_url = qdrant_url
         self._qdrant_api_key = qdrant_api_key
@@ -33,6 +36,7 @@ class QdrantBackend(MemoryBackend):
         self._embedder = None
         self._initialized_collections: set = set()
 
+    @synchronized
     def _get_client(self):
         if self._client is None:
             try:
@@ -52,6 +56,7 @@ class QdrantBackend(MemoryBackend):
                 )
         return self._client
 
+    @synchronized
     def _get_embedder(self):
         if self._embedder is None:
             try:
@@ -64,13 +69,16 @@ class QdrantBackend(MemoryBackend):
             self._embedder = TextEmbedding(model_name=self._embedding_model)
         return self._embedder
 
+    @synchronized
     def _embed(self, texts: List[str]) -> List[List[float]]:
         return list(self._get_embedder().embed(texts))
 
+    @synchronized
     def _collection_name(self, team_id: str) -> str:
         safe_id = team_id.replace("/", "_").replace("\\", "_")
         return f"{_COLLECTION_PREFIX}{safe_id}"
 
+    @synchronized
     def _ensure_collection(self, team_id: str) -> None:
         name = self._collection_name(team_id)
         if name in self._initialized_collections:
@@ -91,6 +99,7 @@ class QdrantBackend(MemoryBackend):
 
         self._initialized_collections.add(name)
 
+    @synchronized
     def _entry_to_text(self, key: str, meta: dict) -> str:
         """Build a searchable text representation of a memory entry."""
         parts = [key]
@@ -100,6 +109,7 @@ class QdrantBackend(MemoryBackend):
             parts.append(" ".join(meta["tags"]))
         return " | ".join(parts)
 
+    @synchronized
     def _upsert_entry(self, team_id: str, key: str) -> None:
         self._ensure_collection(team_id)
         client = self._get_client()
@@ -123,6 +133,7 @@ class QdrantBackend(MemoryBackend):
             ],
         )
 
+    @synchronized
     def _delete_entry(self, team_id: str, key: str) -> None:
         name = self._collection_name(team_id)
         if name not in self._initialized_collections:
@@ -142,61 +153,76 @@ class QdrantBackend(MemoryBackend):
         return str(uuid.UUID(hashlib.md5(key.encode()).hexdigest()))
 
     @property
+    @synchronized
     def supports_semantic_search(self) -> bool:
         return True
 
+    @synchronized
     def _index_safe(self, team_id: str, key: str, verb: str) -> None:
         try:
             self._upsert_entry(team_id, key)
         except Exception as e:
             logger.warning("Failed to %s %s/%s in Qdrant: %s", verb, team_id, key, e)
 
+    @synchronized
     def _unindex_safe(self, team_id: str, key: str, verb: str) -> None:
         try:
             self._delete_entry(team_id, key)
         except Exception as e:
             logger.warning("Failed to %s %s/%s from Qdrant: %s", verb, team_id, key, e)
 
+    @synchronized
     def read(self, team_id: str, key: str) -> Any:
         return self._file_backend.read(team_id, key)
 
+    @synchronized
     def write(self, team_id: str, key: str, data: Any) -> None:
         self._file_backend.write(team_id, key, data)
         self._index_safe(team_id, key, "index")
 
+    @synchronized
     def append(self, team_id: str, key: str, entry: Any) -> None:
         self._file_backend.append(team_id, key, entry)
         self._index_safe(team_id, key, "index")
 
+    @synchronized
     def list_keys(self, team_id: str) -> List[str]:
         return self._file_backend.list_keys(team_id)
 
+    @synchronized
     def delete(self, team_id: str, key: str) -> None:
         self._file_backend.delete(team_id, key)
         self._unindex_safe(team_id, key, "remove")
 
+    @synchronized
     def get_index(self, team_id: str) -> Dict[str, dict]:
         return self._file_backend.get_index(team_id)
 
+    @synchronized
     def update_meta(self, team_id: str, key: str, **fields) -> None:
         self._file_backend.update_meta(team_id, key, **fields)
         self._index_safe(team_id, key, "re-index")
 
+    @synchronized
     def archive(self, team_id: str, key: str) -> None:
         self._file_backend.archive(team_id, key)
         self._unindex_safe(team_id, key, "remove archived")
 
+    @synchronized
     def search_archive(
         self, team_id: str, query: str, limit: int = 10,
     ) -> List[dict]:
         return self._file_backend.search_archive(team_id, query, limit)
 
+    @synchronized
     def read_overview(self, team_id: str) -> str:
         return self._file_backend.read_overview(team_id)
 
+    @synchronized
     def get_all_stats(self) -> Dict[str, Any]:
         return self._file_backend.get_all_stats()
 
+    @synchronized
     def semantic_search(
         self,
         team_id: str,

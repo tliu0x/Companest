@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from ..utils import run_sync
 from . import ExecutionMode, ProgressCallback, _with_memory_task_hint
 from ..exceptions import TeamError
 
@@ -106,7 +107,7 @@ class CollaborativeMode(ExecutionMode):
                     )
 
         try:
-            team.memory.append_team_memory(
+            await run_sync(team.memory.append_team_memory,
                 team.id, "pipeline-log.json",
                 {"stages": len(pipeline), "results": [
                     {"pi": r["pi_id"], "status": r["status"]}

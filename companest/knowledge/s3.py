@@ -2,7 +2,10 @@
 
 import json
 import logging
+import threading
 from typing import Any, Dict, Optional
+
+from ..utils import synchronized
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,9 @@ class S3JsonStore:
         self.region = region
         self.endpoint_url = endpoint_url or None
         self._s3 = None
+        self._io_lock = threading.RLock()
 
+    @synchronized
     def _get_s3(self):
         if self._s3 is None:
             try:

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from ..utils import run_sync
 
 
 class OutputSink(ABC):
@@ -15,4 +16,4 @@ class MemorySink(OutputSink):
 
     async def emit(self, company_id: str, cycle_result: dict) -> None:
         team_id = f"company-{company_id}"
-        self._memory.append_team_memory(team_id, "cycle-results.json", cycle_result)
+        await run_sync(self._memory.append_team_memory, team_id, "cycle-results.json", cycle_result)

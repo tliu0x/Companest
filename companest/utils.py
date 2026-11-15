@@ -1,6 +1,42 @@
+import asyncio
 import json
 import re
+from functools import wraps
 from typing import Any, Dict, Iterator, List, Optional
+
+
+async def run_sync(func, /, *args, **kwargs):
+    """Offload blocking work; finish its cleanup before propagating cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            task.exception()
+        raise
+
+
+def offload(func):
+    @wraps(func)
+    async def wrapped(*args, **kwargs):
+        return await run_sync(func, *args, **kwargs)
+    return wrapped
+
+
+def synchronized(func):
+    """Serialize a synchronous object's I/O and cache mutations with its RLock."""
+    @wraps(func)
+    def wrapped(self, *args, **kwargs):
+        with self._io_lock:
+            return func(self, *args, **kwargs)
+    return wrapped
 
 
 def _json_candidates(text: str, open_char: str, close_char: str) -> Iterator[str]:

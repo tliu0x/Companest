@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable, Dict
 
+from ..utils import run_sync
 from ..events import EventBus, EventType
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ class BackgroundManager:
 
     async def send_daily_report(self) -> None:
         try:
-            report = self._cost_gate.get_daily_report(hours=24)
+            report = await run_sync(self._cost_gate.get_daily_report, hours=24)
             await self._cost_gate.notifier.notify_daily_report(report)
             logger.info(f"[Background] Daily report sent: ${report.get('window_spend', 0):.2f}")
         except Exception as e:

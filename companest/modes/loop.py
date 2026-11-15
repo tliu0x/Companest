@@ -2,9 +2,9 @@ import hashlib
 import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from ..utils import run_sync, extract_json_array
 from . import ExecutionMode, ProgressCallback, _lead_pi, _with_memory_task_hint
 from ..exceptions import PiError, TeamError
-from ..utils import extract_json_array
 
 if TYPE_CHECKING:
     from ..agents.team import AgentTeam
@@ -80,7 +80,7 @@ class LoopMode(ExecutionMode):
                 logger.warning(f"[Team:{team.id}] Subtask {i+1} failed: {e}")
                 entry = {"subtask": subtask, "status": "failed", "error": str(e)}
             results.append(entry)
-            team.memory.append_team_memory(team.id, progress_key, entry)
+            await run_sync(team.memory.append_team_memory, team.id, progress_key, entry)
 
         successful = [result for result in results if result["status"] == "done"]
         if not successful:
@@ -104,7 +104,7 @@ class LoopMode(ExecutionMode):
         )
 
         try:
-            team.memory.delete_team_memory(team.id, progress_key)
+            await run_sync(team.memory.delete_team_memory, team.id, progress_key)
         except Exception:
             pass
 

@@ -23,7 +23,8 @@ def master_config():
 @pytest.fixture
 def mock_orchestrator():
     orch = MagicMock()
-    orch.get_status.return_value = {"status": "idle", "teams_initialized": True}
+    orch.get_status_async = AsyncMock(return_value={"status": "idle", "teams_initialized": True})
+    orch.get_teams_status_async = AsyncMock(return_value={})
 
     orch.run_team = AsyncMock(return_value="Team result")
 

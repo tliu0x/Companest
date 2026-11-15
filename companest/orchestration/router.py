@@ -4,9 +4,11 @@ import json
 import os
 import re
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+from ..utils import run_sync
 from ..events import EventType
 from ..modes import VALID_MODES
 
@@ -220,6 +222,8 @@ class SmartRouter:
         self._proxy_config = proxy_config
         self._event_bus = event_bus
         self._bindings: List[RoutingBinding] = []
+        self._prompt_lock = threading.Lock()
+        self._prompt_generation = 0
         self.invalidate_cache()
 
     def add_binding(
@@ -330,7 +334,7 @@ class SmartRouter:
     ) -> Optional[RoutingDecision]:
         from openai import AsyncOpenAI
 
-        system_prompt = self._build_system_prompt(company_id=company_id)
+        system_prompt = await run_sync(self._build_system_prompt, company_id=company_id)
         if not system_prompt:
             return None
 
@@ -385,8 +389,10 @@ class SmartRouter:
 
         hash_input = ",".join(sorted(business_teams)) + f"|{company_id or ''}"
         team_hash = hashlib.sha256(hash_input.encode()).hexdigest()
-        if self._cached_prompt and self._cached_prompt_hash == team_hash:
-            return self._cached_prompt
+        with self._prompt_lock:
+            generation = self._prompt_generation
+            if self._cached_prompt and self._cached_prompt_hash == team_hash:
+                return self._cached_prompt
 
         descriptions = []
         for team_id in sorted(business_teams):
@@ -394,11 +400,14 @@ class SmartRouter:
             descriptions.append(f"### {team_id}\n{summary}")
 
         team_block = "\n\n".join(descriptions)
-        self._cached_prompt = _ROUTING_SYSTEM_PROMPT_TEMPLATE.format(
+        prompt = _ROUTING_SYSTEM_PROMPT_TEMPLATE.format(
             team_descriptions=team_block
         )
-        self._cached_prompt_hash = team_hash
-        return self._cached_prompt
+        with self._prompt_lock:
+            if generation == self._prompt_generation:
+                self._cached_prompt = prompt
+                self._cached_prompt_hash = team_hash
+        return prompt
 
     def _parse_response(self, raw: str) -> Optional[RoutingDecision]:
         json_str = raw.strip()
@@ -524,8 +533,10 @@ class SmartRouter:
 
     def invalidate_cache(self) -> None:
         """Force rebuild of system prompt and keyword router on next route() call."""
-        self._cached_prompt = None
-        self._cached_prompt_hash = None
+        with self._prompt_lock:
+            self._prompt_generation += 1
+            self._cached_prompt = None
+            self._cached_prompt_hash = None
         available = [
             t for t in self._registry.list_teams()
             if t not in self._registry.list_meta_teams()

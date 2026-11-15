@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from ..utils import run_sync
 from .manager import MemoryManager
 from ..exceptions import CompanestError
 from ..agents.model_routing import detect_provider, resolve_model_endpoint
@@ -86,7 +87,7 @@ class Dreamer:
 
     async def run_all_dreams(self, dry_run: bool = False) -> Dict[str, Any]:
         stats: Dict[str, Any] = {}
-        for team_id in self.memory.list_teams():
+        for team_id in await run_sync(self.memory.list_teams):
             try:
                 stats[team_id] = await self.run_team_dream(team_id, dry_run=dry_run)
             except Exception as e:
@@ -94,11 +95,11 @@ class Dreamer:
                 stats[team_id] = {"error": str(e)}
 
         if not dry_run:
-            self._write_dream_log(stats, "nightly")
+            await run_sync(self._write_dream_log, stats, "nightly")
         return stats
 
     async def run_team_dream(self, team_id: str, dry_run: bool = False) -> Dict[str, Any]:
-        index = self.memory.get_memory_index(team_id)
+        index = await run_sync(self.memory.get_memory_index, team_id)
         short_entries = {
             k: v for k, v in index.items()
             if v.get("tier", "short") == "short"
@@ -130,14 +131,14 @@ class Dreamer:
                 "score_batches": (len(unscored) + self.SCORE_BATCH_SIZE - 1) // self.SCORE_BATCH_SIZE if unscored else 0,
             }
 
-        snapshot = self.memory.get_memory_index(team_id)
+        snapshot = await run_sync(self.memory.get_memory_index, team_id)
         try:
             stats: Dict[str, Any] = {"scored": 0, "compacted": 0, "gc_deleted": 0}
 
             if unscored:
                 entry_contents = {}
                 for key in unscored:
-                    content = self.memory.read_team_memory(team_id, key)
+                    content = await run_sync(self.memory.read_team_memory, team_id, key)
                     if content is not None:
                         entry_contents[key] = content
                 if entry_contents:
@@ -148,13 +149,13 @@ class Dreamer:
                     stats["scored"] = len(all_scores)
 
             # Re-read: scoring updated the index
-            index = self.memory.get_memory_index(team_id)
+            index = await run_sync(self.memory.get_memory_index, team_id)
             expired_important = {}
             for k, v in index.items():
                 if v.get("tier") != "short":
                     continue
                 if _expired(v, cutoff) and v.get("importance", 0.0) >= self.min_importance_to_keep:
-                    content = self.memory.read_team_memory(team_id, k)
+                    content = await run_sync(self.memory.read_team_memory, team_id, k)
                     if content is not None:
                         expired_important[k] = content
 
@@ -165,7 +166,7 @@ class Dreamer:
                     all_compacted.extend(compacted)
                 stats["compacted"] = len(all_compacted)
 
-            gc_deleted = self._gc_expired(team_id)
+            gc_deleted = await run_sync(self._gc_expired, team_id)
             stats["gc_deleted"] = len(gc_deleted)
             stats["gc_keys"] = gc_deleted
 
@@ -179,14 +180,14 @@ class Dreamer:
             return stats
 
         except Exception:
-            self._restore_index(team_id, snapshot)
+            await run_sync(self._restore_index, team_id, snapshot)
             raise
 
     async def run_deep_consolidation(self) -> Dict[str, Any]:
         stats: Dict[str, Any] = {}
-        for team_id in self.memory.list_teams():
+        for team_id in await run_sync(self.memory.list_teams):
             try:
-                index = self.memory.get_memory_index(team_id)
+                index = await run_sync(self.memory.get_memory_index, team_id)
                 long_entries = {
                     k: v for k, v in index.items()
                     if v.get("tier") == "long"
@@ -197,7 +198,7 @@ class Dreamer:
 
                 entry_contents = {}
                 for key in long_entries:
-                    content = self.memory.read_team_memory(team_id, key)
+                    content = await run_sync(self.memory.read_team_memory, team_id, key)
                     if content is not None:
                         entry_contents[key] = content
 
@@ -205,7 +206,7 @@ class Dreamer:
                     stats[team_id] = {"skipped": True, "reason": "not enough readable entries"}
                     continue
 
-                snapshot = self.memory.get_memory_index(team_id)
+                snapshot = await run_sync(self.memory.get_memory_index, team_id)
                 try:
                     all_compacted = []
                     for batch in _batch_dict(entry_contents, self.COMPACT_BATCH_SIZE):
@@ -217,13 +218,13 @@ class Dreamer:
                         logger.warning(f"[Dreamer] Overview generation failed for {team_id}: {e}")
                     stats[team_id] = {"merged": len(entry_contents), "into": len(all_compacted)}
                 except Exception:
-                    self._restore_index(team_id, snapshot)
+                    await run_sync(self._restore_index, team_id, snapshot)
                     raise
 
             except Exception as e:
                 logger.error(f"[Dreamer] Deep consolidation failed for {team_id}: {e}")
                 stats[team_id] = {"error": str(e)}
-        self._write_dream_log(stats, "deep")
+        await run_sync(self._write_dream_log, stats, "deep")
         return stats
 
     def _write_dream_log(self, stats: Dict[str, Any], kind: str) -> None:
@@ -274,7 +275,7 @@ class Dreamer:
             summary = str(meta.get("summary", ""))
             result[key] = importance
             try:
-                self.memory.update_entry_meta(
+                await run_sync(self.memory.update_entry_meta,
                     team_id, key,
                     importance=importance,
                     summary=summary,
@@ -306,8 +307,8 @@ class Dreamer:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         new_key = f"{'deep-' if deep else ''}consolidated-{ts}.json"
 
-        self.memory.write_team_memory(team_id, new_key, compacted["content"])
-        self.memory.update_entry_meta(
+        await run_sync(self.memory.write_team_memory, team_id, new_key, compacted["content"])
+        await run_sync(self.memory.update_entry_meta,
             team_id, new_key,
             tier="long",
             summary=compacted.get("summary", ""),
@@ -316,7 +317,7 @@ class Dreamer:
         )
 
         for key in entries:
-            self.memory.archive_team_memory(team_id, key)
+            await run_sync(self.memory.archive_team_memory, team_id, key)
 
         return [compacted]
 
@@ -340,7 +341,7 @@ class Dreamer:
         return deleted
 
     async def _generate_overview(self, team_id: str) -> Optional[str]:
-        index = self.memory.get_memory_index(team_id)
+        index = await run_sync(self.memory.get_memory_index, team_id)
         long_entries = {
             k: v for k, v in index.items()
             if v.get("tier") == "long" and v.get("summary")
@@ -356,9 +357,9 @@ class Dreamer:
         prompt = _OVERVIEW_PROMPT.format(team_id=team_id, entries_json=entries_json)
         overview = await self._call_llm(prompt)
 
-        overview_path = self.memory.team_path(team_id) / "memory" / ".overview.md"
-        self.memory._write_file(overview_path, overview)
-        self.memory._invalidate_prompt_cache_for_team(team_id)
+        overview_path = await run_sync(self.memory.team_path, team_id) / "memory" / ".overview.md"
+        await run_sync(self.memory._write_file, overview_path, overview)
+        await run_sync(self.memory._invalidate_prompt_cache_for_team, team_id)
         return overview
 
     async def _call_llm(self, prompt: str) -> str:

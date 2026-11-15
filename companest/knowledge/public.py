@@ -1,5 +1,6 @@
 """Shared public knowledge."""
 
+
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..utils import offload
 from .s3 import S3JsonStore
 
 logger = logging.getLogger(__name__)
@@ -156,7 +158,7 @@ def create_public_knowledge_router():
     index_store = IndexStore(**settings)
 
     @router.get("/search")
-    async def search_public_knowledge(
+    def search_public_knowledge(
         tags: Optional[str] = Query(default=None, description="Comma-separated tags"),
         source_type: Optional[str] = Query(default=None, description="Filter by source type"),
         fresh: bool = Query(default=False, description="Only fresh documents"),
@@ -178,7 +180,7 @@ def create_public_knowledge_router():
         }
 
     @router.get("/{doc_id}")
-    async def get_public_knowledge_doc(doc_id: str):
+    def get_public_knowledge_doc(doc_id: str):
         doc = store.get_doc(doc_id)
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
@@ -202,7 +204,8 @@ def create_public_knowledge_tool_defs(
     _store = PublicKnowledgeS3Store(**settings)
     _index_store = IndexStore(**settings)
 
-    async def search_public_knowledge(args: dict) -> str:
+    @offload
+    def search_public_knowledge(args: dict) -> str:
         tags_raw = args.get("tags", "")
         query = SearchQuery(
             tags=[t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else None,
@@ -214,7 +217,8 @@ def create_public_knowledge_tool_defs(
         results = search(query, _index_store.load_index())
         return json.dumps([r.model_dump(mode="json") for r in results], ensure_ascii=False, indent=2)
 
-    async def read_public_knowledge(args: dict) -> str:
+    @offload
+    def read_public_knowledge(args: dict) -> str:
         doc_id = args["doc_id"]
         doc = _store.get_doc(doc_id)
         if doc is None:

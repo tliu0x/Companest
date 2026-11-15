@@ -5,9 +5,12 @@ import ipaddress
 import json
 import re
 import socket
+import threading
+from functools import wraps
 from typing import List
 from urllib.parse import urlparse
 
+from ..utils import offload
 from .workspace import Workspace
 
 MAX_OUTPUT_CHARS = 30_000
@@ -44,21 +47,36 @@ def create_builtin_tool_defs(ctx) -> List:
     return defs
 
 
+_workspace_lock = threading.RLock()
+
+
+def _file_tool(func):
+    @offload
+    @wraps(func)
+    def wrapped(args):
+        with _workspace_lock:
+            return func(args)
+    return wrapped
+
+
 def _workspace_tool_defs(ToolDefinition, ws: Workspace) -> List:
-    async def read(args):
+    @_file_tool
+    def read(args):
         try:
             return _clip(ws.read_file(args["path"]))
         except (ValueError, OSError) as e:
             return f"Error: {e}"
 
-    async def write(args):
+    @_file_tool
+    def write(args):
         try:
             ws.write_file(args["path"], args["content"])
         except (ValueError, OSError) as e:
             return f"Error: {e}"
         return f"Wrote {len(args['content'])} characters to {args['path']}"
 
-    async def edit(args):
+    @_file_tool
+    def edit(args):
         try:
             text = ws.read_file(args["path"])
         except (ValueError, OSError) as e:
@@ -69,10 +87,12 @@ def _workspace_tool_defs(ToolDefinition, ws: Workspace) -> List:
         ws.write_file(args["path"], text.replace(args["old_string"], args["new_string"]))
         return f"Edited {args['path']}"
 
-    async def glob(args):
+    @_file_tool
+    def glob(args):
         return json.dumps(ws.list_files(args.get("pattern") or "**/*"))
 
-    async def grep(args):
+    @_file_tool
+    def grep(args):
         try:
             regex = re.compile(args["pattern"])
         except re.error as e:
