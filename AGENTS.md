@@ -3,7 +3,7 @@
 ## Scope
 
 - This is the root agent guide for this repository. If a deeper directory adds its own `AGENTS.md`, the deeper file takes precedence for that subtree.
-- Keep this guide aligned with `CLAUDE.md`.
+- `AGENTS.md` is the single repository guide for coding agents. Do not maintain duplicate agent-specific guides.
 
 ## Project Snapshot
 
@@ -12,6 +12,9 @@
 - Optional extras in `pyproject.toml` gate major capabilities such as server mode, scheduler support, gateway mode, Qdrant, and provider integrations.
 
 ## Start Here
+
+- Unit responsibilities, module index and state ownership: `companest/README.md`
+- Every job and schedule: `companest/jobs/README.md`
 
 - CLI entry and operator workflows: `companest/cli.py`
 - API serving: `companest/server/server.py`
@@ -54,6 +57,8 @@ python -m compileall companest tests -q
 - For team-mode behavior changes, inspect the matching file in `companest/modes/` and the paired tests in `tests/test_modes.py`, `tests/test_team_mode.py`, and nearby mode-specific tests.
 - For memory or knowledge (feeds, digests, public knowledge) changes, run the focused tests such as `tests/test_memory_*`, `tests/test_feeds.py`, `tests/test_digests.py`, and `tests/test_public_knowledge.py`.
 - Keep changes scoped. Do not mix provider, scheduler, and API refactors unless the task truly spans them.
+- Update the affected unit README when responsibilities, data boundaries, or modules change; update `companest/jobs/README.md` when adding or changing a job.
+- Reuse the canonical `team_id` across routing, tools, files and vector filters; do not rewrite it into a second tenant identifier.
 
 ## Code Conventions
 
@@ -74,3 +79,4 @@ python -m compileall companest tests -q
 - Run targeted tests for the area you touched, then `pytest tests/ -q` for broader confidence.
 - Run `pytest -m live_network -q` only when intentionally validating real external integrations.
 - Run `python -m compileall companest tests -q` after wide Python changes to catch import and syntax issues.
+- Keep migration/fault-injection simulation scripts outside the repository when requested; use existing behavioral contracts instead of adding duplicate wrapper tests. See `tests/README.md`.

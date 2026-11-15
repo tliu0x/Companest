@@ -227,3 +227,9 @@ Apache License 2.0
 Substrate actors require persistent shared memory and workspace mounts. See the
 [storage setup](deploy/substrate/storage.md) for retained CSI directories,
 workspace ownership, identity checks and process-shared memory locks.
+
+## Module documentation
+
+See the [Companest unit index](companest/README.md) for each package and module,
+and the [job catalog](companest/jobs/README.md) for every task type and schedule.
+Coding agents use the single [AGENTS.md](AGENTS.md) guide.
