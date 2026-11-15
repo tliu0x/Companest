@@ -30,6 +30,10 @@ See [SECURITY.md](./SECURITY.md) for private security reporting.
 
 ## Installation
 
+The Agent Substrate migration is in progress. See
+[`deploy/substrate/README.md`](./deploy/substrate/README.md) for the pinned local
+runtime launch. Installing it does not yet switch the Companest execution path.
+
 ### Runtime Install
 
 Use this when you want to run the API server and agent teams:
