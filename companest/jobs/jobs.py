@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 
-from .exceptions import JobError
+from ..exceptions import JobError
 
 logger = logging.getLogger(__name__)
 

@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from companest.modes.collaborative import CollaborativeMode
-from companest.team import AgentTeam, TeamConfig
-from companest.pi import PiConfig
+from companest.agents.team import AgentTeam, TeamConfig
+from companest.agents.pi import PiConfig
 from companest.memory import MemoryManager
 from companest.exceptions import TeamError
 

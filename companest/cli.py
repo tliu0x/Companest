@@ -8,7 +8,7 @@ from pathlib import Path
 from enum import Enum
 
 from . import __version__
-from .company import CompanyConfig, CompanyRegistry
+from .companies.company import CompanyConfig, CompanyRegistry
 from .config import CompanestConfig
 from .parser import MarkdownConfigParser, generate_config_template
 
@@ -129,7 +129,7 @@ ENV_KEYS = [
         "name": "Telegram Bot",
         "required": False,
         "description": "Telegram bot token for the master gateway (from @BotFather)",
-        "hint": "Needed on the master gateway machine (scripts/master_gateway.py)",
+        "hint": "Needed on the master gateway machine (python -m companest.gateway.server)",
     },
     {
         "key": "OPENAI_API_KEY",
@@ -449,10 +449,10 @@ def cmd_serve(args) -> int:
         )
     print()
 
-    from .orchestrator import CompanestOrchestrator
-    from .jobs import JobManager
-    from .server import CompanestAPIServer
-    from .master import MasterConnection
+    from .orchestration.orchestrator import CompanestOrchestrator
+    from .jobs.jobs import JobManager
+    from .server.server import CompanestAPIServer
+    from .gateway.master import MasterConnection
 
     async def _start():
         orchestrator = CompanestOrchestrator(config)

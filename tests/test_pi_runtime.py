@@ -11,8 +11,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 from companest.exceptions import PiError
 from companest.memory import MemoryManager
-from companest.pi import Pi, PiConfig
-from companest.tools import ToolContext, ToolDefinition, ToolProvider, ToolRegistry, _to_mcp_connection
+from companest.agents.pi import Pi, PiConfig
+from companest.agents.tools import ToolContext, ToolDefinition, ToolProvider, ToolRegistry, _to_mcp_connection
 
 
 class ScriptedModel(BaseChatModel):
@@ -70,7 +70,7 @@ def _make_pi(memory, tools=None, tools_deny=None, max_turns=5, registry=None):
 
 
 async def _run(pi, model, task="do the task"):
-    with patch("companest.pi.build_chat_model", return_value=model):
+    with patch("companest.agents.pi.build_chat_model", return_value=model):
         return await pi.run(task)
 
 
@@ -146,7 +146,7 @@ async def test_empty_response_raises_pi_error(memory):
 @pytest.mark.asyncio
 async def test_model_failure_is_wrapped_in_pi_error(memory):
     pi = _make_pi(memory)
-    with patch("companest.pi.build_chat_model", side_effect=RuntimeError("boom")):
+    with patch("companest.agents.pi.build_chat_model", side_effect=RuntimeError("boom")):
         with pytest.raises(PiError, match="boom"):
             await pi.run("task")
 

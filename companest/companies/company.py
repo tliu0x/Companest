@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
-from .exceptions import CompanyError
+from ..exceptions import CompanyError
 
 logger = logging.getLogger(__name__)
 

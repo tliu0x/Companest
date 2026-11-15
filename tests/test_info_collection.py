@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from companest.background import BackgroundManager
+from companest.orchestration.background import BackgroundManager
 from companest.knowledge.feeds import _normalize_news, fetch_hn, fetch_openbb, fetch_reddit, fetch_rss
 from companest.memory import MemoryManager
-from companest.tools import resolve_tool_names
+from companest.agents.tools import resolve_tool_names
 
 
 class TestFeedFetchersLive:

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .manager import MemoryManager
 from ..exceptions import CompanestError
-from ..model_routing import detect_provider, resolve_model_endpoint
+from ..agents.model_routing import detect_provider, resolve_model_endpoint
 
 if TYPE_CHECKING:
     from ..config import ProxyConfig

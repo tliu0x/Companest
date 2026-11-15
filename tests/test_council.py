@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from companest.team import AgentTeam, TeamConfig, _parse_rubric
+from companest.agents.team import AgentTeam, TeamConfig, _parse_rubric
 from companest.modes.council import _parse_judge_response, CouncilMode
-from companest.pi import PiConfig
+from companest.agents.pi import PiConfig
 from companest.memory import MemoryManager
 from companest.exceptions import PiError, TeamError
 

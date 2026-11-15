@@ -1,8 +1,8 @@
 """Verify all default model configurations converge on deepseek-chat."""
 
-from companest.company import CompanyCEOConfig
-from companest.pi import PiConfig
-from companest.team import _parse_pi_sections
+from companest.companies.company import CompanyCEOConfig
+from companest.agents.pi import PiConfig
+from companest.agents.team import _parse_pi_sections
 
 
 def test_default_models_converge():

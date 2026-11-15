@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from companest.git_tools import git_branch, git_commit, git_diff, git_log, git_push, git_status
-from companest.workspace import Workspace, WorkspaceRegistry
-from companest.tools import TOOL_PRESETS, resolve_tool_names
+from companest.agents.git_tools import git_branch, git_commit, git_diff, git_log, git_push, git_status
+from companest.agents.workspace import Workspace, WorkspaceRegistry
+from companest.agents.tools import TOOL_PRESETS, resolve_tool_names
 
 
 def test_validate_path_confines_to_workspace(tmp_path):

@@ -2,7 +2,7 @@
 
 import pytest
 
-from companest.cascade import (
+from companest.agents.cascade import (
     build_model_tiers,
     build_cascade_chain,
     get_downgrade,
@@ -14,7 +14,7 @@ from companest.cascade import (
     CascadeEngine,
     _detect_provider,
 )
-from companest.cost_gate import MODEL_PRICES
+from companest.orchestration.cost_gate import MODEL_PRICES
 from companest.memory import MemoryManager
 
 OPUS = "claude-opus-4-6"

@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    command: python scripts/master_gateway.py --port 19000
+    command: python -m companest.gateway.server --port 19000
     network_mode: host
     restart: unless-stopped
     env_file: .env

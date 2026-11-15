@@ -8,11 +8,11 @@ from typing import List
 
 import pytest
 
-from companest.company import CompanyConfig, CompanyRegistry, CompanySchedule
-from companest.component import CompanyContext, CompanyMemoryNamespace
-from companest.jobs import JobManager
+from companest.companies.company import CompanyConfig, CompanyRegistry, CompanySchedule
+from companest.companies.component import CompanyContext, CompanyMemoryNamespace
+from companest.jobs.jobs import JobManager
 from companest.memory.manager import MemoryManager
-from companest.team import TeamConfig
+from companest.agents.team import TeamConfig
 
 
 @dataclass

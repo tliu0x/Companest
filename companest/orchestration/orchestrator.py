@@ -4,26 +4,26 @@ import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
-from .config import CompanestConfig
-from .memory import MemoryManager, Dreamer, FileBackend, QdrantBackend
-from .team import TeamRegistry
+from ..config import CompanestConfig
+from ..memory import MemoryManager, Dreamer, FileBackend, QdrantBackend
+from ..agents.team import TeamRegistry
 from .router import SmartRouter, RoutingDecision, TeamAssignment
 from .cost_gate import CostGate, UserNotifier
-from .cascade import CascadeEngine
-from .modes import build_default_registry, ModeRegistry
-from .scheduler import Scheduler
-from .archiver import MemoryArchiver
-from .events import EventBus, EventType
-from .tools import ToolRegistry, load_skills
+from ..agents.cascade import CascadeEngine
+from ..modes import build_default_registry, ModeRegistry
+from ..jobs.scheduler import Scheduler
+from ..memory.archiver import MemoryArchiver
+from ..events import EventBus, EventType
+from ..agents.tools import ToolRegistry, load_skills
 from .multi_team import run_multi_team, ProgressCallback
 from .background import BackgroundManager
-from .company import CompanyRegistry, CompanyConfig
-from .component import CompanyContext, CompanyMemoryNamespace
-from .ceo_engine import build_cycle_prompt, generate_ceo_soul
-from .output import MemorySink
-from .pi import Pi, PiConfig
-from .workspace import WorkspaceRegistry
-from .exceptions import OrchestratorError, TeamError
+from ..companies.company import CompanyRegistry, CompanyConfig
+from ..companies.component import CompanyContext, CompanyMemoryNamespace
+from ..companies.ceo_engine import build_cycle_prompt, generate_ceo_soul
+from ..companies.output import MemorySink
+from ..agents.pi import Pi, PiConfig
+from ..agents.workspace import WorkspaceRegistry
+from ..exceptions import OrchestratorError, TeamError
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def _import_user_scheduler():
             ", ".join(missing),
         )
         return None
-    from .user_scheduler import UserScheduler
+    from ..jobs.user_scheduler import UserScheduler
     return UserScheduler
 
 
@@ -719,7 +719,7 @@ class CompanestOrchestrator:
                 gb = resolve_result.global_binding
                 direct = (gb.team_id, gb.mode, "Global binding match")
             elif user_context.get("binding_team_id"):
-                # Binding hint resolved by the gateway (scripts/channel.py)
+                # Binding hint resolved by the gateway (companest/gateway/channel.py)
                 direct = (
                     user_context["binding_team_id"],
                     user_context.get("binding_mode", "default"),

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
-from .exceptions import SchedulerError
+from ..exceptions import SchedulerError
 
 logger = logging.getLogger(__name__)
 

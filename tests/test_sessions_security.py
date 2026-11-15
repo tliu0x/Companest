@@ -2,7 +2,7 @@ import asyncio
 import json
 
 from companest.memory import MemoryManager
-from companest.tools import create_sessions_tool_defs
+from companest.agents.tools import create_sessions_tool_defs
 
 
 def _write_team(base, team_id: str) -> None:

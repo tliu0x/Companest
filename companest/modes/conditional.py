@@ -6,7 +6,7 @@ from ..exceptions import PiError, TeamError
 from ..utils import extract_json_object
 
 if TYPE_CHECKING:
-    from ..team import AgentTeam
+    from ..agents.team import AgentTeam
 
 logger = logging.getLogger(__name__)
 

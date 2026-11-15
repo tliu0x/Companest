@@ -4,9 +4,9 @@ import asyncio
 import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock
 
-from companest.master import MasterConnection
+from companest.gateway.master import MasterConnection
 from companest.config import MasterConfig
-from companest.router import RoutingDecision, TeamAssignment
+from companest.orchestration.router import RoutingDecision, TeamAssignment
 
 
 @pytest.fixture

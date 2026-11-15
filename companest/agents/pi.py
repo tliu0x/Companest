@@ -8,14 +8,14 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 
 ProgressCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 
-from .memory import FileBackend, MemoryManager, MemorySearchService
+from ..memory import FileBackend, MemoryManager, MemorySearchService
 from .tools import ToolRegistry, ToolContext, DEFAULT_TOOLS_DENY
 from .cascade import CascadeEngine, CascadeMetrics
-from .exceptions import PiError
+from ..exceptions import PiError
 from .model_routing import build_chat_model, detect_provider
 
 if TYPE_CHECKING:
-    from .config import ProxyConfig
+    from ..config import ProxyConfig
 
 logger = logging.getLogger(__name__)
 

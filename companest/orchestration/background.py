@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable, Dict
 
-from .events import EventBus, EventType
+from ..events import EventBus, EventType
 
 if TYPE_CHECKING:
-    from .user_scheduler import ScheduledJob
+    from ..jobs.user_scheduler import ScheduledJob
 
 logger = logging.getLogger(__name__)
 

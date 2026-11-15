@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
-from .memory import MemoryManager
+from ..memory import MemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +228,7 @@ class CostGate:
         return overflow_used
 
     def estimate_cost(self, task: str, target_model: str, target_team: str) -> CostEstimate:
-        from .cascade import get_downgrade
+        from ..agents.cascade import get_downgrade
 
         # Deliberately overestimates: ~2 chars per token, ~2000 tokens of system prompt
         task_tokens = max(len(task) // 2, 10)
@@ -292,7 +292,7 @@ class CostGate:
 
         if self._circuit_breaker.is_tripped(daily_limit):
             if self._event_bus:
-                from .events import EventType
+                from ..events import EventType
                 self._spawn(self._event_bus.emit(
                     EventType.CIRCUIT_BREAKER_TRIPPED,
                     self._circuit_breaker.get_status(),

@@ -7,8 +7,8 @@ from ..exceptions import PiError, TeamError
 from ..utils import extract_json_array
 
 if TYPE_CHECKING:
-    from ..team import AgentTeam
-    from ..pi import Pi
+    from ..agents.team import AgentTeam
+    from ..agents.pi import Pi
 
 logger = logging.getLogger(__name__)
 

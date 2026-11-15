@@ -4,10 +4,10 @@ from typing import Any, Callable, List, Optional, Protocol, TYPE_CHECKING, runti
 
 if TYPE_CHECKING:
     from .company import CompanyConfig, CompanySchedule
-    from .events import EventBus
-    from .memory import MemoryManager, EnrichmentSource
-    from .team import TeamConfig
-    from .tools import ToolRegistry
+    from ..events import EventBus
+    from ..memory import MemoryManager, EnrichmentSource
+    from ..agents.team import TeamConfig
+    from ..agents.tools import ToolRegistry
 
 
 @runtime_checkable

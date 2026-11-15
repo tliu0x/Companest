@@ -4,8 +4,8 @@ import pytest
 
 from companest.config import CompanestConfig
 from companest.memory import FileBackend, MemoryManager, MemorySearchService, QdrantBackend
-from companest.orchestrator import CompanestOrchestrator
-from companest.pi import Pi, PiConfig
+from companest.orchestration.orchestrator import CompanestOrchestrator
+from companest.agents.pi import Pi, PiConfig
 
 
 def _make_memory(tmp_path):

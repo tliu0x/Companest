@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from .memory import MemoryManager, MemoryBackend, FileBackend, MemorySearchService
+from ..memory import MemoryManager, MemoryBackend, FileBackend, MemorySearchService
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +354,7 @@ def create_scheduler_tool_defs(
 
 
 def create_feed_tool_defs() -> List[ToolDefinition]:
-    from .knowledge import feeds
+    from ..knowledge import feeds
 
     def feed_handler(fetch_name: str):
         # The fetcher is resolved at call time; only arguments it declares are passed,
@@ -803,7 +803,7 @@ def _sessions_defs(ctx: ToolContext) -> List[ToolDefinition]:
 
 
 def _public_knowledge_defs(ctx: ToolContext) -> List[ToolDefinition]:
-    from .knowledge.public import create_public_knowledge_tool_defs
+    from ..knowledge.public import create_public_knowledge_tool_defs
     return create_public_knowledge_tool_defs()
 
 

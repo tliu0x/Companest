@@ -4,8 +4,8 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 from ..exceptions import TeamError
 
 if TYPE_CHECKING:
-    from ..pi import Pi
-    from ..team import AgentTeam
+    from ..agents.pi import Pi
+    from ..agents.team import AgentTeam
 
 ProgressCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 

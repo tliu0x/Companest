@@ -139,7 +139,7 @@ def _workspace_tool_defs(ToolDefinition, ws: Workspace) -> List:
 
 
 def _web_tool_defs(ToolDefinition) -> List:
-    from .knowledge import feeds
+    from ..knowledge import feeds
 
     async def web_search(args):
         items = await feeds.brave_search(query=args["query"], count=int(args.get("count", 10)))

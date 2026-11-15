@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .pi import Pi, PiConfig
-from .memory import MemoryManager
+from ..memory import MemoryManager
 from .cascade import CascadeEngine
-from .exceptions import TeamError
+from ..exceptions import TeamError
 
 if TYPE_CHECKING:
-    from .config import ProxyConfig
+    from ..config import ProxyConfig
 
 logger = logging.getLogger(__name__)
 

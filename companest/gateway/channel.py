@@ -6,7 +6,7 @@ message-handling logic (progress updates, response formatting, error
 handling) is written once and reused across Telegram, Discord, Slack, etc.
 
 Adding a new platform = implement ChannelAdapter (~100 lines) + wire it
-into master_gateway.py.  Zero changes to Companest core.
+into companest.gateway.server.  Zero changes to Companest core.
 """
 
 import asyncio

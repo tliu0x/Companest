@@ -7,14 +7,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from .events import EventType
-from .modes import VALID_MODES
+from ..events import EventType
+from ..modes import VALID_MODES
 
 if TYPE_CHECKING:
-    from .team import TeamRegistry
-    from .memory import MemoryManager
-    from .config import ProxyConfig
-    from .events import EventBus
+    from ..agents.team import TeamRegistry
+    from ..memory import MemoryManager
+    from ..config import ProxyConfig
+    from ..events import EventBus
 
 logger = logging.getLogger(__name__)
 

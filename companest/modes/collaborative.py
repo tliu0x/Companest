@@ -5,7 +5,7 @@ from . import ExecutionMode, ProgressCallback, _with_memory_task_hint
 from ..exceptions import TeamError
 
 if TYPE_CHECKING:
-    from ..team import AgentTeam
+    from ..agents.team import AgentTeam
 
 logger = logging.getLogger(__name__)
 

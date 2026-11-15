@@ -234,7 +234,7 @@ def create_public_knowledge_tool_defs(
     endpoint_url: str = "",
 ) -> List:
     """Create the search/read ToolDefinitions. Arguments default to the PK_S3_* environment."""
-    from ..tools import ToolDefinition
+    from ..agents.tools import ToolDefinition
 
     settings = _s3_settings_from_env()
     if bucket:

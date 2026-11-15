@@ -26,8 +26,8 @@ import time
 from typing import Any, Callable, Coroutine, Dict, Optional
 
 from .client import GatewayClient
-from .config import MasterConfig
-from .exceptions import MasterError, OrchestratorError
+from ..config import MasterConfig
+from ..exceptions import MasterError, OrchestratorError
 
 logger = logging.getLogger(__name__)
 

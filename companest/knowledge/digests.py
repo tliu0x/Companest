@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type
 
 from pydantic import BaseModel, Field
 
-from ..company import _SAFE_ID_RE
+from ..companies.company import _SAFE_ID_RE
 from .s3 import S3JsonStore
 
 logger = logging.getLogger(__name__)

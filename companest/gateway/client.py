@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 
-from .exceptions import (
+from ..exceptions import (
     GatewayError,
     GatewayConnectionError,
     GatewayAuthError,

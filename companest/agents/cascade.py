@@ -4,10 +4,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from .cost_gate import MODEL_PRICES
+from ..orchestration.cost_gate import MODEL_PRICES
 
 if TYPE_CHECKING:
-    from .memory import MemoryManager
+    from ..memory import MemoryManager
 
 
 def detect_language(text: str) -> str:

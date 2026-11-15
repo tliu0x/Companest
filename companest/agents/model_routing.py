@@ -4,10 +4,10 @@ import os
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
-from .exceptions import ConfigurationError
+from ..exceptions import ConfigurationError
 
 if TYPE_CHECKING:
-    from .config import ProxyConfig
+    from ..config import ProxyConfig
 
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_OPENAI = "openai"

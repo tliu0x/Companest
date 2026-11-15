@@ -23,9 +23,9 @@ def ensure_event_loop():
 def api_runtime(tmp_path):
     """Factory for (config, orchestrator, server) on a minimal one-team runtime in tmp_path."""
     from companest.config import CompanestConfig
-    from companest.jobs import JobManager
-    from companest.orchestrator import CompanestOrchestrator
-    from companest.server import CompanestAPIServer
+    from companest.jobs.jobs import JobManager
+    from companest.orchestration.orchestrator import CompanestOrchestrator
+    from companest.server.server import CompanestAPIServer
 
     def build(auth_token=None):
         general_pi = tmp_path / "teams" / "general" / "pis" / "assistant"

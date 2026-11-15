@@ -18,10 +18,10 @@ Requirements (install on the gateway machine):
 
 Usage:
     export TELEGRAM_BOT_TOKEN="your-token"
-    python master_gateway.py --port 19000
+    python -m companest.gateway.server --port 19000
 
     # With static routing bindings:
-    python master_gateway.py --port 19000 --bindings bindings.json
+    python -m companest.gateway.server --port 19000 --bindings bindings.json
 
     # Then on the Companest machine:
     python -m companest serve -c .companest/config.test.md
@@ -36,7 +36,7 @@ import logging
 import argparse
 from typing import Any, Callable, Coroutine, Dict, Optional
 
-from channel import (
+from .channel import (
     TelegramAdapter,
     Binding,
     match_binding,

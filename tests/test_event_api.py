@@ -4,8 +4,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from companest.config import CompanestConfig
-from companest.jobs import JobManager
-from companest.server import CompanestAPIServer
+from companest.jobs.jobs import JobManager
+from companest.server.server import CompanestAPIServer
 
 
 MANIFEST = json.loads(
@@ -115,7 +115,7 @@ def test_events_endpoint_gracefully_degrades_when_store_unavailable(tmp_path, mo
     async def fake_start(self):
         return False
 
-    monkeypatch.setattr("companest.server.EventStore.start", fake_start)
+    monkeypatch.setattr("companest.server.server.EventStore.start", fake_start)
 
     config = CompanestConfig(debug=True)
     server = CompanestAPIServer(config, JobManager(data_dir=tmp_path), orchestrator=None)

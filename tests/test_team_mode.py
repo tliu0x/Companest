@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from companest.config import CompanestConfig
-from companest.orchestrator import CompanestOrchestrator
-from companest.team import TeamConfig
+from companest.orchestration.orchestrator import CompanestOrchestrator
+from companest.agents.team import TeamConfig
 
 
 def test_team_config_parses_mode(tmp_path):

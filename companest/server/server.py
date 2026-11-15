@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 
-from .config import CompanestConfig
+from ..config import CompanestConfig
 from .event_store import EventStore
-from .jobs import JobManager, JobStatus
-from .orchestrator import CompanestOrchestrator
-from .company import _SAFE_ID_RE, CompanyBinding, CompanyConfig, GlobalBinding
-from .exceptions import JobError, OrchestratorError
+from ..jobs.jobs import JobManager, JobStatus
+from ..orchestration.orchestrator import CompanestOrchestrator
+from ..companies.company import _SAFE_ID_RE, CompanyBinding, CompanyConfig, GlobalBinding
+from ..exceptions import JobError, OrchestratorError
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class CompanestAPIServer:
             if hasattr(self.orchestrator, "scheduler"):
                 await self.orchestrator.scheduler.stop()
                 logger.info("Scheduler stopped via lifespan")
-            from .knowledge.feeds import close_client as close_feed_client
+            from ..knowledge.feeds import close_client as close_feed_client
             await close_feed_client()
             if self._event_store:
                 await self._event_store.close()
@@ -388,7 +388,7 @@ class CompanestAPIServer:
                     logger.error(f"n8n webhook failed: {e}")
                     raise HTTPException(status_code=500, detail="Internal server error")
 
-        from .modes import VALID_MODES as _VALID_MODES
+        from ..modes import VALID_MODES as _VALID_MODES
         _modes_pattern = r"^(" + "|".join(_VALID_MODES) + r")$"
 
         class TeamRunRequest(BaseModel):
@@ -858,11 +858,11 @@ class CompanestAPIServer:
             return {"status": "saved", "count": len(parsed)}
 
         if os.environ.get("ENABLE_PUBLIC_KNOWLEDGE_V1", "").lower() in ("1", "true"):
-            from .knowledge.public import create_public_knowledge_router
+            from ..knowledge.public import create_public_knowledge_router
             app.include_router(create_public_knowledge_router())
             logger.info("Public Knowledge API enabled")
 
-            from .knowledge.digests import DigestS3Store, create_digest_router
+            from ..knowledge.digests import DigestS3Store, create_digest_router
             app.include_router(create_digest_router(DigestS3Store(
                 bucket=os.environ.get("DIGEST_S3_BUCKET", ""),
                 prefix=os.environ.get("DIGEST_S3_PREFIX", "companest-digests/"),

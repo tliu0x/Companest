@@ -5,9 +5,9 @@ from .config import (
     APIConfig,
     MasterConfig,
 )
-from .orchestrator import CompanestOrchestrator
+from .orchestration.orchestrator import CompanestOrchestrator
 from .events import EventBus, Event, EventType
-from .tools import ToolRegistry, ToolProvider, ToolContext, DEFAULT_TOOLS_DENY, SESSIONS_TOOL_NAMES
+from .agents.tools import ToolRegistry, ToolProvider, ToolContext, DEFAULT_TOOLS_DENY, SESSIONS_TOOL_NAMES
 from .parser import (
     MarkdownConfigParser,
     ParseResult,
@@ -17,18 +17,18 @@ from .memory import (
     MemoryManager, EnrichmentSource, Dreamer, DreamerError,
     MemoryBackend, FileBackend, QdrantBackend, MemorySearchService,
 )
-from .pi import Pi, PiConfig
-from .team import AgentTeam, TeamConfig, TeamRegistry
-from .cost_gate import CostGate, CostEstimate, CostDecision, UserNotifier
-from .cascade import (
+from .agents.pi import Pi, PiConfig
+from .agents.team import AgentTeam, TeamConfig, TeamRegistry
+from .orchestration.cost_gate import CostGate, CostEstimate, CostDecision, UserNotifier
+from .agents.cascade import (
     CascadeEngine,
     CascadeStrategy,
     CascadeMetrics,
     AdequacyChecker,
     ModelTier,
 )
-from .scheduler import Scheduler
-from .router import TeamRouter, SmartRouter, RoutingDecision, TeamAssignment, RoutingBinding
+from .jobs.scheduler import Scheduler
+from .orchestration.router import TeamRouter, SmartRouter, RoutingDecision, TeamAssignment, RoutingBinding
 from .modes import (
     ExecutionMode,
     ModeRegistry,
@@ -39,10 +39,10 @@ from .modes import (
     CouncilMode,
     CollaborativeMode,
 )
-from .company import CompanyConfig, CompanyRegistry, CompanyError, GlobalBinding, ResolveResult
-from .component import CompanyComponent, CompanyContext, CompanyMemoryNamespace
-from .output import OutputSink, MemorySink
-from .ceo_engine import build_cycle_prompt, generate_ceo_soul
+from .companies.company import CompanyConfig, CompanyRegistry, CompanyError, GlobalBinding, ResolveResult
+from .companies.component import CompanyComponent, CompanyContext, CompanyMemoryNamespace
+from .companies.output import OutputSink, MemorySink
+from .companies.ceo_engine import build_cycle_prompt, generate_ceo_soul
 from .exceptions import (
     CompanestError,
     ConfigurationError,
@@ -60,34 +60,34 @@ from .exceptions import (
 
 
 try:
-    from .client import GatewayClient
+    from .gateway.client import GatewayClient
 except ImportError:
     GatewayClient = None
 
 try:
-    from .jobs import JobManager, Job, JobStatus
+    from .jobs.jobs import JobManager, Job, JobStatus
 except ImportError:
     JobManager = None
     Job = None
     JobStatus = None
 
 try:
-    from .server import CompanestAPIServer
+    from .server.server import CompanestAPIServer
 except ImportError:
     CompanestAPIServer = None
 
 try:
-    from .master import MasterConnection
+    from .gateway.master import MasterConnection
 except ImportError:
     MasterConnection = None
 
 try:
-    from .archiver import MemoryArchiver
+    from .memory.archiver import MemoryArchiver
 except ImportError:
     MemoryArchiver = None
 
 try:
-    from .user_scheduler import UserScheduler
+    from .jobs.user_scheduler import UserScheduler
 except ImportError:
     UserScheduler = None
 

@@ -4,8 +4,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from companest.config import CompanestConfig
-from companest.jobs import JobManager
-from companest.server import CompanestAPIServer
+from companest.jobs.jobs import JobManager
+from companest.server.server import CompanestAPIServer
 
 
 MANIFEST = json.loads(

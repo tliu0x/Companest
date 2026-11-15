@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from . import ExecutionMode, ProgressCallback, _lead_pi
 
 if TYPE_CHECKING:
-    from ..team import AgentTeam
+    from ..agents.team import AgentTeam
 
 
 class DefaultMode(ExecutionMode):

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from companest.config import CompanestConfig
-from companest.model_routing import (
+from companest.agents.model_routing import (
     build_chat_model,
     detect_provider,
     resolve_model_endpoint,

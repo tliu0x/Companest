@@ -26,8 +26,8 @@ def _make_team(base, team_id, pi, *, role="general", extra="", pi_md="",
 
 
 def _smart_router(base, teams):
-    from companest.team import TeamRegistry
-    from companest.router import SmartRouter
+    from companest.agents.team import TeamRegistry
+    from companest.orchestration.router import SmartRouter
 
     for team_id, pi in teams:
         _make_team(
@@ -173,7 +173,7 @@ class TestTeamRegistry:
 
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
-        from companest.team import TeamRegistry
+        from companest.agents.team import TeamRegistry
 
         self.base = tmp_path
         _make_team(
@@ -191,7 +191,7 @@ class TestTeamRegistry:
         self.reg.scan_configs()
 
     def test_team_config_from_markdown(self):
-        from companest.team import TeamConfig
+        from companest.agents.team import TeamConfig
         config = TeamConfig.from_markdown(self.base / "teams" / "stock" / "team.md")
         assert config.id == "stock"
         assert config.role == "general"
@@ -203,7 +203,7 @@ class TestTeamRegistry:
 
     def test_team_config_discovers_pis_from_directories(self):
         """team.md without Pi sections falls back to the pis/ subdirectories."""
-        from companest.team import TeamConfig
+        from companest.agents.team import TeamConfig
         _make_team(self.base, "research", "scout", role="research", extra="- always_on: true\n")
         config = TeamConfig.from_markdown(self.base / "teams" / "research" / "team.md")
         assert config.id == "research"
@@ -226,7 +226,7 @@ class TestTeamRegistry:
         assert "stock" in self.reg.list_active()
 
     def test_registry_evict_idle(self):
-        from companest.team import TeamRegistry
+        from companest.agents.team import TeamRegistry
         reg = TeamRegistry(str(self.base / "teams"), self.mm, idle_timeout=0)
         reg.scan_configs()
 
@@ -250,8 +250,8 @@ class TestTeamRegistry:
         assert "finance" in status["meta"]
 
     def test_register_on_demand_team(self):
-        from companest.team import TeamConfig
-        from companest.pi import PiConfig
+        from companest.agents.team import TeamConfig
+        from companest.agents.pi import PiConfig
 
         self.reg.register(TeamConfig(
             id="kalshi",
@@ -264,8 +264,8 @@ class TestTeamRegistry:
         assert self.reg.get_or_create("kalshi").id == "kalshi"
 
     def test_register_always_on_team(self):
-        from companest.team import TeamConfig
-        from companest.pi import PiConfig
+        from companest.agents.team import TeamConfig
+        from companest.agents.pi import PiConfig
 
         self.reg.register(TeamConfig(
             id="monitor",
@@ -278,7 +278,7 @@ class TestTeamRegistry:
         assert "monitor" in self.reg.list_active()
 
     def test_register_disabled_team_skipped(self):
-        from companest.team import TeamConfig
+        from companest.agents.team import TeamConfig
         self.reg.register(TeamConfig(id="disabled", enabled=False))
         assert "disabled" not in self.reg.list_teams()
 
@@ -288,7 +288,7 @@ class TestCostGate:
 
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
-        from companest.cost_gate import CostGate
+        from companest.orchestration.cost_gate import CostGate
 
         (tmp_path / "teams" / "finance" / "memory").mkdir(parents=True)
         self.mm = MemoryManager(str(tmp_path))
@@ -298,7 +298,7 @@ class TestCostGate:
         self.mm.write_team_memory("finance", "budget.json", budget)
 
     def _notifying_gate(self):
-        from companest.cost_gate import CostGate, UserNotifier
+        from companest.orchestration.cost_gate import CostGate, UserNotifier
         return CostGate(self.mm, notifier=UserNotifier())
 
     def test_cost_estimate(self):
@@ -351,8 +351,8 @@ class TestCostGate:
         assert report["window_spend"] > 0
 
     def test_model_prices_complete(self):
-        from companest.cost_gate import MODEL_PRICES
-        from companest.cascade import get_downgrade
+        from companest.orchestration.cost_gate import MODEL_PRICES
+        from companest.agents.cascade import get_downgrade
         for model_id in MODEL_PRICES:
             downgrade = get_downgrade(model_id)
             if downgrade is not None:
@@ -460,7 +460,7 @@ class TestCircuitBreaker:
 
     @staticmethod
     def _breaker(**kwargs):
-        from companest.cost_gate import CircuitBreaker
+        from companest.orchestration.cost_gate import CircuitBreaker
         return CircuitBreaker(window_minutes=5, threshold_pct=30, **kwargs)
 
     def test_not_tripped_under_threshold(self):
@@ -513,7 +513,7 @@ class TestRouter:
     """Keyword-based team routing."""
 
     def setup_method(self):
-        from companest.router import TeamRouter
+        from companest.orchestration.router import TeamRouter
         self.router = TeamRouter(
             available_teams=["stock", "bizdev", "engineering", "philosophy", "science", "finance"]
         )
@@ -532,7 +532,7 @@ class TestRouter:
         assert self.router.route(task) == team
 
     def test_no_default_returns_none(self):
-        from companest.router import TeamRouter
+        from companest.orchestration.router import TeamRouter
         router = TeamRouter(available_teams=["stock"], default_team=None)
         assert router.route("hello world") is None
 
@@ -672,7 +672,7 @@ class TestScheduler:
 
     @pytest.fixture(autouse=True)
     def _setup(self):
-        from companest.scheduler import Scheduler
+        from companest.jobs.scheduler import Scheduler
 
         self.calls = 0
 
@@ -722,15 +722,15 @@ class TestTools:
         }),
     ])
     def test_resolve_contains(self, config, expected):
-        from companest.tools import resolve_tool_names
+        from companest.agents.tools import resolve_tool_names
         assert expected <= set(resolve_tool_names(config))
 
     def test_resolve_builtin_keeps_order(self):
-        from companest.tools import resolve_tool_names
+        from companest.agents.tools import resolve_tool_names
         assert resolve_tool_names(["Read", "Write", "Bash"]) == ["Read", "Write", "Bash"]
 
     def test_deduplication(self):
-        from companest.tools import resolve_tool_names
+        from companest.agents.tools import resolve_tool_names
         assert resolve_tool_names(["Read", "Read", "read"]).count("Read") == 1
 
     @pytest.mark.parametrize("deny,allowed", [
@@ -738,20 +738,20 @@ class TestTools:
         ({"Bash", "Write"}, ["Read"]),
     ])
     def test_resolve_with_deny_filter(self, deny, allowed):
-        from companest.tools import ToolRegistry
+        from companest.agents.tools import ToolRegistry
         result = ToolRegistry().resolve_tool_names(["Read", "Write", "Bash"], tools_deny=deny)
         for name in ("Read", "Write", "Bash"):
             assert (name in result) == (name in allowed)
 
     def test_default_deny_list(self):
         """Default PiConfig.tools_deny=[] falls back to DEFAULT_TOOLS_DENY, which bans Bash."""
-        from companest.pi import PiConfig
-        from companest.tools import DEFAULT_TOOLS_DENY
+        from companest.agents.pi import PiConfig
+        from companest.agents.tools import DEFAULT_TOOLS_DENY
         assert PiConfig(id="test").tools_deny == []
         assert "Bash" in DEFAULT_TOOLS_DENY
 
     def test_deny_none_allows_all(self, tmp_path):
-        from companest.pi import Pi, PiConfig
+        from companest.agents.pi import Pi, PiConfig
 
         (tmp_path / "teams" / "test" / "memory").mkdir(parents=True)
         config = PiConfig(id="pi1", tools=["Read", "Bash"], tools_deny=["none"])
@@ -763,7 +763,7 @@ class TestTools:
         ("", []),
     ])
     def test_parse_tools_deny_from_markdown(self, deny_line, expected):
-        from companest.team import _parse_pi_sections
+        from companest.agents.team import _parse_pi_sections
         text = (
             "# Team: test\n"
             "#### Pi: agent1\n"
@@ -792,8 +792,8 @@ class TestServerEndpoints:
         pytest.importorskip("fastapi")
 
         from companest.config import CompanestConfig
-        from companest.jobs import JobManager
-        from companest.server import CompanestAPIServer
+        from companest.jobs.jobs import JobManager
+        from companest.server.server import CompanestAPIServer
 
         jm = JobManager.__new__(JobManager)
         jm.orchestrator = None
@@ -828,8 +828,8 @@ class TestCompanyScoping:
     """Company-scoped routing helpers."""
 
     def test_can_access_team_respects_explicit_shared_team_whitelist(self):
-        from companest.company import CompanyConfig
-        from companest.orchestrator import CompanestOrchestrator
+        from companest.companies.company import CompanyConfig
+        from companest.orchestration.orchestrator import CompanestOrchestrator
 
         orch = CompanestOrchestrator.__new__(CompanestOrchestrator)
         orch.company_registry = type("Registry", (), {
@@ -844,7 +844,7 @@ class TestCompanyScoping:
         assert not orch.can_access_team("beta", "finance")
 
     def test_initialized_company_ids_include_registry_only_companies(self):
-        from companest.orchestrator import CompanestOrchestrator
+        from companest.orchestration.orchestrator import CompanestOrchestrator
 
         orch = CompanestOrchestrator.__new__(CompanestOrchestrator)
         orch._ceo_pis = {}
