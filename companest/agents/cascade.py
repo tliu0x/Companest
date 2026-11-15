@@ -106,8 +106,9 @@ def build_cascade_chain(
         if t.model_id != target_model and t.cost_rank <= target.cost_rank
         and (not same_provider_only or t.provider == target.provider)
     ]
-    cheaper.sort(key=lambda t: t.cost_rank * _lang_penalty(t.model_id, lang))
-    return [t.model_id for t in cheaper] + [target_model]
+    ranks = {tier.model_id: tier.cost_rank for tier in tiers}
+    cheaper.sort(key=lambda t: ranks[t.model_id] * _lang_penalty(t.model_id, lang))
+    return [*dict.fromkeys(t.model_id for t in cheaper), target_model]
 
 
 def get_downgrade(model_id: str, tiers: Optional[List[ModelTier]] = None) -> Optional[str]:

@@ -4,7 +4,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from companest.config import CompanestConfig
+from companest.companies.company import CompanyConfig, CompanyRegistry
 from companest.jobs.jobs import JobManager
+from companest.orchestration.orchestrator import CompanestOrchestrator
 from companest.server.server import CompanestAPIServer
 
 
@@ -80,6 +82,36 @@ def test_company_registration_flow_smoke(api_runtime):
     assert orchestrator.team_registry.get_configs_by_company("prediction-market") == {}
     assert "ceo_prediction-market" not in orchestrator.scheduler.get_status()["tasks"]
     assert "company_prediction-market_market-collection" not in orchestrator.scheduler.get_status()["tasks"]
+
+
+def test_company_status_with_registry_only(tmp_path):
+    config = CompanestConfig(debug=True)
+    orchestrator = CompanestOrchestrator(config)
+    orchestrator.company_registry = CompanyRegistry(tmp_path)
+    orchestrator.company_registry.save(CompanyConfig(id="acme", name="Acme"))
+    server = CompanestAPIServer(config, JobManager(data_dir=tmp_path), orchestrator)
+
+    with TestClient(server.create_app()) as client:
+        detail = client.get("/api/companies/acme")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["summary"]["active_team_count"] == 0
+        assert client.get("/api/companies").json()["companies"][0]["active_team_count"] == 0
+        assert client.get("/api/fleet/status").json()["companies"]["acme"]["active_teams"] == 0
+
+
+def test_seeded_team_keeps_ceo_memory_namespace(api_runtime):
+    _, orchestrator, server = api_runtime()
+    manifest = {
+        "id": "seeded",
+        "name": "Seeded",
+        "ceo": {"enabled": True},
+        "memory_seed": {"teams": {"research": {"brief.json": {"status": "seeded"}}}},
+    }
+
+    with TestClient(server.create_app()) as client:
+        response = client.post("/api/companies", json=manifest)
+        assert response.status_code == 200, response.text
+        assert orchestrator._ceo_pis["seeded"].team_id == "company-seeded"
 
 
 def test_create_company_rejects_invalid_team_id_without_persisting(api_runtime):

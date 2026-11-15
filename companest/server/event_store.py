@@ -63,10 +63,13 @@ class EventStore:
         return True
 
     async def close(self) -> None:
-        await self._db.close()
-        self._db = None
+        if self._db is not None:
+            await self._db.close()
+            self._db = None
 
     async def get_latest_sequence(self) -> int:
+        if self._db is None:
+            return 0
         async with self._db.execute(
             "SELECT COALESCE(MAX(sequence_id), 0) FROM events"
         ) as cursor:
@@ -79,6 +82,8 @@ class EventStore:
         timestamp: str,
         company_id: Optional[str] = None,
     ) -> StoredEvent:
+        if self._db is None:
+            raise RuntimeError("EventStore is not started")
         cursor = await self._db.execute(
             """
             INSERT INTO events (event_type, timestamp, company_id, payload_json)
@@ -105,6 +110,8 @@ class EventStore:
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[StoredEvent], int]:
+        if self._db is None:
+            return [], 0
         where_parts: List[str] = []
         params: List[Any] = []
         for clause, value in (
@@ -143,7 +150,7 @@ class EventStore:
                 event_type=row[1],
                 timestamp=row[2],
                 company_id=row[3],
-                payload=json.loads(row[4]),
+                payload=json.loads(row[4]) if row[4] else {},
             )
             for row in rows
         ]

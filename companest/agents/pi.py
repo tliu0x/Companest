@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from ..config import ProxyConfig
 
 logger = logging.getLogger(__name__)
+_run_tool_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("run_tool_context", default=None)
 
 
 @dataclass
@@ -53,7 +55,7 @@ class Pi:
         self.cascade_engine = cascade_engine
         self.user_scheduler = None  # set by orchestrator
         self.last_usage: Optional[Dict[str, Any]] = None
-        self._user_context: Optional[Dict[str, Any]] = None
+        self._user_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("user_context", default=None)
         self._extra_tool_context: Dict[str, Any] = {}  # set by orchestrator
 
     @staticmethod
@@ -72,7 +74,7 @@ class Pi:
         on_progress: ProgressCallback = None,
         user_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        self._user_context = user_context
+        context_token = self._user_context.set(user_context)
         try:
             system = self.memory.build_system_prompt(
                 self.team_id, self.id,
@@ -137,7 +139,7 @@ class Pi:
                 return last_result
             raise last_error
         finally:
-            self._user_context = None
+            self._user_context.reset(context_token)
 
     @staticmethod
     def _resolve_memory_task_hint(
@@ -189,7 +191,7 @@ class Pi:
             skill_instructions = self.tool_registry.get_skill_instructions(self.tools_config)
             if skill_instructions:
                 system = system + "\n\n---\n\n" + skill_instructions
-        ws_context = self._extra_tool_context.get("workspace_context")
+        ws_context = self._get_extra_tool_context().get("workspace_context")
         if ws_context:
             system = system + "\n\n---\n\n" + ws_context
 
@@ -266,7 +268,7 @@ class Pi:
         return set(self.tools_deny)
 
     def _build_tool_context(self) -> ToolContext:
-        uc = self._user_context or {}
+        uc = self._user_context.get() or {}
         return ToolContext(
             memory=self.memory,
             team_id=self.team_id,
@@ -275,7 +277,10 @@ class Pi:
             user_context=uc or None,
             user_scheduler=self.user_scheduler,
             tools_deny=self._build_deny_set(),
-            extra=self._extra_tool_context,
+            extra=self._get_extra_tool_context(),
             memory_backend=self.tool_registry.memory_backend,
             company_id=uc.get("company_id"),
         )
+
+    def _get_extra_tool_context(self) -> Dict[str, Any]:
+        return self._extra_tool_context | (_run_tool_context.get() or {})

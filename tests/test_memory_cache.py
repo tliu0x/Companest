@@ -47,6 +47,8 @@ class TestFileCache:
         entry = mm._file_cache[path.resolve()]
         assert entry.content == "user context"
         assert not entry.is_json
+        assert mm._read_file(path) == "user context"
+        assert mm._file_cache[path.resolve()] is entry
 
     def test_file_cache_invalidation_on_mtime(self, mm, mem_dir):
         path = mem_dir / "user.md"

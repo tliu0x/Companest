@@ -62,12 +62,14 @@ class CompanestAPIServer:
             "enabled": config.enabled,
             "bindings_count": len(config.bindings),
             "ceo_enabled": config.ceo.enabled,
-            "active_team_count": len(
-                self.orchestrator.team_registry.get_configs_by_company(company_id)
-            ),
+            "active_team_count": len(self._company_teams(company_id)),
             "recent_job_count": snapshot["recent_job_count"],
             "last_activity_timestamp": snapshot["last_activity_timestamp"],
         }
+
+    def _company_teams(self, company_id: str) -> List[str]:
+        registry = getattr(self.orchestrator, "team_registry", None)
+        return list(registry.get_configs_by_company(company_id)) if registry is not None else []
 
     def _get_api_capabilities(self) -> Dict[str, bool]:
         return {
@@ -294,11 +296,9 @@ class CompanestAPIServer:
                 for cid in company_ids:
                     cfg = registry.get(cid)
                     companies[cid] = {
-                        "name": cfg.name,
-                        "enabled": cfg.enabled,
-                        "active_teams": len(
-                            self.orchestrator.team_registry.get_configs_by_company(cid)
-                        ),
+                        "name": cfg.name if cfg else cid,
+                        "enabled": cfg.enabled if cfg else False,
+                        "active_teams": len(self._company_teams(cid)),
                         "total_jobs": snapshot[cid]["total_jobs"],
                     }
                 status["companies"] = companies
@@ -752,12 +752,14 @@ class CompanestAPIServer:
             data = config.model_dump()
             # Redact env vars (sensitive)
             data["env"] = {k: "***" for k in data["env"]}
-            data["teams"] = list(self.orchestrator.team_registry.get_configs_by_company(company_id))
-            sched_status = self.orchestrator.scheduler.get_status()
-            data["schedule_status"] = {
-                name: info for name, info in sched_status["tasks"].items()
-                if name.startswith(f"company_{company_id}_") or name == f"ceo_{company_id}"
-            }
+            if hasattr(self.orchestrator, "team_registry"):
+                data["teams"] = self._company_teams(company_id)
+            if hasattr(self.orchestrator, "scheduler"):
+                sched_status = self.orchestrator.scheduler.get_status()
+                data["schedule_status"] = {
+                    name: info for name, info in sched_status["tasks"].items()
+                    if name.startswith(f"company_{company_id}_") or name == f"ceo_{company_id}"
+                }
             recent = await self.job_manager.list_jobs(company_id=company_id, limit=10)
             data["recent_jobs"] = [j.to_dict() for j in recent]
             data["summary"] = self._build_company_summary(
@@ -765,13 +767,14 @@ class CompanestAPIServer:
                 config,
                 self.job_manager.get_company_activity_snapshot([company_id])[company_id],
             )
-            cost_gate = self.orchestrator.cost_gate
-            data["finance"] = {
-                "hourly_budget_usd": config.preferences.budget_hourly_usd,
-                "monthly_budget_usd": config.preferences.budget_monthly_usd,
-                "last_hour_spend": round(cost_gate._get_company_window_spending(company_id, 1.0), 4),
-                "last_24h_spend": round(cost_gate._get_company_window_spending(company_id, 24.0), 4),
-            }
+            if hasattr(self.orchestrator, "cost_gate"):
+                cost_gate = self.orchestrator.cost_gate
+                data["finance"] = {
+                    "hourly_budget_usd": config.preferences.budget_hourly_usd,
+                    "monthly_budget_usd": config.preferences.budget_monthly_usd,
+                    "last_hour_spend": round(cost_gate._get_company_window_spending(company_id, 1.0), 4),
+                    "last_24h_spend": round(cost_gate._get_company_window_spending(company_id, 24.0), 4),
+                }
             return data
 
         @app.patch("/api/companies/{company_id}")

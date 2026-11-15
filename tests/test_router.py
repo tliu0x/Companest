@@ -150,6 +150,16 @@ class TestRoutingBindings:
         assert decision.mode == "cascade"
         assert "Binding match" in decision.reasoning
 
+    def test_routing_survives_audit_failure(self):
+        class EventBus:
+            async def emit(self, *args):
+                raise RuntimeError("audit unavailable")
+
+        self.router._event_bus = EventBus()
+        self.router.add_binding(r"stock", "stock")
+        decision = _run(self.router.route("Check this stock"))
+        assert decision.teams[0].team_id == "stock"
+
     def test_binding_first_match_wins(self):
         self.router.add_binding(r"stock|ticker", "stock", mode="cascade")
         self.router.add_binding(r"stock|market", "scheduler", mode="default")

@@ -129,5 +129,5 @@ class TestCoderToolResolution:
         for name in ("Read", "Write", "Edit", "Bash", "Glob", "Grep"):
             assert name in resolved
         for name in ("git_status", "git_diff", "git_commit", "git_branch", "git_log"):
-            assert f"{name}" in resolved
+            assert name in resolved
         assert "memory_read" in resolved

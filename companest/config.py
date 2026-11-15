@@ -21,10 +21,10 @@ class APIConfig(BaseModel):
 
     @model_validator(mode="after")
     def resolve_api_auth(self):
-        if not self.auth_token:
+        placeholders = ("$COMPANEST_API_TOKEN", "${COMPANEST_API_TOKEN}")
+        if not self.auth_token or self.auth_token in placeholders:
             token = os.getenv("COMPANEST_API_TOKEN")
-            if token:
-                self.auth_token = token
+            self.auth_token = token if token and token not in placeholders else None
         return self
 
 
@@ -45,10 +45,10 @@ class MasterConfig(BaseModel):
 
     @model_validator(mode="after")
     def resolve_auth_token(self):
-        if not self.auth_token:
+        placeholders = ("$COMPANEST_MASTER_TOKEN", "${COMPANEST_MASTER_TOKEN}")
+        if not self.auth_token or self.auth_token in placeholders:
             token = os.getenv("COMPANEST_MASTER_TOKEN")
-            if token:
-                self.auth_token = token
+            self.auth_token = token if token and token not in placeholders else None
         return self
 
 
@@ -171,6 +171,12 @@ class CompanestConfig(BaseModel):
         return cls(**MarkdownConfigParser().parse_file(path).config)
 
     @classmethod
+    def from_markdown_content(cls, content: str) -> "CompanestConfig":
+        from .parser import MarkdownConfigParser
+
+        return cls(**MarkdownConfigParser().parse_content(content).config)
+
+    @classmethod
     def from_json_file(cls, path: Union[str, Path]) -> "CompanestConfig":
         path = Path(path)
         if not path.exists():
@@ -202,3 +208,9 @@ class CompanestConfig(BaseModel):
 
         logger.warning("No Companest configuration found")
         return None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump(exclude_none=True)
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent)

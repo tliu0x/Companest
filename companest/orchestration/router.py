@@ -488,21 +488,22 @@ class SmartRouter:
     ) -> None:
         if not self._event_bus:
             return
-        available = [
-            t for t in self._registry.list_teams()
-            if t not in self._registry.list_meta_teams()
-        ]
-        await self._event_bus.emit(EventType.TASK_ROUTED, {
-            "input_summary": task[:200],
-            "source": source,
-            "candidate_teams": available,
-            "selected_teams": [t.team_id for t in decision.teams],
-            "strategy": decision.strategy,
-            "mode": decision.mode,
-            "confidence": decision.confidence,
-            "reasoning": decision.reasoning,
-            "declined": decision.declined,
-        })
+        try:
+            meta_teams = set(self._registry.list_meta_teams())
+            available = [t for t in self._registry.list_teams() if t not in meta_teams]
+            await self._event_bus.emit(EventType.TASK_ROUTED, {
+                "input_summary": task[:200],
+                "source": source,
+                "candidate_teams": available,
+                "selected_teams": [t.team_id for t in decision.teams],
+                "strategy": decision.strategy,
+                "mode": decision.mode,
+                "confidence": decision.confidence,
+                "reasoning": decision.reasoning,
+                "declined": decision.declined,
+            })
+        except Exception as e:
+            logger.debug("Routing audit failed: %s", e)
 
     def _keyword_fallback(self, task: str) -> RoutingDecision:
         team_id, confidence = self._keyword_router.route_with_confidence(task)

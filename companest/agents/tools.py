@@ -943,10 +943,16 @@ class ToolRegistry:
         for name, cfg in configs.items():
             try:
                 client = MultiServerMCPClient({name: _to_mcp_connection(cfg)})
-                tools.extend(await client.get_tools())
+                server = name.rsplit("/", 1)[-1]
+                tools.extend(
+                    tool for tool in await client.get_tools()
+                    if tool.name not in tools_deny
+                    and f"mcp__{name}__{tool.name}" not in tools_deny
+                    and f"mcp__{server}__{tool.name}" not in tools_deny
+                )
             except Exception as e:
                 logger.warning("External MCP server %r unavailable: %s", name, e)
-        return [t for t in tools if t.name not in tools_deny]
+        return tools
 
 
 def _to_mcp_connection(cfg: dict) -> dict:

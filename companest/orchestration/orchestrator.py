@@ -2,26 +2,26 @@ import importlib.util
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 
 from ..config import CompanestConfig
-from ..memory import MemoryManager, Dreamer, FileBackend, QdrantBackend
-from ..agents.team import TeamRegistry
+from ..memory import MemoryManager, Dreamer, EnrichmentSource, FileBackend, QdrantBackend
+from ..agents.team import TeamConfig, TeamRegistry
 from .router import SmartRouter, RoutingDecision, TeamAssignment
 from .cost_gate import CostGate, UserNotifier
 from ..agents.cascade import CascadeEngine
 from ..modes import build_default_registry, ModeRegistry
 from ..jobs.scheduler import Scheduler
 from ..memory.archiver import MemoryArchiver
-from ..events import EventBus, EventType
-from ..agents.tools import ToolRegistry, load_skills
+from ..events import EventBus, EventCallback, EventType
+from ..agents.tools import ToolProvider, ToolRegistry, load_skills
 from .multi_team import run_multi_team, ProgressCallback
 from .background import BackgroundManager
 from ..companies.company import CompanyRegistry, CompanyConfig
 from ..companies.component import CompanyContext, CompanyMemoryNamespace
 from ..companies.ceo_engine import build_cycle_prompt, generate_ceo_soul
-from ..companies.output import MemorySink
-from ..agents.pi import Pi, PiConfig
+from ..companies.output import MemorySink, OutputSink
+from ..agents.pi import Pi, PiConfig, _run_tool_context
 from ..agents.workspace import WorkspaceRegistry
 from ..exceptions import OrchestratorError, TeamError
 
@@ -78,12 +78,58 @@ class CompanestOrchestrator:
             },
         }
         self._info_refresh_team: str = "info-collection"
-        self._output_sinks: Dict[str, list] = {}
+        self._output_sinks: Dict[str, List[OutputSink]] = {}
+        self._pending_teams: List[Tuple[TeamConfig, bool]] = []
+        self._pending_enrichments: List[EnrichmentSource] = []
+        self._pending_bindings: List[Tuple[str, str, str]] = []
         self._cycle_numbers: Dict[str, int] = {}
         self.mode_registry: ModeRegistry = build_default_registry(
             run_team_fn=self.run_team,
         )
         logger.info("Companest Orchestrator initialized")
+
+    def on_event(self, event_type: EventType, callback: EventCallback) -> None:
+        self.events.on(event_type, callback)
+
+    async def register_tools(self, provider: ToolProvider) -> None:
+        self.tool_registry.register(provider)
+        await self.events.emit(EventType.TOOL_REGISTERED, {"provider": provider.name})
+
+    async def register_team(self, config: TeamConfig, always_on: bool = False) -> None:
+        if hasattr(self, "team_registry"):
+            self.team_registry.register(config, always_on=always_on)
+            await self.events.emit(EventType.TEAM_REGISTERED, {"team_id": config.id})
+        else:
+            self._pending_teams.append((config, always_on))
+
+    def register_enrichment(self, source: EnrichmentSource) -> None:
+        if hasattr(self, "memory"):
+            self.memory.register_enrichment(source)
+        else:
+            self._pending_enrichments.append(source)
+
+    def register_enrichment_cycle(self, team_id: str, interval: int, prompt: str) -> None:
+        self._enrichment_cycles[team_id] = {"interval": interval, "prompt": prompt}
+
+    def add_routing_binding(self, pattern: str, team_id: str, mode: str = "cascade") -> None:
+        if hasattr(self, "_smart_router"):
+            self._smart_router.add_binding(pattern, team_id, mode)
+        else:
+            self._pending_bindings.append((pattern, team_id, mode))
+
+    def register_output_sink(self, company_id: str, sink: OutputSink) -> None:
+        self._output_sinks.setdefault(company_id, []).append(sink)
+
+    @classmethod
+    def from_config_file(cls, path: Union[str, Path]) -> "CompanestOrchestrator":
+        path = Path(path)
+        config = CompanestConfig.from_markdown(path) if path.suffix == ".md" else CompanestConfig.from_json_file(path)
+        return cls(config)
+
+    @classmethod
+    def discover_and_create(cls, base_path: Union[str, Path] = ".") -> Optional["CompanestOrchestrator"]:
+        config = CompanestConfig.discover_config(base_path)
+        return cls(config) if config is not None else None
 
     def get_status(self) -> Dict[str, Any]:
         return {
@@ -215,6 +261,16 @@ class CompanestOrchestrator:
             event_bus=self.events,
         )
 
+        for config, always_on in self._pending_teams:
+            self.team_registry.register(config, always_on=always_on)
+        self._pending_teams.clear()
+        for source in self._pending_enrichments:
+            self.memory.register_enrichment(source)
+        self._pending_enrichments.clear()
+        for pattern, team_id, mode in self._pending_bindings:
+            self._smart_router.add_binding(pattern, team_id, mode)
+        self._pending_bindings.clear()
+
         self.workspace_registry = WorkspaceRegistry(base_path)
         self.workspace_registry.load()
 
@@ -245,7 +301,8 @@ class CompanestOrchestrator:
         # None = no whitelist (every global team allowed); an unknown company gets [] (none).
         if not company_id:
             return None
-        company = self.company_registry.get(company_id)
+        registry = getattr(self, "company_registry", None)
+        company = registry.get(company_id) if registry is not None else None
         if company is None:
             return []
         return company.shared_teams
@@ -287,7 +344,9 @@ class CompanestOrchestrator:
                 logger.error(f"[Company] Component on_init() failed for {company.id}: {e}")
 
         self._generate_ceo_soul(company)
-        self._output_sinks[company.id] = [MemorySink(self.memory)]
+        sinks = self._output_sinks.setdefault(company.id, [])
+        if not any(isinstance(sink, MemorySink) for sink in sinks):
+            sinks.insert(0, MemorySink(self.memory))
 
         for rb in company.routing_bindings:
             self._smart_router.add_binding(
@@ -301,10 +360,10 @@ class CompanestOrchestrator:
         for key, content in seed.get("shared", {}).items():
             if ns.read_shared(key) is None:
                 ns.write_shared(key, content)
-        for team_id, team_seed in seed.get("teams", {}).items():
+        for seed_team_id, team_seed in seed.get("teams", {}).items():
             for key, content in team_seed.items():
-                if ns.read_team_memory(team_id, key) is None:
-                    ns.write_team_memory(team_id, key, content)
+                if ns.read_team_memory(seed_team_id, key) is None:
+                    ns.write_team_memory(seed_team_id, key, content)
 
         for mcp_cfg in company.mcp_servers:
             cfg = dict(mcp_cfg)
@@ -616,7 +675,6 @@ class CompanestOrchestrator:
                         f"\U0001f4b0 ${decision.estimate.estimated_cost_usd:.4f} approved"
                     )
 
-        # Pis are shared objects: scheduling, workspace and company context are injected per run
         extra_context: Dict[str, Any] = {}
         workspace_id = user_context.get("workspace_id")
         ws = self.workspace_registry.get(workspace_id) if workspace_id else None
@@ -626,9 +684,6 @@ class CompanestOrchestrator:
         extra_context["company_shared_teams"] = self._get_company_shared_teams(company_id)
         for pi in team.pis.values():
             pi.user_scheduler = self.user_scheduler
-            extra = getattr(pi, "_extra_tool_context", {})
-            extra.update(extra_context)
-            pi._extra_tool_context = extra
 
         event_data = {"team_id": team_id, "mode": effective_mode, "task_preview": task[:200]}
         if company_id:
@@ -637,6 +692,7 @@ class CompanestOrchestrator:
 
         # acquire/release keeps the team from being evicted mid-task
         self.team_registry.acquire(team_id)
+        tool_context_token = _run_tool_context.set(extra_context)
         try:
             try:
                 execution_mode = self.mode_registry.get(effective_mode)
@@ -659,6 +715,7 @@ class CompanestOrchestrator:
                 details={"team": team_id, "mode": effective_mode},
             )
         finally:
+            _run_tool_context.reset(tool_context_token)
             self.team_registry.release(team_id)
 
         completed_data = {"team_id": team_id, "mode": effective_mode}
@@ -793,10 +850,11 @@ class CompanestOrchestrator:
         return result, decision
 
     def get_teams_status(self) -> Dict[str, Any]:
-        if not hasattr(self, "team_registry"):
-            return {}
-        return {
-            "teams": self.team_registry.get_fleet_status(),
-            "finance": self.cost_gate.get_spending_summary(),
-            "scheduler": self.scheduler.get_status(),
-        }
+        status = {}
+        if hasattr(self, "team_registry"):
+            status["teams"] = self.team_registry.get_fleet_status()
+        if hasattr(self, "cost_gate"):
+            status["finance"] = self.cost_gate.get_spending_summary()
+        if hasattr(self, "scheduler"):
+            status["scheduler"] = self.scheduler.get_status()
+        return status

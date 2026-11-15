@@ -112,9 +112,6 @@ class JobManager:
         await self._init_db()
         await self._load_jobs()
 
-        for i in range(num_workers):
-            self._workers.append(asyncio.create_task(self._worker(f"worker-{i}")))
-
         for job in self._jobs.values():
             if job.status in (JobStatus.RUNNING, JobStatus.DISPATCHED):
                 logger.warning(
@@ -125,13 +122,15 @@ class JobManager:
                 job.started_at = None
                 await self._persist_job(job)
 
+        self._queue = asyncio.Queue()
         for job in self._jobs.values():
             if job.status == JobStatus.PENDING:
                 self._transition(job, JobStatus.QUEUED)
-                await self._queue.put(job.id)
-            elif job.status == JobStatus.QUEUED:
-                await self._queue.put(job.id)
+            if job.status == JobStatus.QUEUED:
+                self._queue.put_nowait(job.id)
 
+        for i in range(num_workers):
+            self._workers.append(asyncio.create_task(self._worker(f"worker-{i}")))
         logger.info(f"JobManager started with {num_workers} workers")
 
     async def stop(self) -> None:
@@ -216,25 +215,28 @@ class JobManager:
 
     def get_company_activity_snapshot(
         self,
-        company_ids: Iterable[str],
+        company_ids: Optional[Iterable[str]] = None,
         recent_hours: float = 24.0,
     ) -> Dict[str, Dict[str, Any]]:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=recent_hours)
         snapshot: Dict[str, Dict[str, Any]] = {
             cid: {"total_jobs": 0, "recent_job_count": 0, "last_activity_timestamp": None}
-            for cid in company_ids
+            for cid in company_ids or ()
         }
         latest: Dict[str, datetime] = {}
         for job in self._jobs.values():
-            entry = snapshot.get(job.company_id) if job.company_id else None
-            if entry is None:
+            company_id = job.company_id
+            if not company_id or (company_ids is not None and company_id not in snapshot):
                 continue
+            entry = snapshot.setdefault(
+                company_id, {"total_jobs": 0, "recent_job_count": 0, "last_activity_timestamp": None},
+            )
             entry["total_jobs"] += 1
             if job.created_at >= cutoff:
                 entry["recent_job_count"] += 1
             activity = job.completed_at or job.started_at or job.created_at
-            if job.company_id not in latest or activity > latest[job.company_id]:
-                latest[job.company_id] = activity
+            if company_id not in latest or activity > latest[company_id]:
+                latest[company_id] = activity
                 entry["last_activity_timestamp"] = activity.isoformat()
         return snapshot
 
@@ -264,7 +266,7 @@ class JobManager:
                     continue
 
                 job = self._jobs.get(job_id)
-                if not job or job.status == JobStatus.CANCELLED:
+                if not job or job.status != JobStatus.QUEUED:
                     continue
 
                 logger.info(f"[{name}] Processing job {job_id}")
@@ -286,6 +288,8 @@ class JobManager:
         self._transition(job, JobStatus.DISPATCHED)
         job.started_at = datetime.now(timezone.utc)
         await self._persist_job(job)
+        if job.status == JobStatus.CANCELLED:
+            return
 
         if not self.orchestrator:
             self._transition(job, JobStatus.FAILED)
@@ -297,8 +301,10 @@ class JobManager:
         try:
             self._transition(job, JobStatus.RUNNING)
             await self._persist_job(job)
+            if job.status == JobStatus.CANCELLED:
+                return
 
-            exec_context = dict(job.context)
+            exec_context = dict(job.context or {})
             if job.company_id and "company_id" not in exec_context:
                 exec_context["company_id"] = job.company_id
 
@@ -315,11 +321,15 @@ class JobManager:
                     user_context=exec_context,
                 )
 
+            if job.status == JobStatus.CANCELLED:
+                return
             self._transition(job, JobStatus.COMPLETED)
             job.result = result_text
             job.completed_at = datetime.now(timezone.utc)
 
         except Exception as e:
+            if job.status == JobStatus.CANCELLED:
+                return
             self._transition(job, JobStatus.FAILED)
             job.error = str(e)
             job.completed_at = datetime.now(timezone.utc)

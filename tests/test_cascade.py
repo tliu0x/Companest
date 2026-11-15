@@ -71,6 +71,10 @@ class TestBuildCascadeChain:
     def test_unknown_model_returns_single(self):
         assert build_cascade_chain("unknown-model-xyz", self.tiers) == ["unknown-model-xyz"]
 
+    def test_chain_deduplicates_custom_tiers(self):
+        tiers = [tier for tier in self.tiers if tier.model_id in {HAIKU, OPUS}]
+        assert build_cascade_chain(OPUS, tiers + tiers) == [HAIKU, OPUS]
+
     def test_chain_is_sorted_cheapest_first(self):
         chain = build_cascade_chain(OPUS, self.tiers)
         tier_map = {t.model_id: t.cost_rank for t in self.tiers}

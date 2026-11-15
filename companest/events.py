@@ -51,6 +51,15 @@ class EventBus:
         except ValueError:
             pass
 
+    def off(self, event_type: EventType, callback: EventCallback) -> None:
+        listeners = self._listeners.get(event_type, [])
+        if callback in listeners:
+            listeners.remove(callback)
+
+    def clear(self) -> None:
+        self._listeners.clear()
+        self._any_listeners.clear()
+
     async def emit(self, event_type: EventType, data: Dict[str, Any] = None) -> None:
         """Fire an event. All callbacks run concurrently; errors are logged not raised."""
         event = Event(type=event_type, data=data or {})
